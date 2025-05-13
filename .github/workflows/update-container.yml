@@ -1,4 +1,4 @@
-name: Update Container App
+name: Update Container App with New Image
 
 concurrency:
   group: update-container-${{ github.event.inputs.environment || inputs.environment }}

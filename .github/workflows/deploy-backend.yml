@@ -1,4 +1,4 @@
-name: Deploy all
+name: Deploy Backend Infra and Code
 
 on:
     push:
@@ -30,7 +30,7 @@ jobs:
     get-changes:
         runs-on: ubuntu-latest
         outputs:
-            infra_bicep: ${{ steps.get-changes.outputs.infra_bicep }}
+            infra_backend_bicep: ${{ steps.get-changes.outputs.infra_backend_bicep }}
             infra_bicep_container: ${{ steps.get-changes.outputs.infra_bicep_container }}
             backend: ${{ steps.get-changes.outputs.backend }}
         steps:
@@ -39,17 +39,21 @@ jobs:
               id: get-changes
               with:
                 filters: |
-                    infra_bicep:
-                      - 'infra/**' # Tracks changes inside the 'infra' folder
+                    infra_backend_bicep:
+                      - 'infra/containerRegistry/**'
+                      - 'infra/cosmosDb/**'
+                      - 'infra/keyVault/**'
+                      - 'infra/managedIdentities/**'
+                      - 'infra/storageAccount/**'
                     infra_bicep_container:
                       - 'infra/containerApp/**' # Tracks changes inside the 'infra/containerApp' folder
                     backend:
                       - 'backend/**' # Tracks changes inside the 'backend' folder
                     
     deploy-infra:
-        if: ${{ needs.get-changes.outputs.infra_bicep == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
+        if: ${{ needs.get-changes.outputs.infra_backend_bicep == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
         needs: get-changes
-        uses: ./.github/workflows/azure-infra-deploy.yml
+        uses: ./.github/workflows/backend-infra-deploy.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
