@@ -70,7 +70,7 @@ jobs:
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
         secrets: inherit
 
-    deploy-container:
+    deploy-container-infra:
         needs: 
             - deploy-backend # Ensure backend is deployed first
             - get-changes # Ensure changes are detected first
@@ -82,7 +82,7 @@ jobs:
 
     push-to-container:
         needs: 
-            - deploy-container # Ensure container is deployed first
+            - deploy-container-infra # Ensure container is deployed first
             - deploy-backend # Ensure backend is deployed first
         if: ${{ needs.deploy-backend.result == 'success' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
         uses: ./.github/workflows/deploy-api-to-containerapp.yml
