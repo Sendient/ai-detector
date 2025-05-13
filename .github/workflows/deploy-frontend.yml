@@ -25,7 +25,7 @@ jobs:
     get-changes:
         runs-on: ubuntu-latest
         outputs:
-            infra_frontend_bicep: ${{ steps.get-changes.outputs.frontend_bicep }}
+            infra_frontend_bicep: ${{ steps.get-changes.outputs.infra_frontend_bicep }}
         steps:
             - uses: actions/checkout@v4
             - uses: dorny/paths-filter@v3

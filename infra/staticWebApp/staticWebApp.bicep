@@ -21,7 +21,7 @@ param parBackendId string
 
 module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
   scope: resourceGroup(parSubId, parRgName)
-  name: 'staticSiteDeployment-${parEnv}'
+  name: 'staticWebSiteDeployment-${parEnv}'
   params: {
     // Required parameters
     name: parAppName
