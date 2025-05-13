@@ -55,4 +55,5 @@ jobs:
         uses: ./.github/workflows/deploy-ui-code.yml
         with:
             environment: ${{ github.event.inputs.environment || 'dev1' }}
+        secrets: inherit
 
