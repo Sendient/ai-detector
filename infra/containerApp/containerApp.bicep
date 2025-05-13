@@ -52,7 +52,7 @@ param parIPRules array
 
 module containerApp 'br/public:avm/res/app/container-app:0.11.0' = {
   scope: resourceGroup(parSubId, parRgName)
-  name: 'containerAppDeployment-${parEnv}'
+  name: 'containerAppDeploy-${parEnv}'
   params: {
     // Required parameters
     name: parContainerAppName

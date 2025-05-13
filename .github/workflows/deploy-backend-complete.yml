@@ -63,7 +63,7 @@ jobs:
         needs: 
             - deploy-infra # Ensure infra is deployed first
             - get-changes # Ensure changes are detected first
-        if: ${{ (needs.get-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped') }}  # Runs if manually triggered or infra changes detected
+        if: ${{ (needs.get-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped' || needs.deploy-infra.result == null) }}  # Runs if manually triggered or infra changes detected
         uses: ./.github/workflows/deploy-api-code.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
@@ -74,7 +74,7 @@ jobs:
         needs: 
             - deploy-backend # Ensure backend is deployed first
             - get-changes # Ensure changes are detected first
-        if: ${{ (needs.get-changes.outputs.infra_bicep_container == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped') }}
+        if: ${{ (needs.get-changes.outputs.infra_bicep_container == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped' || needs.deploy-backend.result == null) }}
         uses: ./.github/workflows/deploy-container-infra.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
@@ -84,7 +84,7 @@ jobs:
         needs: 
             - deploy-container-infra # Ensure container is deployed first
             - deploy-backend # Ensure backend is deployed first
-        if: ${{ (needs.deploy-backend.result == 'success' || github.event_name == 'workflow_dispatch') && (needs.deploy-container-infra.result == 'success' || needs.deploy-container-infra.result == 'skipped') }} # Only runs if changes in infra are detected or manually triggered
+        if: ${{ (needs.deploy-backend.result == 'success' || github.event_name == 'workflow_dispatch') && (needs.deploy-container-infra.result == 'success' || needs.deploy-container-infra.result == 'skipped' || needs.deploy-container-infra.result == null) }} # Only runs if changes in infra are detected or manually triggered
         uses: ./.github/workflows/deploy-api-to-containerapp.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
