@@ -53,7 +53,7 @@ jobs:
     deploy-infra:
         if: ${{ needs.get-changes.outputs.infra_backend_bicep == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
         needs: get-changes
-        uses: ./.github/workflows/backend-infra-deploy.yml
+        uses: ./.github/workflows/deploy-backend-infra.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
@@ -64,7 +64,7 @@ jobs:
             - deploy-infra # Ensure infra is deployed first
             - get-changes # Ensure changes are detected first
         if: ${{ needs.get-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}  # Runs if manually triggered or infra changes detected
-        uses: ./.github/workflows/backend-ci-cd.yml
+        uses: ./.github/workflows/deploy-api-code.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
@@ -75,7 +75,7 @@ jobs:
             - deploy-backend # Ensure backend is deployed first
             - get-changes # Ensure changes are detected first
         if: ${{ needs.get-changes.outputs.infra_bicep_container == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
-        uses: ./.github/workflows/deploy-container.yml
+        uses: ./.github/workflows/deploy-container-infra.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
         secrets: inherit
@@ -85,7 +85,7 @@ jobs:
             - deploy-container # Ensure container is deployed first
             - deploy-backend # Ensure backend is deployed first
         if: ${{ needs.deploy-backend.result == 'success' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
-        uses: ./.github/workflows/update-container.yml
+        uses: ./.github/workflows/deploy-api-to-containerapp.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}

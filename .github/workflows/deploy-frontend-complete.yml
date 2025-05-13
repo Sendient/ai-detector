@@ -26,6 +26,7 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             infra_frontend_bicep: ${{ steps.get-changes.outputs.infra_frontend_bicep }}
+            ui_frontend_code: ${{ steps.get-changes.outputs.ui_frontend_code }}
         steps:
             - uses: actions/checkout@v4
             - uses: dorny/paths-filter@v3
@@ -34,12 +35,24 @@ jobs:
                 filters: |
                     infra_frontend_bicep:
                       - 'infra/staticWebApp/**'
+                    ui_frontend_code:
+                      - 'frontend/**'
 
                     
     deploy-infra:
         if: ${{ needs.get-changes.outputs.infra_frontend_bicep == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
         needs: get-changes
-        uses: ./.github/workflows/frontend-infra-deploy.yml
+        uses: ./.github/workflows/deploy-frontend-infra.yml
         with:
           environment: ${{ github.event.inputs.environment || 'dev1' }}
         secrets: inherit
+
+    deploy-ui-code:
+        if: ${{ needs.get-changes.outputs.infra_frontend_bicep == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
+        needs: 
+            - get-changes
+            - deploy-infra
+        uses: ./.github/workflows/deploy-ui-code.yml
+        with:
+            environment: ${{ github.event.inputs.environment || 'dev1' }}
+
