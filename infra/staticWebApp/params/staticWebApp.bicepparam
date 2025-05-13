@@ -20,3 +20,5 @@ param parBackendId = 'https://ca-sdt-uks-aid-dev1.lemonfield-d5c79fcf.uksouth.az
 param parSku =  'Standard'
 
 param parStagingEnvironmentPolicy =  'Enabled'
+
+param parLocation =  'westeurope'

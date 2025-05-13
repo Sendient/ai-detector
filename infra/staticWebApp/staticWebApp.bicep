@@ -19,12 +19,15 @@ param parStagingEnvironmentPolicy string
 
 param parBackendId string
 
+param parLocation string
+
 module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
   scope: resourceGroup(parSubId, parRgName)
   name: 'staticWebSiteDeployment-${parEnv}'
   params: {
     // Required parameters
     name: parAppName
+    location: parLocation
     // Non-required parameters
     allowConfigFileUpdates: parAllowConfigFileUpdates
     appSettings: parAppSettings
