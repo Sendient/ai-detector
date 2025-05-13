@@ -1,0 +1,58 @@
+name: Deploy Frontend to Azure Static Web App
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Target environment (dev, stg, prod, dev1)'
+        required: true
+        default: 'dev1' # Default value, adjust as needed
+        type: string
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (dev1, dev, stg, prod)'
+        required: true
+        type: choice
+        options:
+          - dev1
+          - dev
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_deploy:
+    name: Build and Deploy Frontend
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || inputs.environment }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          cd frontend
+          echo "VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL }}" > .env
+          echo "VITE_KINDE_DOMAIN=${{ vars.VITE_KINDE_DOMAIN }}" >> .env
+          echo "VITE_KINDE_CLIENT_ID=${{ vars.VITE_KINDE_CLIENT_ID }}" >> .env
+          echo "VITE_KINDE_LOGIN_REDIRECT_URI=${{ vars.VITE_KINDE_LOGIN_REDIRECT_URI }}" >> .env
+          echo "VITE_KINDE_LOGOUT_REDIRECT_URI=${{ vars.VITE_KINDE_LOGOUT_REDIRECT_URI }}" >> .env
+          echo "VITE_KINDE_AUDIENCE=${{ vars.VITE_KINDE_AUDIENCE }}" >> .env
+
+      - name: Deploy to Azure Static Web Apps
+        uses: azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "frontend"
+          output_location: "dist"
+          app_build_command: "npm run build"
+          api_location: ""
+          app_artifact_location: "dist"
+          deployment_environment: ${{ github.event.inputs.environment || inputs.environment }}

@@ -126,7 +126,7 @@ param parContainerImage01 = 'acrsdtuksaid${parEnv}.azurecr.io/backend-api:latest
 // For CI/CD, use output of container env deployment
 param parContainerEnvResourceId = '/subscriptions/${parSubId}/resourceGroups/${parRgName}/providers/Microsoft.App/managedEnvironments/ce-sdt-uks-aid-${parEnv}'
 
-param parAlowHttp = true
+param parAlowHttp = false
 
 param parTargetPort = 8000
 
