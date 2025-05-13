@@ -1,4 +1,4 @@
-name: Deploy Container to Azure
+name: Deploy Container Infra
 
 concurrency:
   group: deploy-container-${{ github.event.inputs.environment || inputs.environment }}

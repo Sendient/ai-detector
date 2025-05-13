@@ -1,4 +1,4 @@
-name: Deploy all
+name: Deploy Backend Infra and Code
 
 on:
     push:

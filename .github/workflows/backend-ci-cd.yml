@@ -1,4 +1,4 @@
-name: Build and Deploy Backend API
+name: Build and Deploy Backend API Code
 
 concurrency:
   group: backend-api-${{ github.event.inputs.environment || inputs.environment }} # Unique group for this workflow
