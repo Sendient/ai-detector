@@ -1,0 +1,79 @@
+name: Deploy Frontend Azure Infrastructure
+
+concurrency:
+  group: frontend-infra-deploy-${{ github.event.inputs.environment || inputs.environment }}
+  cancel-in-progress: true # Cancel any in-progress runs for the same environment
+
+# Allow manual triggering from the GitHub Actions UI ONLY
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Target environment (dev1, dev, stg, prod)'
+        required: true
+        default: 'dev1' # Default value, adjust as needed
+        type: string
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (dev1, dev, stg, prod)'
+        required: true
+        type: choice
+        options: # <-- Ensure this list matches your desired environment names
+          - dev1
+          - dev
+          - staging
+          - prod
+# Permissions needed by the runner
+permissions:
+  id-token: write # May be needed by azure/login internally
+  contents: read  # To checkout the code
+
+jobs:
+  deploy_infrastructure:
+    name: Deploy Infra to ${{ github.event.inputs.environment || inputs.environment }}
+    runs-on: ubuntu-latest
+
+    # Link the job to the GitHub Environment matching the input
+    # This makes environment-specific secrets available
+    environment: ${{ github.event.inputs.environment || inputs.environment }} # This now correctly links to 'stg' when selected
+
+    steps:
+    # 1. Checkout repository code so the workflow can access Bicep files
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 2. Log in to Azure using the single 'creds' JSON input
+    #    Ensure the secrets referenced here are for the CORRECT SP (5c69...)
+    #    in the target GitHub Environment (e.g., stg)
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}' 
+        enable-AzPSSession: false
+
+    # 3. (Optional) Install/Verify Bicep CLI
+    - name: Install/Verify Bicep CLI
+      run: |
+        echo "Attempting to ensure Bicep CLI is available..."
+        az bicep install
+        az bicep version
+      continue-on-error: true # Allow to continue even if Bicep is already managed by az cli
+
+    - name: Set Backend Resource ID
+      id: set_backend_id
+      run: |
+        BACKEND_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}/providers/Microsoft.App/containerApps/ca-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}"
+        echo "backend_id=$BACKEND_ID" >> $GITHUB_OUTPUT
+
+    - name: Deploy Static Web App
+      uses: azure/cli@v1
+      with:
+        inlineScript:
+          az deployment sub create --name "StaticWebAppDeploy" --location "uksouth" --template-file ".\infra\staticWebApp\staticWebApp.bicep" --parameters ".\infra\staticWebApp\params\staticWebApp.bicepparam" --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" --parameters "parBackendId=${{ steps.set_backend_id.outputs.backend_id }}"
+  
+
+    # 7. Azure Logout (Good practice)
+    - name: Azure Logout
+      run: az logout
+      if: always() # Run even if previous steps fail

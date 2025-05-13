@@ -7,25 +7,31 @@ param parRgName string
 
 param parEnv string
 
+param parAppSettings object
+
+param parAppName string
+
+param parAllowConfigFileUpdates bool
+
+param parSku string
+
+param parStagingEnvironmentPolicy string
+
+param parBackendId string
+
 module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
   scope: resourceGroup(parSubId, parRgName)
-  name: 'staticSiteDeployment'
+  name: 'staticSiteDeployment-${parEnv}'
   params: {
     // Required parameters
-    name: 'wsswaf001'
+    name: parAppName
     // Non-required parameters
-    allowConfigFileUpdates: true
-    appSettings: {
-      foo: 'bar'
-      setting: 1
-    }
+    allowConfigFileUpdates: parAllowConfigFileUpdates
+    appSettings: parAppSettings
     enterpriseGradeCdnStatus: 'Disabled'
-    functionAppSettings: {
-      foo: 'bar'
-      setting: 1
-    }
+    functionAppSettings: parAppSettings
     linkedBackend: {
-      resourceId: '<resourceId>'
+      resourceId: parBackendId
     }
     // privateEndpoints: [
     //   {
@@ -44,8 +50,8 @@ module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
     //     }
     //   }
     // ]
-    sku: 'Standard'
-    stagingEnvironmentPolicy: 'Enabled'
+    sku: parSku
+    stagingEnvironmentPolicy: parStagingEnvironmentPolicy
     tags: {
       AutoDelete: 'No'
     }

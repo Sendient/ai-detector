@@ -1,7 +1,7 @@
-name: Deploy Azure Infrastructure
+name: Deploy Backend Azure Infrastructure
 
 concurrency:
-  group: infra-deploy-${{ github.event.inputs.environment || inputs.environment }}
+  group: backend-infra-deploy-${{ github.event.inputs.environment || inputs.environment }}
   cancel-in-progress: true # Cancel any in-progress runs for the same environment
 
 # Allow manual triggering from the GitHub Actions UI ONLY
