@@ -1,0 +1,88 @@
+name: Deploy all
+
+on:
+    push:
+        branches:
+            - main
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: 'Target environment (dev1, dev, stg, prod)'
+                required: true
+                default: 'dev1' # Default value, adjust as needed
+                type: choice
+                options:
+                    - dev1
+                    - dev
+                    - staging
+                    - prod
+            image_tag:
+                description: 'Docker image tag to configure (e.g., latest, commit SHA)'
+                required: true
+                default: 'latest' # Default value, adjust as needed
+                type: string
+
+permissions:
+    id-token: write # May be needed by azure/login internally
+    contents: read  # To checkout the code
+
+jobs:
+    get-changes:
+        runs-on: ubuntu-latest
+        outputs:
+            infra_bicep: ${{ steps.get-changes.outputs.infra_bicep }}
+            infra_bicep_container: ${{ steps.get-changes.outputs.infra_bicep_container }}
+            backend: ${{ steps.get-changes.outputs.backend }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dorny/paths-filter@v3
+              id: get-changes
+              with:
+                filters: |
+                    infra_bicep:
+                      - 'infra/**' # Tracks changes inside the 'infra' folder
+                    infra_bicep_container:
+                      - 'infra/containerApp/**' # Tracks changes inside the 'infra/containerApp' folder
+                    backend:
+                      - 'backend/**' # Tracks changes inside the 'backend' folder
+                    
+    deploy-infra:
+        if: ${{ needs.get-changes.outputs.infra_bicep == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
+        needs: get-changes
+        uses: ./.github/workflows/azure-infra-deploy.yml
+        with:
+          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
+        secrets: inherit
+
+    deploy-backend:
+        needs: 
+            - deploy-infra # Ensure infra is deployed first
+            - get-changes # Ensure changes are detected first
+        if: ${{ needs.get-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}  # Runs if manually triggered or infra changes detected
+        uses: ./.github/workflows/backend-ci-cd.yml
+        with:
+          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
+        secrets: inherit
+
+    deploy-container:
+        needs: 
+            - deploy-backend # Ensure backend is deployed first
+            - get-changes # Ensure changes are detected first
+        if: ${{ needs.get-changes.outputs.infra_bicep_container == 'true' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
+        uses: ./.github/workflows/deploy-container.yml
+        with:
+          environment: ${{ github.event.inputs.environment || 'dev1' }}
+        secrets: inherit
+
+    push-to-container:
+        needs: 
+            - deploy-container # Ensure container is deployed first
+            - deploy-backend # Ensure backend is deployed first
+        if: ${{ needs.deploy-backend.result == 'success' || github.event_name == 'workflow_dispatch' }} # Only runs if changes in infra are detected or manually triggered
+        uses: ./.github/workflows/update-container.yml
+        with:
+          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
+        secrets: inherit

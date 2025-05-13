@@ -1,0 +1,195 @@
+name: Build and Deploy Backend API
+
+concurrency:
+  group: backend-api-${{ github.event.inputs.environment || inputs.environment }} # Unique group for this workflow
+  cancel-in-progress: true # Cancel any in-progress runs for the same ref
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Target environment (dev, stg, prod, dev1)'
+        required: true
+        default: 'dev1' # Default value, adjust as needed
+        type: string
+      image_tag:
+        description: 'Docker image tag to configure (e.g., latest, commit SHA)'
+        required: true
+        default: 'latest' # Default value, adjust as needed
+        type: string
+  workflow_dispatch: # Allow manual trigger
+    inputs:
+      environment:
+        description: 'Target environment (dev, stg, prod, dev1)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+          - dev1
+      image_tag:
+        description: 'Optional: Specific tag to build/deploy (overrides default)'
+        required: false
+
+permissions:
+  id-token: write # Required for azure/login when using OIDC (though we use SP secret here)
+  contents: read  # Required to checkout the code
+
+jobs:
+  determine_environment:
+    name: Determine Environment & Tag
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set_env.outputs.environment }}
+      image_tag: ${{ steps.set_tag.outputs.image_tag }}
+      acr_name: ${{ steps.set_acr.outputs.acr_name }}
+      repo_name: backend-api # Hardcode repo name for simplicity
+    steps:
+      - name: Set Environment based on Trigger
+        id: set_env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            # Pushes to main now go to ${{ inputs.environment}}
+            echo "environment=${{ inputs.environment}}" >> $GITHUB_OUTPUT
+          else
+            echo "Unsupported trigger ref: ${{ github.ref }}. Defaulting to ${{ inputs.environment}}."
+            echo "environment=${{ inputs.environment}}" >> $GITHUB_OUTPUT # Defaulting to ${{ inputs.environment}} for other cases too
+          fi
+
+      - name: Set Image Tag
+        id: set_tag
+        run: |
+          if [[ "${{ github.event.inputs.image_tag || inputs.image_tag }}" != "" ]]; then
+            echo "Using manual input tag: ${{ github.event.inputs.image_tag || inputs.image_tag }}"
+            echo "image_tag=${{ github.event.inputs.image_tag || inputs.image_tag }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/v*.*.* ]]; then
+            TAG_NAME=$(echo "${{ github.ref }}" | sed 's#refs/tags/##')
+            echo "Using Git tag: ${TAG_NAME}"
+            echo "image_tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+          else
+            # Use commit SHA for dev/stg builds for uniqueness
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "Using commit SHA tag: ${SHORT_SHA}"
+            echo "image_tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+            # Alternatively, use 'latest' for dev/stg if preferred:
+            # echo "image_tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set ACR Name
+        id: set_acr
+        run: |
+          # --- !!! IMPORTANT: Ensure this matches your ACR naming !!! ---
+          # ---
+          ACR_NAME="acrsdtuksaid${ENVIRONMENT}"
+          echo "ACR Name for environment ${{ steps.set_env.outputs.environment }}: ${ACR_NAME}"
+          echo "acr_name=${ACR_NAME}" >> $GITHUB_OUTPUT
+        env:
+          ENVIRONMENT: ${{ steps.set_env.outputs.environment }}
+
+
+  build_and_push:
+    name: Build and Push Docker Image
+    needs: determine_environment # Depends on the previous job
+    runs-on: ubuntu-latest
+    # Link to the GitHub Environment to get secrets for ACR login
+    environment: ${{ needs.determine_environment.outputs.environment }}
+    # Set outputs for the next job
+    outputs:
+      image_name: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Add Docker metadata (tags, labels)
+      # See https://github.com/docker/metadata-action
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.determine_environment.outputs.acr_name }}.azurecr.io/${{ needs.determine_environment.outputs.repo_name }}
+          tags: |
+            # Use the specific tag determined in the previous job
+            ${{ needs.determine_environment.outputs.image_tag }}
+            # Optionally add 'latest' tag for dev/stg/${{ inputs.environment}} builds
+            type=raw,value=latest,enable=${{ needs.determine_environment.outputs.environment == 'dev' || needs.determine_environment.outputs.environment == 'stg' || needs.determine_environment.outputs.environment == '${{ inputs.environment}}' }}
+
+      # Login to Azure Container Registry (using the SP credentials from GitHub Environment Secrets)
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ needs.determine_environment.outputs.acr_name }}.azurecr.io
+          username: ${{ secrets.AZURE_CLIENT_ID }}
+          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      # Set up Docker Buildx
+      - name: Set up Docker Buildx
+        id: buildx 
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          use: true # Make this builder active
+          install: true # Ensure buildx is installed
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+          # Create a named builder instance
+          buildkitd-flags: --debug
+          platforms: linux/amd64
+
+      - name: Verify Buildx Setup
+        run: |
+          # Verify the builder exists and is active
+          docker buildx ls
+          # Ensure it's properly configured
+          docker buildx inspect --bootstrap
+
+      - name: Echo Buildx context outputs
+        run: |
+          echo "Buildx Name: ${{ steps.buildx.outputs.name }}"
+          echo "Buildx Driver: ${{ steps.buildx.outputs.driver }}"
+          echo "Buildx Platforms: ${{ steps.buildx.outputs.platforms }}"
+          echo "Buildx Nodes: ${{ steps.buildx.outputs.nodes }}"
+          echo "Buildx Endpoint: ${{ steps.buildx.outputs.endpoint }}"
+
+      # Build and push Docker image with Buildx (recommended for multi-platform builds if needed)
+      # See https://github.com/docker/build-push-action
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: ./backend # Assuming Dockerfile is in the 'backend' directory
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+
+  # deploy_to_aca:
+  #   name: Deploy to Azure Container Apps
+  #   needs: [determine_environment, build_and_push] # Depends on previous jobs
+  #   runs-on: ubuntu-latest
+  #   # Link to the GitHub Environment for secrets needed by azure-infra-deploy.yml
+  #   environment: ${{ needs.determine_environment.outputs.environment }}
+
+  #   steps:
+  #     # 1. Checkout repository code to access the infra deployment workflow file
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ github.ref }} # Checkout the same ref that triggered the workflow
+
+  #     # 2. Trigger the Infrastructure Deployment Workflow
+  #     #    This reuses the existing workflow, passing the specific image tag
+  #     - name: Trigger Infrastructure Deployment
+  #       uses: benc-uk/workflow-dispatch@v1 # Action to trigger another workflow
+  #       with:
+  #         workflow: azure-infra-deploy.yml # Name of the workflow file to trigger
+  #         ref: ${{ github.ref }} # Trigger on the same branch/tag
+  #         inputs: '{ "environment": "${{ needs.determine_environment.outputs.environment }}", "image_tag": "${{ needs.determine_environment.outputs.image_tag }}" }'
+  #         token: ${{ secrets.PAT_TOKEN }} # A Personal Access Token with repo/workflow scope is needed

@@ -1,0 +1,24 @@
+# Python Virtual Environments and Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables - IMPORTANT
+*.env
+.env.*
+.env.test
+
+# IDE / OS specific files
+.vscode/
+.DS_Store
+*.swp
+
+# Add other specific files/folders to ignore later if needed
+# e.g., build/
+# e.g., node_modules/"scripts/" 
+scripts/ 
+backend/scripts/ 

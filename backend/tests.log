@@ -1,0 +1,83 @@
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+INFO     app.core.security:security.py:118 Successfully fetched and cached 1 JWKS keys.
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+ERROR    app.core.security:security.py:129 Unexpected error during JWKS fetch: Network error
+Traceback (most recent call last):
+  File "C:\Users\RowlandJohnson\Projects\smarteaid-app\backend\app\core\security.py", line 110, in get_jwks
+    response = requests.get(JWKS_URL, timeout=10) # Network timeout
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1228, in _execute_mock_call
+    raise effect
+Exception: Network error
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+ERROR    app.core.security:security.py:129 Unexpected error during JWKS fetch: Network error
+Traceback (most recent call last):
+  File "C:\Users\RowlandJohnson\Projects\smarteaid-app\backend\app\core\security.py", line 110, in get_jwks
+    response = requests.get(JWKS_URL, timeout=10) # Network timeout
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1228, in _execute_mock_call
+    raise effect
+Exception: Network error
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+ERROR    app.core.security:security.py:129 Unexpected error during JWKS fetch: Network error on retry
+Traceback (most recent call last):
+  File "C:\Users\RowlandJohnson\Projects\smarteaid-app\backend\app\core\security.py", line 110, in get_jwks
+    response = requests.get(JWKS_URL, timeout=10) # Network timeout
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.1008.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1228, in _execute_mock_call
+    raise effect
+Exception: Network error on retry
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:196 Token successfully validated.
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+WARNING  app.core.security:security.py:182 Public key with kid 'test_key_1' not found in JWKS. Cache cleared.
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+INFO     app.core.security:security.py:118 Successfully fetched and cached 1 JWKS keys.
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+INFO     app.core.security:security.py:118 Successfully fetched and cached 1 JWKS keys.
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+INFO     app.core.security:security.py:273 JWKS cache cleared.
+INFO     app.core.security:security.py:108 Attempting to fetch JWKS keys from https://aidetector.kinde.com/.well-known/jwks.json...
+INFO     app.core.security:security.py:118 Successfully fetched and cached 1 JWKS keys.
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor
+DEBUG    asyncio:proactor_events.py:631 Using proactor: IocpProactor

@@ -1,0 +1,20 @@
+[
+  {
+    "key": {
+      "keys": [
+        "_id"
+      ]
+    }
+  },
+  {
+    "key": {
+      "keys": [
+        "kinde_id"
+      ]
+    },
+    "options": {
+      "unique": true
+    },
+    "name": "idx_teacher_kinde_id"
+  }
+] 
