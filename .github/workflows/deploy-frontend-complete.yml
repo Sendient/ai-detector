@@ -48,7 +48,7 @@ jobs:
         secrets: inherit
 
     deploy-ui-code:
-        if: ${{ (needs.get-changes.outputs.ui_frontend_code == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped' || needs.deploy-infra.result == null) }} # Only runs if changes in infra are detected or manually triggered
+        if: ${{ (needs.get-changes.outputs.ui_frontend_code == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-infra.result == 'skipped') }}
         needs: 
             - get-changes
             - deploy-infra
