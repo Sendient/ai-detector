@@ -51,7 +51,7 @@ jobs:
         needs: 
             - get-changes
             - deploy-infra
-        if: ${{ (needs.get-changes.outputs.ui_frontend_code == 'true' || github.event_name == 'workflow_dispatch') && (needs.deploy-infra.result == 'skipped' || needs.deploy-infra.result == 'success') }}
+        if: ${{ (needs.get-changes.outputs.ui_frontend_code == 'true' || github.event_name == 'workflow_dispatch') && (success() || needs.deploy-infra.result == 'skipped' )}}
         uses: ./.github/workflows/deploy-ui-code.yml
         with:
             environment: ${{ github.event.inputs.environment || 'dev1' }}
