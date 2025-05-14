@@ -34,10 +34,37 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Get Static Web App deployment token
+        id: get_swa_token
+        run: |
+          TOKEN=$(az staticwebapp secrets list \
+            --name my-staticwebapp-name \
+            --resource-group my-rg \
+            --query properties.apiKey \
+            --output tsv)
+      
+          # Mask it for any potential accidental echoes
+          echo "::add-mask::$TOKEN"
+      
+          # Output it for downstream use
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Get Container App URL
+        id: get_app_url
+        run: |
+          APP_URL=$(az containerapp show \
+            --name my-containerapp-name \
+            --resource-group my-resource-group \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+
+          echo "::add-mask::$APP_URL"
+          echo "url=https://$APP_URL" >> $GITHUB_OUTPUT
+
       - name: Create .env file
         run: |
           cd frontend
-          echo "VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL }}" > .env
+          echo "VITE_API_BASE_URL=${{ steps.get_app_url.outputs.url }}" > .env
           echo "VITE_KINDE_DOMAIN=${{ vars.VITE_KINDE_DOMAIN }}" >> .env
           echo "VITE_KINDE_CLIENT_ID=${{ vars.VITE_KINDE_CLIENT_ID }}" >> .env
           echo "VITE_KINDE_LOGIN_REDIRECT_URI=${{ vars.VITE_KINDE_LOGIN_REDIRECT_URI }}" >> .env
@@ -47,7 +74,7 @@ jobs:
       - name: Deploy to Azure Static Web Apps
         uses: azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ steps.get_swa_token.outputs.token }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           app_location: "frontend"
