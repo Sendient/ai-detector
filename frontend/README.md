@@ -1,6 +1,5 @@
 # AI Detector Frontend
 
-<<<<<<< HEAD
 **IMPORTANT DEPLOYMENT PREREQUISITES:**
 1. **Before UI Code Deployment:**
    - After running the infrastructure deployment (`deploy-frontend-infra.yml`), you MUST set the Static Web App deployment token as a GitHub secret named `AZURE_STATIC_WEB_APPS_API_TOKEN`
@@ -39,34 +38,6 @@ frontend/
 
 ## Local Development Setup
 
-=======
-This is the frontend application for the AI Detector, built with React and Vite, featuring a modern UI with Tailwind CSS and DaisyUI components.
-
-## Project Structure
-
-```
-frontend/
-├── src/                    # Source code
-│   ├── assets/            # Static assets (images, fonts, etc.)
-│   ├── components/        # Reusable React components
-│   ├── hooks/            # Custom React hooks
-│   ├── pages/            # Page components
-│   ├── App.jsx           # Main application component
-│   ├── main.jsx          # Application entry point
-│   ├── i18n.js           # Internationalization setup
-│   └── index.css         # Global styles
-├── public/               # Public static files
-├── index.html           # HTML entry point
-├── package.json         # Project dependencies and scripts
-├── vite.config.js       # Vite configuration
-├── tailwind.config.js   # Tailwind CSS configuration
-├── postcss.config.js    # PostCSS configuration
-└── eslint.config.js     # ESLint configuration
-```
-
-## Local Development Setup
-
->>>>>>> fa6f6264b7aa1a6daf2276468cc549e9a81114d2
 1. Install dependencies:
    ```bash
    npm install
