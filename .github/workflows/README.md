@@ -5,15 +5,13 @@
 The following environment variables and secrets must be set in your GitHub repository or environment for successful deployments. Secrets must be added in the GitHub repository or environment as **secrets** (not plain variables).
 
 ### Frontend (Static Web App)
-- `VITE_API_BASE_URL`: Base URL for the API (environment variable)
 - `VITE_KINDE_AUDIENCE`: Kinde audience (environment variable)
 - `VITE_KINDE_CLIENT_ID`: Kinde client ID (environment variable)
 - `VITE_KINDE_DOMAIN`: Kinde domain (environment variable)
 - `VITE_KINDE_LOGIN_REDIRECT_URI`: Kinde login redirect URI (environment variable)
 - `VITE_KINDE_LOGOUT_REDIRECT_URI`: Kinde logout redirect URI (environment variable)
-- `AZURE_STATIC_WEB_APPS_API_TOKEN` (**REQUIRED SECRET**): Deployment token for Azure Static Web Apps (obtainable from the Azure Portal under your Static Web App's "Manage deployment tokens")
 
-### Backend (API & Infrastructure)
+### Backend (API & Infrastructure) and Frontend
 - `AZURE_CLIENT_ID` (**REQUIRED SECRET**): The client ID of your Azure service principal
 - `AZURE_CLIENT_SECRET` (**REQUIRED SECRET**): The client secret of your Azure service principal
 - `AZURE_TENANT_ID` (**REQUIRED SECRET**): Your Azure tenant ID

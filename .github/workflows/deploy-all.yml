@@ -1,0 +1,35 @@
+name: Deploy all - Backend and Frontend
+
+on:
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: 'Target environment (dev1, dev, stg, prod)'
+                required: true
+                default: 'dev1' # Default value, adjust as needed
+                type: choice
+                options:
+                    - dev1
+                    - dev
+                    - staging
+                    - prod
+
+permissions:
+    id-token: write # May be needed by azure/login internally
+    contents: read  # To checkout the code
+
+jobs:                
+    deploy-backend:
+        uses: ./.github/workflows/deploy-backend-complete.yml
+        with:
+            environment: ${{ github.event.inputs.environment }}
+        secrets: inherit
+
+    deploy-frontend:
+        needs:
+            - deploy-backend
+        uses: ./.github/workflows/deploy-frontend-complete.yml
+        with:
+            environment: ${{ github.event.inputs.environment }}
+        secrets: inherit
+
