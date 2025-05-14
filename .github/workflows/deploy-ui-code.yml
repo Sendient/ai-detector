@@ -44,8 +44,8 @@ jobs:
         id: get_swa_token
         run: |
           TOKEN=$(az staticwebapp secrets list \
-            --name my-staticwebapp-name \
-            --resource-group my-rg \
+            --name "app-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" \
+            --resource-group "rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" \
             --query properties.apiKey \
             --output tsv)
       
@@ -59,8 +59,8 @@ jobs:
         id: get_app_url
         run: |
           APP_URL=$(az containerapp show \
-            --name my-containerapp-name \
-            --resource-group my-resource-group \
+            --name "ca-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" \
+            --resource-group "rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" \
             --query properties.configuration.ingress.fqdn \
             --output tsv)
 
