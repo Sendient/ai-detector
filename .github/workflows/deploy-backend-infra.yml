@@ -113,8 +113,8 @@ jobs:
       uses: azure/cli@v1
       with:
         inlineScript: |
-          az keyvault secret set --vault-name "kv-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --name "stripe-secret-key" --value "dummy"
-          az keyvault secret set --vault-name "kv-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --name "kinde-clinet-secret" --value "dummy"
+          az keyvault secret set --vault-name "kv-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --name "stripe-secret-${{ github.event.inputs.environment || inputs.environment }}" --value ${{ secrets.STRIPE_SECRET}}
+          az keyvault secret set --vault-name "kv-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --name "kinde-secret-${{ github.event.inputs.environment || inputs.environment }}" --value ${{ secrets.VITE_KINDE_SECRET}}
 
     - name: Deploy MongoDb
       uses: azure/cli@v1
