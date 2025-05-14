@@ -1,5 +1,6 @@
 # AI Detector Backend
 
+<<<<<<< HEAD
 **IMPORTANT DEPLOYMENT PREREQUISITES:**
 1. **Azure Credentials Setup:**
    - Before any deployment, you MUST set up the following GitHub secrets:
@@ -9,6 +10,8 @@
    - These credentials are required for GitHub Actions to authenticate with Azure and deploy resources
    - The service principal must have appropriate permissions to deploy and manage resources in your Azure subscription
 
+=======
+>>>>>>> fa6f6264b7aa1a6daf2276468cc549e9a81114d2
 This is the backend service for the AI Detector application, built with FastAPI and designed to run in Azure Container Apps.
 
 ## Project Structure
