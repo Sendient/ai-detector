@@ -40,20 +40,34 @@ jobs:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}' 
           enable-AzPSSession: false
 
-      - name: Get Static Web App deployment token
-        id: get_swa_token
+      - name: Get Static Web App deployment token and URL
+        id: get_swa_details
         run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || inputs.environment }}"
+          APP_NAME="app-sdt-uks-aid-${ENVIRONMENT}"
+          RG_NAME="rg-sdt-uks-aid-${ENVIRONMENT}"
+      
+          # Get the deployment token
           TOKEN=$(az staticwebapp secrets list \
-            --name "app-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" \
-            --resource-group "rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" \
+            --name "$APP_NAME" \
+            --resource-group "$RG_NAME" \
             --query properties.apiKey \
             --output tsv)
       
-          # Mask it for any potential accidental echoes
+          # Mask the token
           echo "::add-mask::$TOKEN"
       
-          # Output it for downstream use
+          # Get the default hostname (i.e., app URL)
+          URL=$(az staticwebapp show \
+            --name "$APP_NAME" \
+            --resource-group "$RG_NAME" \
+            --query defaultHostname \
+            --output tsv)
+      
+          # Output both for downstream use
           echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "url=https://$URL" >> $GITHUB_OUTPUT
+        
 
       - name: Get Container App URL
         id: get_app_url
@@ -73,14 +87,14 @@ jobs:
           echo "VITE_API_BASE_URL=${{ steps.get_app_url.outputs.url }}" > .env
           echo "VITE_KINDE_DOMAIN=${{ vars.VITE_KINDE_DOMAIN }}" >> .env
           echo "VITE_KINDE_CLIENT_ID=${{ vars.VITE_KINDE_CLIENT_ID }}" >> .env
-          echo "VITE_KINDE_LOGIN_REDIRECT_URI=${{ vars.VITE_KINDE_LOGIN_REDIRECT_URI }}" >> .env
-          echo "VITE_KINDE_LOGOUT_REDIRECT_URI=${{ vars.VITE_KINDE_LOGOUT_REDIRECT_URI }}" >> .env
+          echo "VITE_KINDE_LOGIN_REDIRECT_URI=${{ steps.get_swa_details.outputs.url }}" >> .env
+          echo "VITE_KINDE_LOGOUT_REDIRECT_URI=${{ steps.get_swa_details.outputs.url }}" >> .env
           echo "VITE_KINDE_AUDIENCE=${{ vars.VITE_KINDE_AUDIENCE }}" >> .env
 
       - name: Deploy to Azure Static Web Apps
         uses: azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ steps.get_swa_token.outputs.token }}
+          azure_static_web_apps_api_token: ${{ steps.get_swa_details.outputs.token }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           app_location: "frontend"
