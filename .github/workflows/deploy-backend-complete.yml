@@ -4,6 +4,13 @@ on:
     push:
         branches:
             - main
+    workflow_call:
+      inputs:
+        environment:
+          description: 'Target environment (dev, stg, prod, dev1)'
+          required: true
+          default: 'dev1' # Default value, adjust as needed
+          type: string
     workflow_dispatch:
         inputs:
             environment:
@@ -55,7 +62,7 @@ jobs:
         needs: get-changes
         uses: ./.github/workflows/deploy-backend-infra.yml
         with:
-          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          environment: ${{ github.event.inputs.environment || inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
         secrets: inherit
 
@@ -66,7 +73,7 @@ jobs:
         if: ${{ (needs.get-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch') && (success() || needs.deploy-infra.result == 'skipped' || needs.deploy-infra.result == null) }}  # Runs if manually triggered or infra changes detected
         uses: ./.github/workflows/deploy-api-code.yml
         with:
-          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          environment: ${{ github.event.inputs.environment || inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
         secrets: inherit
 
@@ -77,7 +84,7 @@ jobs:
         if: ${{ (needs.get-changes.outputs.infra_bicep_container == 'true' || github.event_name == 'workflow_dispatch') && (success() || needs.deploy-backend.result == 'skipped') }}
         uses: ./.github/workflows/deploy-container-infra.yml
         with:
-          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          environment: ${{ github.event.inputs.environment || inputs.environment || 'dev1' }}
         secrets: inherit
 
     push-to-container:
@@ -87,6 +94,6 @@ jobs:
         if: ${{ (needs.deploy-backend.result == 'success' || github.event_name == 'workflow_dispatch') && (success() || needs.deploy-container-infra.result == 'skipped') }} # Only runs if changes in infra are detected or manually triggered
         uses: ./.github/workflows/deploy-api-to-containerapp.yml
         with:
-          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          environment: ${{ github.event.inputs.environment || inputs.environment || 'dev1' }}
           image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
         secrets: inherit

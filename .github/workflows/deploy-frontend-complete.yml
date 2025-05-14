@@ -4,6 +4,13 @@ on:
     push:
         branches:
             - main
+    workflow_call:
+        inputs:
+            environment:
+              description: 'Target environment (dev, stg, prod, dev1)'
+              required: true
+              default: 'dev1' # Default value, adjust as needed
+              type: string
     workflow_dispatch:
         inputs:
             environment:
@@ -44,7 +51,7 @@ jobs:
         needs: get-changes
         uses: ./.github/workflows/deploy-frontend-infra.yml
         with:
-          environment: ${{ github.event.inputs.environment || 'dev1' }}
+          environment: ${{ github.event.inputs.environment || inputs.environment || 'dev1' }}
         secrets: inherit
 
     deploy-ui-code:
@@ -54,6 +61,6 @@ jobs:
         if: ${{ (needs.get-changes.outputs.ui_frontend_code == 'true' || github.event_name == 'workflow_dispatch') && (success() || needs.deploy-infra.result == 'skipped' )}}
         uses: ./.github/workflows/deploy-ui-code.yml
         with:
-            environment: ${{ github.event.inputs.environment || 'dev1' }}
+            environment: ${{ github.event.inputs.environment || inputs.environment || 'dev1' }}
         secrets: inherit
 
