@@ -17,6 +17,8 @@ The following environment variables and secrets must be set in your GitHub repos
 - `AZURE_TENANT_ID` (**REQUIRED SECRET**): Your Azure tenant ID
 - `AZURE_SUBSCRIPTION_ID` (**REQUIRED SECRET**): Your Azure subscription ID
 - `VITE_KINDE_CLIENT_SECRET` (**REQUIRED SECRET**): Kinde client Secret (environment variable)
+- `STRIPE_SECRET` (**REQUIRED SECRET**): Stripe Secret (environment variable)
+
 
 These variables and secrets are accessible only by GitHub Actions in the context of this environment. Set them before running any deployments.
 
