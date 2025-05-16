@@ -78,7 +78,7 @@ jobs:
             --query properties.configuration.ingress.fqdn \
             --output tsv)
 
-          echo "::add-mask::$APP_URL"
+          echo "$APP_URL"
           echo "url=https://$APP_URL" >> $GITHUB_OUTPUT
 
       - name: Create .env file
