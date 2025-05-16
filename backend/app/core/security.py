@@ -255,6 +255,9 @@ async def get_current_user_payload( # Already async, which is good
     except JWKSFetchError as e: # This might be less likely now if validate_token wraps it
          logger.error(f"Authentication failed due to JWKS fetch error: {e}")
          raise internal_error_exception from e # Or map to a 401/403 if preferred
+    except HTTPException as http_exc: # Add this block
+        logger.warning(f"HTTPException during authentication dependency: {http_exc.status_code} - {http_exc.detail}")
+        raise http_exc # Re-raise the original HTTPException
     except Exception as e:
         logger.error(f"Unexpected error during authentication dependency: {e}", exc_info=True)
         raise internal_error_exception from e
