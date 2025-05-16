@@ -64,9 +64,9 @@ class TeacherCreate(TeacherBase):
 # Properties stored in DB
 class TeacherInDBBase(TeacherBase):
     # Use Kinde ID as the primary identifier, mapping to MongoDB's _id
-    id: str = Field(..., alias="_id", description="Kinde User ID (Primary Key)") # MODIFIED
-    # Removed the separate UUID id field
-    # Removed the separate kinde_id field as it's now the primary 'id'
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, alias="_id", description="Internal unique identifier for the teacher record")
+    # Kinde User ID, indexed and should be unique logically
+    kinde_id: str = Field(..., description="Kinde User ID, obtained from authentication token")
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -77,10 +77,10 @@ class TeacherInDBBase(TeacherBase):
 
     # Inherit model_config from Base, add specifics if needed
     model_config = ConfigDict(
-        # populate_by_name=True, # Inherited
-        # from_attributes=True, # Inherited
-        arbitrary_types_allowed=True, # Allow complex types if needed later
-        # use_enum_values=True, # Inherited
+        populate_by_name=True, # Ensures alias _id works for id field
+        from_attributes=True, 
+        arbitrary_types_allowed=True, # Important for UUID type
+        use_enum_values=True, 
     )
 
 # Final model representing a Teacher read from DB (API Response)

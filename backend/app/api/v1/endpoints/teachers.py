@@ -211,9 +211,18 @@ async def update_or_create_current_user_profile(
                 logger.info(f"Successfully created new teacher profile via PUT for Kinde ID: {user_kinde_id_str}, Internal ID: {created_teacher.id}")
                 return created_teacher
             else:
-                # This case implies crud.create_teacher returned None without raising an exception, which is unusual.
-                logger.error(f"crud.create_teacher returned None unexpectedly during PUT for Kinde ID: {user_kinde_id_str}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create teacher profile due to an unexpected internal error.")
+                # This case implies crud.create_teacher returned None.
+                # This typically means the uniqueness check within crud.create_teacher found an existing user.
+                logger.warning(f"crud.create_teacher returned None for Kinde ID {user_kinde_id_str}, likely due to pre-existing user. Attempting to fetch.")
+                # Attempt to fetch the teacher again, as it might have been created concurrently or the initial check missed it.
+                refetched_teacher = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id_str)
+                if refetched_teacher:
+                    logger.info(f"Successfully fetched teacher for Kinde ID {user_kinde_id_str} after create_teacher returned None.")
+                    return refetched_teacher
+                else:
+                    # If it's still not found, then it's a genuine issue.
+                    logger.error(f"crud.create_teacher returned None AND re-fetch failed for Kinde ID: {user_kinde_id_str}. This is unexpected.")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create or retrieve teacher profile after attempted creation.")
         except Exception as e:
             # Catch potential exceptions from the CRUD operation (e.g., database errors, unique constraints)
             logger.error(f"Exception during teacher creation via PUT for Kinde ID {user_kinde_id_str}: {e}", exc_info=True)
