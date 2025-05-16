@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone # For uptime calculation
 import asyncio
 from fastapi import status
 from pymongo.errors import OperationFailure
+import os
 
 # Import config and database lifecycle functions
 # Adjust path '.' based on where main.py is relative to 'core' and 'db'
@@ -39,13 +40,16 @@ logger = logging.getLogger(__name__) # Use main module logger or project-specifi
 # Track application start time for uptime calculation
 APP_START_TIME = time.time()
 
-# Define allowed origins
+frontend_origin = os.getenv("FRONTEND_URL")
 origins = [
-    "http://localhost:5173",  # Vite frontend
-    "http://localhost:3000",  # Alternative frontend port
-    "http://127.0.0.1:5173",  # Alternative localhost
-    "http://127.0.0.1:3000",  # Alternative localhost
+    frontend_origin,
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
 ]
+# Remove any None values in case the env var is not set
+origins = [o for o in origins if o]
 
 # Create FastAPI app instance with detailed configuration
 app = FastAPI(
