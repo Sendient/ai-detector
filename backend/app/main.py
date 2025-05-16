@@ -45,6 +45,7 @@ origins = [
     "http://localhost:3000",  # Alternative frontend port
     "http://127.0.0.1:5173",  # Alternative localhost
     "http://127.0.0.1:3000",  # Alternative localhost
+    "https://gray-mud-0fe5b3703.6.azurestaticapps.net", # Production frontend origin
 ]
 
 # Create FastAPI app instance with detailed configuration
@@ -64,7 +65,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
