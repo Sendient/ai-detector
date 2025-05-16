@@ -42,11 +42,13 @@ APP_START_TIME = time.time()
 
 frontend_origin = os.getenv("FRONTEND_URL")
 origins = [
-    frontend_origin,
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
+
+    "http://localhost:5173",  # Vite frontend
+    "http://localhost:3000",  # Alternative frontend port
+    "http://127.0.0.1:5173",  # Alternative localhost
+    "http://127.0.0.1:3000",  # Alternative localhost
+    "https://gray-mud-0fe5b3703.6.azurestaticapps.net", # Production frontend origin
+
 ]
 # Remove any None values in case the env var is not set
 origins = [o for o in origins if o]
@@ -68,7 +70,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
