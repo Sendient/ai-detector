@@ -1,141 +1,165 @@
 # AI Detector Backend
 
-**IMPORTANT DEPLOYMENT PREREQUISITES:**
-1. **Azure Credentials Setup:**
-   - Before any deployment, you MUST set up the following GitHub secrets:
-     - `AZURE_CLIENT_ID`: The client ID of your Azure service principal
-     - `AZURE_CLIENT_SECRET`: The client secret of your Azure service principal
-     - `AZURE_TENANT_ID`: Your Azure tenant ID
-     - `AZURE_SUBSCRIPTION_ID`: Your Azure subscription ID
-   - These credentials are required for GitHub Actions to authenticate with Azure and deploy resources
-   - The service principal must have appropriate permissions to deploy and manage resources in your Azure subscription
+This is the backend service for the AI Detector application, built with FastAPI and designed to handle document processing, AI analysis, and data management.
 
-This is the backend service for the AI Detector application, built with FastAPI and designed to run in Azure Container Apps.
+## Architecture Overview
 
-## Project Structure
+The backend is structured as a modern FastAPI application with the following key components:
 
+### Core Components
+
+1. **API Layer**
+   - RESTful API endpoints for document management, user authentication, and data operations
+   - Built with FastAPI for high performance and automatic OpenAPI documentation
+   - Organized into versioned endpoints (v1) with clear separation of concerns
+
+2. **Document Processing Pipeline**
+   - Handles document uploads, storage, and processing
+   - Supports multiple file types (PDF, DOCX, TXT, PNG, JPG)
+   - Integrates with Azure Blob Storage for file management
+   - Implements text extraction for supported document types
+
+3. **Batch Processing System**
+   - Asynchronous batch processing for multiple documents
+   - Priority-based queue system
+   - Progress tracking and status updates
+   - Error handling and retry mechanisms
+
+4. **Data Management**
+   - MongoDB database integration using Motor for async operations
+   - Structured data models for schools, teachers, students, and documents
+   - Comprehensive CRUD operations with transaction support
+   - Soft delete functionality for data preservation
+
+### Key Features
+
+- **Authentication & Authorization**
+  - Integration with Kinde for user authentication
+  - Role-based access control
+  - Secure API endpoints
+
+- **Document Analysis**
+  - Text extraction from various document formats
+  - Integration with AI detection service
+  - Result storage and retrieval
+
+- **Monitoring & Health Checks**
+  - Comprehensive health check endpoints
+  - System metrics monitoring
+  - Detailed logging system
+
+## Prerequisites
+
+- Python 3.8+
+- MongoDB (local or Azure Cosmos DB)
+- Azure Blob Storage account
+- Kinde authentication setup
+
+## Environment Setup
+
+Create a `.env` file in the backend directory with the following variables:
+
+```env
+# Database
+MONGODB_URL=your_mongodb_connection_string
+DB_NAME=aidetector_dev
+
+# Authentication
+KINDE_DOMAIN=your_kinde_domain
+KINDE_AUDIENCE=your_kinde_audience
+
+# Azure Blob Storage
+AZURE_BLOB_CONNECTION_STRING=your_blob_storage_connection_string
+AZURE_BLOB_CONTAINER_NAME=uploaded-documents
+
+# Optional: Stripe Integration
+STRIPE_SECRET_KEY=your_stripe_secret_key
+STRIPE_WEBHOOK_SECRET=your_stripe_webhook_secret
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+## Installation
+
+1. Create a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## Running the Application
+
+### Local Development
+
+1. Start the development server:
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+2. Access the API documentation:
+- Swagger UI: http://localhost:8000/api/docs
+- ReDoc: http://localhost:8000/api/redoc
+
+### Docker Deployment
+
+1. Build the Docker image:
+```bash
+docker build -t ai-detector-backend .
+```
+
+2. Run the container:
+```bash
+docker run -p 8000:8000 --env-file .env ai-detector-backend
+```
+
+## API Endpoints
+
+### Document Management
+- `POST /api/v1/documents/upload` - Upload a new document
+- `POST /api/v1/documents/{document_id}/assess` - Trigger AI assessment
+- `GET /api/v1/documents/{document_id}` - Get document metadata
+- `GET /api/v1/documents/{document_id}/text` - Get document text content
+
+### Batch Processing
+- `POST /api/v1/documents/batch` - Upload multiple documents
+- `GET /api/v1/documents/batch/{batch_id}` - Get batch status
+
+### Health & Monitoring
+- `GET /health` - Comprehensive health check
+- `GET /healthz` - Liveness probe
+- `GET /readyz` - Readiness probe
+
+## Development Guidelines
+
+### Code Structure
 ```
 backend/
-├── app/                    # Main application package
-│   ├── api/               # API routes and endpoints
-│   ├── core/              # Core application configuration
-│   ├── db/                # Database connection and utilities
-│   ├── migrations/        # Database migrations
-│   ├── models/            # Data models and schemas
-│   ├── services/          # Business logic and services
-│   ├── tasks/             # Background tasks and workers
-│   └── main.py           # Application entry point
-├── tests/                 # Test suite
-├── scripts/               # Utility scripts
-├── documents/            # Documentation and reference materials
-├── Dockerfile            # Container definition
-├── requirements.txt      # Production dependencies
-└── requirements-dev.txt  # Development dependencies
+├── app/
+│   ├── api/
+│   │   └── v1/
+│   │       └── endpoints/
+│   ├── core/
+│   ├── db/
+│   ├── models/
+│   ├── services/
+│   └── tasks/
+├── tests/
+└── requirements.txt
 ```
 
-## Local Development Setup
-
-1. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-2. Install development dependencies:
-   ```bash
-   pip install -r requirements-dev.txt
-   ```
-
-3. Set up environment variables:
-   Create a `.env` file in the backend directory with the following variables:
-   ```
-   MONGODB_URL=your_mongodb_connection_string
-   STORAGE_CONNECTION_STRING=your_storage_connection_string
-   KINDLE_DOMAIN=your_kindle_domain
-   KINDLE_AUDIENCE=your_kindle_audience
-   KINDLE_CLIENT_SECRET=your_kindle_client_secret
-   STRIPE_SECRET_KEY=your_stripe_secret_key
-   ```
-
-4. Run the development server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
-
-The API will be available at `http://localhost:8000`
-
-## Container Deployment
-
-The application is containerized using Docker and deployed to Azure Container Apps. The `Dockerfile` defines the container environment:
-
-- Base image: Python 3.13 slim-bookworm
-- Working directory: `/app`
-- Environment optimizations:
-  - Disabled Python bytecode writing
-  - Unbuffered Python output
-  - Optimized pip settings
-- Exposed port: 8000
-- Entry point: Uvicorn server running the FastAPI application
-
-### Container Configuration
-
-The container is configured with:
-- Single worker process (can be scaled horizontally in Azure Container Apps)
-- Host binding to `0.0.0.0` for external access
-- Port 8000 exposed for HTTP traffic
-
-## Key Components
-
-### 1. API Layer (`app/api/`)
-- RESTful endpoints for the application
-- Request/response handling
-- Input validation
-- Authentication middleware
-
-### 2. Core Configuration (`app/core/`)
-- Application settings
-- Environment configuration
-- Security settings
-- Constants and shared utilities
-
-### 3. Database Layer (`app/db/`)
-- MongoDB connection management
-- Database utilities
-- Connection pooling
-- Error handling
-
-### 4. Models (`app/models/`)
-- Pydantic models for data validation
-- Database models
-- Request/response schemas
-
-### 5. Services (`app/services/`)
-- Business logic implementation
-- External service integrations
-- Data processing
-- File handling
-
-### 6. Tasks (`app/tasks/`)
-- Background task processing
-- Async operations
-- Scheduled jobs
-
-## Dependencies
-
-### Core Dependencies
-- FastAPI: Web framework
-- Uvicorn: ASGI server
-- Motor: MongoDB async driver
-- Pydantic: Data validation
-- Azure Storage Blob: File storage
-- Python-jose: JWT handling
-- Stripe: Payment processing
-
-### Development Dependencies
-- Pytest: Testing framework
-- Black: Code formatting
-- Flake8: Linting
-- MyPy: Type checking
+### Best Practices
+1. Use type hints consistently
+2. Follow FastAPI dependency injection patterns
+3. Implement proper error handling
+4. Write comprehensive logging
+5. Use transactions for data consistency
+6. Follow REST API design principles
 
 ## Testing
 
@@ -144,34 +168,13 @@ Run the test suite:
 pytest
 ```
 
-For test coverage:
-```bash
-pytest --cov=app tests/
-```
+## Contributing
 
-## Important Files
+1. Follow the existing code style and structure
+2. Add appropriate tests for new features
+3. Update documentation as needed
+4. Use meaningful commit messages
 
-- `main.py`: Application entry point and FastAPI app configuration
-- `Dockerfile`: Container definition for deployment
-- `requirements.txt`: Production dependencies
-- `requirements-dev.txt`: Development dependencies
-- `pytest.ini`: Test configuration
-- `fix_cosmos_index.py`: Database index management utility
-- `indexes.json`: Database index definitions
+## License
 
-## Environment Variables
-
-The application requires the following environment variables:
-
-- `MONGODB_URL`: MongoDB connection string
-- `STORAGE_CONNECTION_STRING`: Azure Storage connection string
-- `KINDLE_DOMAIN`: Kindle authentication domain
-- `KINDLE_AUDIENCE`: Kindle authentication audience
-- `KINDLE_CLIENT_SECRET`: Kindle client secret
-- `STRIPE_SECRET_KEY`: Stripe API secret key
-
-## API Documentation
-
-When running the application, API documentation is available at:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc` 
+[Your License Here] 
