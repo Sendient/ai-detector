@@ -225,6 +225,7 @@ async def create_teacher(
     if session:
         logger.debug("create_teacher called within an existing session.")
     else:
+        # This log appeared in user's logs, so keeping it.
         logger.warning("create_teacher called WITHOUT an active session (transaction decorator removed/disabled).")
 
     collection = _get_collection(TEACHER_COLLECTION)
@@ -235,70 +236,71 @@ async def create_teacher(
         return None
 
     # --- Application-level uniqueness check for kinde_id ---
+    # This existing check seems fine.
     existing_teacher_count = await collection.count_documents({"kinde_id": kinde_id, "is_deleted": {"$ne": True}}, session=session)
     if existing_teacher_count > 0:
         logger.warning(f"Attempted to create a teacher with an existing kinde_id: {kinde_id}")
-        # It's often better to raise an HTTPException here that can be caught by FastAPI
-        # and returned as a proper HTTP error response (e.g., 409 Conflict).
-        # For now, returning None as per existing pattern, but consider changing.
-        # raise HTTPException(status_code=409, detail=f"A teacher with Kinde ID '{kinde_id}' already exists.")
+        # Returning None as per existing pattern.
         return None 
     # --- End uniqueness check ---
 
     # Generate a new internal UUID for the teacher record (_id)
     internal_id = uuid.uuid4()
 
-    # Create the document to insert using data from TeacherCreate
-    teacher_doc = teacher_in.model_dump() # Dump all fields from TeacherCreate
-    teacher_doc["_id"] = internal_id      # Set internal DB ID
-    teacher_doc["kinde_id"] = kinde_id    # Add the Kinde ID
+    # Prepare the document for insertion
+    teacher_doc = teacher_in.model_dump() # Converts Pydantic model to dict
+    
+    # --- CRITICAL: Ensure _id and kinde_id are correctly assigned ---
+    # The Teacher model alias `id: str = Field(..., alias="_id")` expects `_id` in the data for `id`.
+    # The primary ID for the Teacher model is the Kinde ID.
+    # Let's re-evaluate how `_id` (MongoDB document ID) and `kinde_id` (Teacher's primary conceptual ID) are handled.
 
-    # Set timestamps and soft delete status
+    # Based on your Teacher model: `id: str = Field(..., alias="_id", description="Kinde User ID (Primary Key)")`
+    # This means the Kinde ID should be stored in MongoDB's `_id` field.
+    
+    # Corrected document preparation:
+    teacher_doc["_id"] = kinde_id # Kinde ID is the document's _id
+    # teacher_doc["internal_mongo_id"] = internal_id # If you need a separate unique mongo id, store it differently
+                                                 # For now, removing this to align with model alias.
+
+    # Add timestamps
     teacher_doc["created_at"] = now
     teacher_doc["updated_at"] = now
-    teacher_doc["is_deleted"] = False
+    # is_deleted defaults to False via Pydantic model or explicitly set if necessary
+    if 'is_deleted' not in teacher_doc:
+         teacher_doc['is_deleted'] = False
 
-    # Ensure defaults from TeacherBase are applied if not explicitly in TeacherCreate dump
-    # Pydantic v2 model_dump includes defaults by default
-    # We might need explicit conversion for enums if use_enum_values=False in model
-    if isinstance(teacher_doc.get("role"), TeacherRole):
-        teacher_doc["role"] = teacher_doc["role"].value # Store the string value
-    if isinstance(teacher_doc.get("how_did_you_hear"), MarketingSource):
-        teacher_doc["how_did_you_hear"] = teacher_doc["how_did_you_hear"].value # Store the string value
-    if "is_active" not in teacher_doc: # Ensure default is set if not present
-        teacher_doc["is_active"] = True # Assuming default is True, adjust if needed
-    if "email_verified" not in teacher_doc:
-        teacher_doc["email_verified"] = False # Assuming default, adjust if needed
-    # Add other defaults as necessary based on TeacherBase or Teacher model
 
-    logger.info(f"Attempting to insert new teacher with internal_id: {internal_id}, kinde_id: {kinde_id}")
+    logger.info(f"Attempting to insert new teacher with _id (Kinde ID): {kinde_id}")
+    
     try:
-        inserted_result = await collection.insert_one(teacher_doc, session=session)
-        if inserted_result.acknowledged:
-            # Fetch the newly created document to return it
-            # Use the internal_id for fetching
-            created_doc = await collection.find_one({"_id": internal_id, "is_deleted": {"$ne": True}}, session=session)
+        result = await collection.insert_one(teacher_doc, session=session)
+        if result.inserted_id: # This will be the kinde_id
+            logger.info(f"Successfully created teacher with _id (Kinde ID): {result.inserted_id}")
+            # Retrieve the fully created document from DB
+            created_doc = await collection.find_one({"_id": result.inserted_id}, session=session)
             if created_doc:
-                logger.info(f"Successfully created teacher: {internal_id} / {kinde_id}")
-                return Teacher(**created_doc) 
+                # The _id from MongoDB (which is kinde_id and already a string)
+                # will be used for the 'id' field in the Pydantic model due to the alias.
+                # No specific UUID to str conversion needed here if _id is already the string kinde_id.
+                # However, if for some reason a UUID was put into _id, this would handle it:
+                if '_id' in created_doc and isinstance(created_doc['_id'], uuid.UUID):
+                    created_doc['_id'] = str(created_doc['_id'])
+                return Teacher(**created_doc) # Convert DB doc back to Pydantic model
             else:
-                logger.error(f"Failed to retrieve teacher after insert, internal_id: {internal_id}")
-                return None
+                logger.error(f"Failed to retrieve teacher after insert, _id: {result.inserted_id}")
+                return None 
         else:
-            logger.error(f"Insert not acknowledged for teacher with kinde_id: {kinde_id}, internal_id: {internal_id}")
+            logger.error(f"Teacher insertion failed for kinde_id {kinde_id}, no inserted_id returned.")
             return None
-    except DuplicateKeyError as e:
-        # This handles the database-level unique index violation, which is a good safety net.
-        # The app-level check above should ideally prevent this, but this catch is still valuable.
-        logger.error(f"Database-level DuplicateKeyError for kinde_id '{kinde_id}' or _id '{internal_id}': {e.details}", exc_info=True)
-        # Again, consider raising HTTPException for a 409 Conflict
-        # raise HTTPException(status_code=409, detail=f"A teacher with this Kinde ID or internal ID already exists (DB constraint).")
+    except DuplicateKeyError:
+        logger.error(f"Duplicate key error creating teacher. Kinde ID {kinde_id} (used as _id) likely already exists.")
         return None
     except Exception as e:
         logger.error(f"Unexpected error creating teacher with kinde_id {kinde_id}: {e}", exc_info=True)
         return None
 
-async def get_teacher_by_id(teacher_id: str, session=None) -> Optional[Teacher]:
+async def get_teacher_by_id(teacher_id: str, session=None) -> Optional[Teacher]: # teacher_id is Kinde ID (string)
     """Get a single teacher by their internal ID (string UUID)."""
     collection = _get_collection(TEACHER_COLLECTION)
     if collection is None: return None
@@ -317,26 +319,27 @@ async def get_teacher_by_id(teacher_id: str, session=None) -> Optional[Teacher]:
         return None
 
 async def get_teacher_by_kinde_id(kinde_id: str, session=None) -> Optional[Teacher]:
-    """Get a single teacher by their Kinde ID."""
+    """Retrieves a teacher by their Kinde ID."""
     collection = _get_collection(TEACHER_COLLECTION)
     if collection is None: return None
-    logger.info(f"Getting teacher by kinde_id: {kinde_id}")
+    
+    # Kinde ID is stored as _id in the database as per the Teacher model alias.
+    query = {"_id": kinde_id} 
+    query.update(soft_delete_filter(False)) # Ensure we don't fetch soft-deleted
+
+    logger.info(f"Getting teacher by _id (Kinde ID): {kinde_id}")
     try:
-        teacher_doc = await collection.find_one({"kinde_id": kinde_id, "is_deleted": {"$ne": True}}, session=session)
-        if teacher_doc:
-            # Convert _id to string BEFORE Pydantic validation if it's a UUID
-            if isinstance(teacher_doc.get("_id"), uuid.UUID):
-                logger.debug(f"Found teacher with UUID _id {teacher_doc['_id']} for Kinde ID {kinde_id}. Converting to string for Pydantic.")
-                teacher_doc["_id"] = str(teacher_doc["_id"])
-            return Teacher(**teacher_doc)
-        return None
-    # Keep specific ValidationError catch if desired, but broaden general Exception catch
-    except ValidationError as e: # Catch Pydantic validation specifically if needed
-        logger.error(f"Pydantic validation error getting teacher by Kinde ID {kinde_id}: {e}", exc_info=False) # exc_info=False for cleaner logs maybe
-        return None # Return None on validation failure as before
+        teacher_doc = await collection.find_one(query, session=session)
     except Exception as e:
-        # Catch any other potential errors (DB connection, etc.)
-        logger.error(f"General error getting teacher by Kinde ID {kinde_id}: {e}", exc_info=True)
+        logger.error(f"Error finding teacher by _id (Kinde ID) {kinde_id}: {e}", exc_info=True)
+        return None
+        
+    if teacher_doc:
+        # The _id from MongoDB (which is kinde_id and already a string)
+        # will be used for the 'id' field in the Pydantic model due to the alias.
+        return Teacher(**teacher_doc)
+    else:
+        logger.debug(f"Teacher with _id (Kinde ID) {kinde_id} not found or is marked as deleted.")
         return None
 
 async def get_all_teachers(skip: int = 0, limit: int = 100, include_deleted: bool = False, session=None) -> List[Teacher]:
