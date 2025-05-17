@@ -77,62 +77,73 @@ app.add_middleware(
 # --- Event Handlers for DB Connection and Batch Processor ---
 @app.on_event("startup")
 async def startup_event():
-    """Connect to MongoDB, ensure indexes, and start batch processor on application startup."""
+    """
+    Event handler for application startup.
+    Connects to the database and ensures necessary indexes are created.
+    """
     logger.info("Executing startup event: Connecting to database...")
-    connected = await connect_to_mongo()
-    if not connected:
-        logger.critical("FATAL: Database connection failed on startup. Application might not function correctly.")
-    else:
+    try:
+        await connect_to_mongo() # Ensure this is awaited
         logger.info("Startup event: Database connection successful.")
-        # Ensure indexes after successful connection
-        try:
-            db_instance = get_database()
-            if db_instance is not None:
-                logger.info("Ensuring database indexes...")
-                # Index for teachers.kinde_id
-                # Use the collection name string directly as defined in crud.py or your DB
-                teachers_collection_name = "teachers" 
-                teachers_collection = db_instance.get_collection(teachers_collection_name)
-                
-                try:
-                    # Create index on kinde_id, make it unique
-                    # Naming the index is good practice for manageability
-                    await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=True)
-                    logger.info(f"Index 'idx_teacher_kinde_id' on {teachers_collection_name}.kinde_id ensured (unique).")
-                except OperationFailure as e:
-                    if e.code == 67: # Code 67: CannotCreateIndex (Cosmos DB specific for unique on non-empty)
-                        logger.warning(
-                            f"Could not create unique index 'idx_teacher_kinde_id' on {teachers_collection_name}.kinde_id "
-                            f"programmatically because the collection is not empty (Cosmos DB restriction). "
-                            f"Please ensure this index is created manually in Azure Portal if it does not exist. Error: {e.details}"
-                        )
-                    elif e.code == 13: # Code 13: Unauthorized - Cosmos DB index modification restriction
-                        logger.warning(
-                            f"Could not modify existing unique index 'idx_teacher_kinde_id' on {teachers_collection_name}.kinde_id. "
-                            f"Cosmos DB requires removing and recreating the collection to change unique indexes. "
-                            f"Ignoring error and continuing startup. Error details: {e.details}"
-                        )
-                    else: # Other OperationFailure, re-raise or log as more critical
-                        logger.error(f"Database OperationFailure while creating index 'idx_teacher_kinde_id': {e}", exc_info=True)
-                        # Potentially re-raise if this should halt startup
-                except Exception as e_general: # Catch other general errors during index creation
-                    logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id': {e_general}", exc_info=True)
-                
-                # Example for other potential indexes (uncomment and adapt as needed):
-                # documents_collection_name = "documents"
-                # documents_collection = db_instance.get_collection(documents_collection_name)
-                # await documents_collection.create_index([("teacher_id", 1), ("student_id", 1)], name="idx_doc_teacher_student")
-                # logger.info(f"Compound index 'idx_doc_teacher_student' on {documents_collection_name} ensured.")
-                
-                logger.info("Database indexes ensured.")
-            else:
-                logger.error("Could not get database instance to ensure indexes.")
-        except Exception as e:
-            logger.error(f"Error ensuring database indexes: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Startup event: Failed to connect to database: {e}", exc_info=True)
+        # Optionally, re-raise or handle more gracefully depending on desired behavior
+        # For now, if DB connection fails, the app might not be usable, so re-raising is one option.
+        raise
 
-    # Start batch processor in background task
-    asyncio.create_task(batch_processor.process_batches())
-    logger.info("Batch processor started")
+    logger.info("Ensuring database indexes...")
+    db = get_database() # Get database instance
+    if db is None:
+        logger.error("Cannot ensure indexes: Database connection not available (db is None).")
+        return
+
+    try:
+        # Ensure indexes for Teachers collection
+        teachers_collection = db.get_collection("teachers")
+        # Check if running in an event loop for async operations
+        # No, this is already an async function, direct await is fine.
+        try:
+            await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
+            logger.info("Successfully created/verified non-unique index 'idx_teacher_kinde_id' on teachers.kinde_id")
+        except OperationFailure as e:
+            if e.code == 85: # IndexOptionsConflict
+                logger.warning(
+                    f"Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id. "
+                    f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
+                    f"This means an index with the same name exists but has different options (e.g., unique, sparse). "
+                    f"The application will continue, but please resolve this manually in Azure Portal/Cosmos DB "
+                    f"by deleting the existing 'idx_teacher_kinde_id' and allowing the application to recreate it, "
+                    f"or by updating the application's index definition in app/main.py to match the existing one."
+                )
+            else:
+                # For other operation failures, log and re-raise
+                logger.error(f"Database OperationFailure while creating index 'idx_teacher_kinde_id': {e.details.get('errmsg', str(e))}", exc_info=True)
+                raise # Re-raise other OperationFailures
+        except Exception as e:
+            # Catch any other unexpected errors during index creation for teachers
+            logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
+            # Depending on policy, you might want to raise this too
+
+        # Ensure indexes for Documents collection (example, adjust as needed)
+        # documents_collection = db[DOCUMENT_COLLECTION]
+        # await documents_collection.create_index([("teacher_id", 1), ("upload_timestamp", -1)], name="idx_doc_teacher_upload")
+        # logger.info("Successfully created/verified index 'idx_doc_teacher_upload' on documents")
+
+        logger.info("Database indexes ensured.")
+
+    except Exception as e:
+        logger.error(f"An error occurred during index creation: {e}", exc_info=True)
+        # Decide if app should proceed if index creation fails for non-critical indexes
+
+    # Start background tasks if any (like BatchProcessor)
+    try:
+        # Assuming BatchProcessor is designed to be started and run in the background
+        from app.tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
+        processor = BatchProcessor()
+        asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
+        logger.info("Batch processor started")
+    except Exception as e:
+        logger.error(f"Failed to start batch processor: {e}", exc_info=True)
 
 @app.on_event("shutdown")
 async def shutdown_event():
