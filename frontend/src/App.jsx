@@ -19,6 +19,7 @@ import AssessmentPage from './pages/AssessmentPage';
 import NotFoundPage from './pages/NotFoundPage';
 import AIDetectionReportPage from './components/AIDetectionReportPage';
 import QuickStartPage from './pages/QuickStartPage';
+import IntegrationsPage from './pages/IntegrationsPage';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
@@ -35,6 +36,14 @@ function App() {
 
   return (
     <Routes>
+      {/* ===== TEST DIVS START ===== */}
+      {/* <div className="p-4 m-4 border-2 border-black">
+        <div className="text-custom-debug-alert p-2">This should be MAGENTA text (custom-debug-alert from theme.extend.colors)</div>
+        <div className="bg-custom-debug-bg p-2 mt-2">This should have a CYAN background (custom-debug-bg from theme.extend.colors)</div>
+        <div className="text-primary p-2 mt-2">This should be HOT PINK text (text-primary from DaisyUI theme)</div>
+        <div className="bg-primary p-2 mt-2">This should have a HOT PINK background (bg-primary from DaisyUI theme)</div>
+      </div> */}
+      {/* ===== TEST DIVS END ===== */}
       <Route element={<Layout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/quickstart" element={<QuickStartPage />} />
@@ -48,6 +57,7 @@ function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/schools" element={<SchoolsPage />} />
         <Route path="/teachers" element={<TeachersPage />} />
+        <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

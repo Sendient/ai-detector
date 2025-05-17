@@ -1,5 +1,29 @@
 /** @type {import('tailwindcss').Config} */
-import daisyui from "daisyui"; // Action 2.1: Import DaisyUI
+import daisyui from "daisyui";
+
+// Define the custom theme as a constant
+const sendientCustomTheme = {
+    "primary": "#7070FF",             // User's desired primary
+    "primary-content": "#FFFFFF",     // White for contrast
+    "secondary": "#f000b8",           // Default DaisyUI secondary for light theme (example)
+    "secondary-content": "#FFFFFF",   // White
+    "accent": "#37cdbe",              // Default DaisyUI accent for light theme (example)
+    "accent-content": "#FFFFFF",      // White
+    "neutral": "#3d4451",             // Default DaisyUI neutral for light theme (example)
+    "neutral-content": "#FFFFFF",     // White
+    "base-100": "#FFFFFF",            // White (page background)
+    "base-200": "#F2F2F2",            // Off-white
+    "base-300": "#E5E6E6",            // Off-white
+    "base-content": "#12344A",        // User's desired main text color
+    "info": "#3abff8",                // Default DaisyUI info for light theme (example)
+    "info-content": "#FFFFFF",        // White
+    "success": "#36d399",             // Default DaisyUI success for light theme (example)
+    "success-content": "#FFFFFF",     // White
+    "warning": "#fbbd23",             // Default DaisyUI warning for light theme (example)
+    "warning-content": "#FFFFFF",     // White
+    "error": "#f87272",               // Default DaisyUI error for light theme (example)
+    "error-content": "#FFFFFF",       // White
+};
 
 export default {
     // Configure files where Tailwind classes can be used
@@ -9,18 +33,12 @@ export default {
     ],
     theme: {
         extend: {
-            // Action 2.3: Define Fonts
-            fontFamily: {
-                sans: ['Montserrat', 'sans-serif'], // Set Montserrat as default sans-serif
-            },
-            // Optional: You can still add specific named colours here if needed
-            // outside the main theme, but primary styling should use the daisyui theme below.
             colors: {
-                 'sendient-success': '#17B26A', // Example explicit color
-                 'sendient-info': '#3295C5',
-                 'sendient-warning': '#F2930D',
-                 'sendient-error': '#F84B3B',
-            }
+                // You can add custom non-DaisyUI color utilities here if needed
+            },
+            fontFamily: {
+                sans: ['Montserrat', 'sans-serif'],
+            },
         },
     },
     // Action 2.2: Add DaisyUI Plugin
@@ -30,46 +48,35 @@ export default {
     daisyui: {
         themes: [
             {
-                sendient_theme: { // Your custom theme name
-                    // --- Mapped Colours (From Sendient UI Kit - Colours.pdf) ---
-                    "primary": "#685CF8",        // Primary 500
-                    "primary-content": "#ffffff",  // White text
-
-                    "secondary": "#21ABAB",      // Secondary 500
-                    "secondary-content": "#ffffff",// White text
-
-                    "accent": "#17B598",         // Accent 500
-                    "accent-content": "#ffffff",   // White text
-
-                    "neutral": "#364152",        // Grey 700
-                    "neutral-content": "#ffffff",  // White text
-
-                    "base-100": "#ffffff",        // White background
-                    "base-200": "#F8FAFC",        // Grey 50
-                    "base-300": "#E3E8EF",        // Grey 200
-                    "base-content": "#121926",    // Grey 900 (default text)
-
-                    "info": "#3295C5",           // Info 500
-                    "info-content": "#ffffff",   // White text
-
-                    "success": "#17B26A",         // Success 500
-                    "success-content": "#ffffff",  // White text
-
-                    "warning": "#F2930D",         // Warning 500
-                    "warning-content": "#441704", // Dark text (Warning 950) for contrast
-
-                    "error": "#F84B3B",           // Error 500
-                    "error-content": "#ffffff",    // White text
-
-                    // --- Optional: Styling variables from UI Kit ---
-                    "--rounded-box": "0.5rem",    // 8px radius for cards, etc.
-                    "--rounded-btn": "0.375rem",  // 6px radius for buttons
+                sendient_theme: {
+                    "primary": "#7070FF",
+                    "primary-content": "#FFFFFF",
+                    "secondary": "#f000b8",
+                    "secondary-content": "#FFFFFF",
+                    "accent": "#37cdbe",
+                    "accent-content": "#FFFFFF",
+                    "neutral": "#3d4451",
+                    "neutral-content": "#FFFFFF",
+                    "base-100": "#FFFFFF",
+                    "base-200": "#F2F2F2",
+                    "base-300": "#E5E6E6",
+                    "base-content": "#12344A",
+                    "info": "#3abff8",
+                    "info-content": "#FFFFFF",
+                    "success": "#36d399",
+                    "success-content": "#FFFFFF",
+                    "warning": "#fbbd23",
+                    "warning-content": "#FFFFFF",
+                    "error": "#f87272",
+                    "error-content": "#FFFFFF"
                 },
             },
-            // Add other themes like a dark theme here later if required
         ],
-        // Optional settings:
-        // darkTheme: "sendient_theme", // Force your theme for dark mode
-        logs: true, // Keep logs enabled during development
+        styled: true,
+        base: true,
+        utils: true,
+        logs: true,
+        prefix: "",
+        darkTheme: false,
     },
 };

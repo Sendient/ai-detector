@@ -11,11 +11,13 @@ import {
     GraduationCap, // Using 'GraduationCap' for Students
     BarChart3,
     User,
+    Puzzle, // Ensure Puzzle icon is imported
     // Settings, // Uncomment if needed later
     LogIn,
     UserPlus,
     LogOut
 } from 'lucide-react';
+import AppLogoDark from './Ai_DETECTOR_STRAPLINE_DARK.png'; // Import the logo
 
 // -> Remove the old PlaceholderIcon, LoginIcon, etc. component definitions
 
@@ -30,15 +32,15 @@ function Sidebar() {
         { nameKey: 'sidebar_menu_documents', iconName: 'FileText', to: '/documents' },
         { nameKey: 'sidebar_menu_classes', iconName: 'Users', to: '/classes' }, // Map key to icon name
         { nameKey: 'sidebar_menu_students', iconName: 'GraduationCap', to: '/students' }, // Map key to icon name
-        { nameKey: 'sidebar_menu_analytics', iconName: 'BarChart3', to: '/analytics' },
-        { nameKey: 'sidebar_menu_profile', iconName: 'User', to: '/profile' },
+        { nameKey: 'sidebar_menu_analytics', iconName: 'BarChart3', to: '/analytics' }
+        // { nameKey: 'sidebar_menu_integrations', iconName: 'LayoutDashboard', to: '/integrations' } // REMOVED from navItems
         // { nameKey: 'sidebar_menu_schools', iconName: 'Building', to: '/schools' }, // Example if added
         // { nameKey: 'sidebar_menu_teachers', iconName: 'UsersRound', to: '/teachers' }, // Example if added
     ];
 
     // -> Map icon names to components for easier use in loop
     const iconComponents = {
-        LayoutDashboard, FileText, Users, GraduationCap, BarChart3, User, LogIn, UserPlus, LogOut
+        LayoutDashboard, FileText, Users, GraduationCap, BarChart3, User, Puzzle, LogIn, UserPlus, LogOut // Ensure Puzzle is here
         // Add other imported icons here if needed: Building, UsersRound, etc.
     };
 
@@ -48,9 +50,11 @@ function Sidebar() {
         <aside className="w-64 h-screen bg-base-200 text-base-content flex flex-col border-r border-base-300 shadow-sm z-40 shrink-0">
             {/* Logo Area */}
             {/* -> Updated logo area classes: text, border */}
-            <div className="p-4 py-5 border-b border-base-300">
-                <h1 className="text-xl font-bold text-primary tracking-tight">{t('sidebar_app_title')}</h1>
-                <p className="text-xs text-neutral mt-1">{t('sidebar_app_tagline')}</p>
+            <div className="p-4 py-5 border-b border-base-300 flex justify-center items-center"> {/* Added flex for centering */}
+                {/* Replace text with image */}
+                <img src={AppLogoDark} alt="AI Detector Logo" className="h-20" /> {/* Adjust height as needed */}
+                {/* <h1 className="text-xl font-bold text-primary tracking-tight">{t('sidebar_app_title')}</h1>
+                <p className="text-xs text-neutral mt-1">{t('sidebar_app_tagline')}</p> */}
             </div>
 
             {/* Navigation */}
@@ -88,14 +92,29 @@ function Sidebar() {
                 {isLoading ? (
                     <div className="text-center text-sm text-gray-500 p-2">{t('sidebar_auth_loading')}</div>
                 ) : isAuthenticated ? (
-                    // -> Updated button classes and icon
-                    <button
-                        onClick={() => logout()}
-                        className="flex items-center w-full px-3 py-2 text-sm font-medium rounded-md text-neutral hover:bg-base-300 group"
-                    >
-                        <LogOut className="mr-3 h-5 w-5 text-neutral" aria-hidden="true" />
-                        {t('sidebar_auth_sign_out')}
-                    </button>
+                    <>
+                        {/* Integrations Link - Added back here with Puzzle icon */}
+                        <Link
+                            to="/integrations"
+                            className={`flex items-center w-full px-3 py-2 text-sm font-medium rounded-md group ${
+                                location.pathname === '/integrations'
+                                    ? 'bg-primary text-primary-content' // Active style
+                                    : 'text-neutral hover:bg-base-300' // Inactive style
+                            }`}
+                        >
+                            <Puzzle className={`mr-3 h-5 w-5 ${location.pathname === '/integrations' ? 'text-primary-content' : 'text-neutral'}`} aria-hidden="true" />
+                            {t('sidebar_menu_integrations')}
+                        </Link>
+
+                        {/* Sign Out Button */}
+                        <button
+                            onClick={() => logout()}
+                            className="flex items-center w-full px-3 py-2 text-sm font-medium rounded-md text-neutral hover:bg-base-300 group"
+                        >
+                            <LogOut className="mr-3 h-5 w-5 text-neutral" aria-hidden="true" />
+                            {t('sidebar_auth_sign_out')}
+                        </button>
+                    </>
                 ) : (
                     <>
                         {/* -> Updated button classes and icon */}
