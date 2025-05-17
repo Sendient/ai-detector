@@ -9,7 +9,7 @@ class ClassGroupBase(BaseModel):
     """Base class for ClassGroup with common attributes."""
     class_name: str = Field(..., description="Name of the class (e.g., 'Math 101', '9th Grade English')")
     academic_year: str = Field(..., description="Academic year (e.g., '2024-2025')")
-    teacher_id: str = Field(..., description="Kinde User ID of the Teacher who owns this class")
+    teacher_id: uuid.UUID = Field(..., description="Internal Database ID of the Teacher who owns this class")
     # school_id: uuid.UUID = Field(..., description="Reference to the School this class belongs to") # REMOVED
     # # teacher_id is handled in DB model # REMOVED COMMENT
 
@@ -22,6 +22,7 @@ class ClassGroupBase(BaseModel):
 # Properties required on creation - teacher_id and is_deleted are set by backend
 class ClassGroupCreate(ClassGroupBase):
     """Model for creating a new ClassGroup."""
+    teacher_id: str = Field(..., description="Kinde User ID of the Teacher who owns this class") # Override for input
     # Student IDs are typically managed after the class is created.
     student_ids: Optional[List[uuid.UUID]] = Field(default_factory=list, description="List of student IDs enrolled in the class (Optional at creation)")
     # school_id is removed
