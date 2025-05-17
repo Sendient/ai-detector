@@ -54,6 +54,17 @@ function Layout({ children }) {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-base-200 p-4 sm:p-6 lg:p-8">
+          {/* ===== TEST DIVS START ===== */}
+          {/*
+          <div className="p-4 m-4 border-2 border-black bg-white">
+            <div className="text-custom-debug-alert p-2">This should be MAGENTA text (custom-debug-alert from theme.extend.colors)</div>
+            <div className="bg-custom-debug-bg p-2 mt-2">This should have a CYAN background (custom-debug-bg from theme.extend.colors)</div>
+            <div className="text-primary p-2 mt-2">This should be HOT PINK text (text-primary from DaisyUI theme)</div>
+            <div className="bg-primary p-2 mt-2">This should have a HOT PINK background (bg-primary from DaisyUI theme)</div>
+            <p className="mt-2">Regular text for contrast.</p>
+          </div>
+          */}
+          {/* ===== TEST DIVS END ===== */}
           <Outlet />
         </main>
       </div>
