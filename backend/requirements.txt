@@ -68,9 +68,7 @@ uvicorn==0.34.0
 watchfiles==1.0.5
 websockets==15.0.1
 yarl==1.20.0
-<<<<<<< HEAD
 asgi-lifespan>=2.1.0
-=======
 
 
 
