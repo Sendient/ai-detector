@@ -1,7 +1,7 @@
 # app/tests/core/test_security.py
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import time
 from datetime import datetime, timedelta, timezone
 from jose import jwt
@@ -53,66 +53,71 @@ MOCK_PAYLOAD = {
 async def test_get_jwks_success():
     """Test successful JWKS fetching and caching."""
     clear_jwks_cache()
-    # Mock httpx.AsyncClient().get() which is now used by get_jwks
     with patch('app.core.security.httpx.AsyncClient') as mock_async_client_constructor:
-        mock_async_client = MagicMock()
+        mock_client_instance_in_with_block = MagicMock()
+        mock_get_method = AsyncMock()
         mock_response = MagicMock()
         mock_response.json.return_value = MOCK_JWKS
         mock_response.raise_for_status.return_value = None
-        mock_async_client.get.return_value = mock_response # This should be awaited by the caller
-        
-        # Configure the context manager to return the mock_async_client
-        mock_instance = MagicMock()
-        mock_instance.__aenter__.return_value = mock_async_client
-        mock_async_client_constructor.return_value = mock_instance
+        mock_get_method.return_value = mock_response
+        mock_client_instance_in_with_block.get = mock_get_method
+
+        mock_constructor_return = MagicMock()
+        mock_constructor_return.__aenter__.return_value = mock_client_instance_in_with_block
+        mock_constructor_return.__aexit__.return_value = MagicMock()
+        mock_async_client_constructor.return_value = mock_constructor_return
 
         # First call should fetch from network
-        result = await get_jwks() # Await the call
+        result = await get_jwks()
         assert result == MOCK_JWKS
-        mock_async_client.get.assert_called_once()
+        mock_get_method.assert_called_once()
         
         # Second call should use cache
-        result = await get_jwks() # Await the call
+        result = await get_jwks()
         assert result == MOCK_JWKS
-        # The mock_async_client.get should still only be called once due to lru_cache
-        mock_async_client.get.assert_called_once()
+        mock_get_method.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_get_jwks_failure():
     """Test JWKS fetching failure handling."""
     clear_jwks_cache()
     with patch('app.core.security.httpx.AsyncClient') as mock_async_client_constructor:
-        mock_async_client = MagicMock()
-        # Make the get call raise an httpx.RequestError (or similar)
-        mock_async_client.get.side_effect = httpx.RequestError("Network error", request=None) # type: ignore
+        mock_client_instance_in_with_block = MagicMock()
+        mock_get_method = AsyncMock()
+        mock_get_method.side_effect = httpx.RequestError("Network error", request=None) # type: ignore
+        mock_client_instance_in_with_block.get = mock_get_method
 
-        mock_instance = MagicMock()
-        mock_instance.__aenter__.return_value = mock_async_client
-        mock_async_client_constructor.return_value = mock_instance
+        mock_constructor_return = MagicMock()
+        mock_constructor_return.__aenter__.return_value = mock_client_instance_in_with_block
+        mock_constructor_return.__aexit__.return_value = MagicMock()
+        mock_async_client_constructor.return_value = mock_constructor_return
         
         with pytest.raises(JWKSFetchError):
-            await get_jwks() # Await the call
+            await get_jwks()
 
 @pytest.mark.asyncio
 async def test_get_jwks_rate_limiting():
     """Test JWKS fetching rate limiting (currently expecting JWKSFetchError on retry without specific rate limit logic)."""
     clear_jwks_cache()
     with patch('app.core.security.httpx.AsyncClient') as mock_async_client_constructor:
-        mock_async_client = MagicMock()
-        mock_async_client.get.side_effect = httpx.RequestError("Network error", request=None) # type: ignore
+        mock_client_instance_in_with_block = MagicMock()
+        mock_get_method = AsyncMock()
+        mock_get_method.side_effect = httpx.RequestError("Network error", request=None) # type: ignore
+        mock_client_instance_in_with_block.get = mock_get_method
 
-        mock_instance = MagicMock()
-        mock_instance.__aenter__.return_value = mock_async_client
-        mock_async_client_constructor.return_value = mock_instance
+        mock_constructor_return = MagicMock()
+        mock_constructor_return.__aenter__.return_value = mock_client_instance_in_with_block
+        mock_constructor_return.__aexit__.return_value = MagicMock()
+        mock_async_client_constructor.return_value = mock_constructor_return
         
         # First failure
         with pytest.raises(JWKSFetchError):
-            await get_jwks() # Await the call
+            await get_jwks()
         
         # Reset the side effect for the next call if needed, or use a list of side_effects
-        mock_async_client.get.side_effect = httpx.RequestError("Network error on retry", request=None) # type: ignore
+        mock_get_method.side_effect = httpx.RequestError("Network error on retry", request=None) # type: ignore
         with pytest.raises(JWKSFetchError): 
-            await get_jwks() # Await the call
+            await get_jwks()
 
 # --- Token Validation Tests ---
 @pytest.mark.asyncio
@@ -179,45 +184,51 @@ async def test_clear_jwks_cache():
     """Test JWKS cache clearing."""
     clear_jwks_cache() 
     with patch('app.core.security.httpx.AsyncClient') as mock_async_client_constructor:
-        mock_async_client = MagicMock()
+        mock_client_instance_in_with_block = MagicMock()
+        mock_get_method = AsyncMock()
         mock_response = MagicMock()
         mock_response.json.return_value = MOCK_JWKS
         mock_response.raise_for_status.return_value = None
-        mock_async_client.get.return_value = mock_response
-
-        mock_instance = MagicMock()
-        mock_instance.__aenter__.return_value = mock_async_client
-        mock_async_client_constructor.return_value = mock_instance
+        mock_get_method.return_value = mock_response
+        mock_client_instance_in_with_block.get = mock_get_method
+        
+        mock_constructor_return = MagicMock()
+        mock_constructor_return.__aenter__.return_value = mock_client_instance_in_with_block
+        mock_constructor_return.__aexit__.return_value = MagicMock()
+        mock_async_client_constructor.return_value = mock_constructor_return
         
         # First call populates cache
-        await get_jwks() # Await
-        assert mock_async_client.get.call_count == 1, "httpx.AsyncClient.get should be called once to populate cache"
+        await get_jwks()
+        assert mock_get_method.call_count == 1, "httpx.AsyncClient.get should be called once to populate cache"
         
         # Clear cache
         clear_jwks_cache()
         
         # Next call should fetch again
-        await get_jwks() # Await
-        assert mock_async_client.get.call_count == 2, "httpx.AsyncClient.get should be called again after cache clear"
+        await get_jwks()
+        assert mock_get_method.call_count == 2, "httpx.AsyncClient.get should be called again after cache clear"
 
 @pytest.mark.asyncio
 async def test_get_jwks_cache_info():
     """Test JWKS cache info retrieval."""
     clear_jwks_cache()
     with patch('app.core.security.httpx.AsyncClient') as mock_async_client_constructor:
-        mock_async_client = MagicMock()
+        mock_client_instance_in_with_block = MagicMock()
+        mock_get_method = AsyncMock()
         mock_response = MagicMock()
         mock_response.json.return_value = MOCK_JWKS
         mock_response.raise_for_status.return_value = None
-        mock_async_client.get.return_value = mock_response
+        mock_get_method.return_value = mock_response
+        mock_client_instance_in_with_block.get = mock_get_method
 
-        mock_instance = MagicMock()
-        mock_instance.__aenter__.return_value = mock_async_client
-        mock_async_client_constructor.return_value = mock_instance
+        mock_constructor_return = MagicMock()
+        mock_constructor_return.__aenter__.return_value = mock_client_instance_in_with_block
+        mock_constructor_return.__aexit__.return_value = MagicMock()
+        mock_async_client_constructor.return_value = mock_constructor_return
         
         # Populate cache
-        await get_jwks() # Await
-        await get_jwks() # Await
+        await get_jwks()
+        await get_jwks()
         
         # Get cache info (this function itself is not async)
         cache_info = get_jwks_cache_info()

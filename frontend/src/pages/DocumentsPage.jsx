@@ -339,10 +339,16 @@ function DocumentsPage() {
               className="btn btn-primary shrink-0"
             >
               {uploadStatus === 'Uploading' ? (
-                <> <span className="loading loading-spinner loading-xs"></span> Uploading... </>
+                <> <span className="loading loading-spinner loading-xs"></span> {t('common_status_uploading')} </>
               ) : (
                 <> <ArrowUpTrayIcon className="h-4 w-4 mr-1" /> {t('common_button_upload')} </>
               )}
+            </button>
+            <button
+              onClick={() => navigate('/bulk-upload')}
+              className="btn btn-secondary shrink-0"
+            >
+              {t('documents_button_bulkUpload', 'Bulk Upload')}
             </button>
           </div>
           {uploadStatus && uploadStatus !== 'Uploading' && (

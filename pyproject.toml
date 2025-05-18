@@ -1,0 +1,20 @@
+[tool.pytest.ini_options]
+minversion = "6.0"
+python_files = "test_*.py *_test.py"
+python_classes = "Test*"
+python_functions = "test_*"
+dotenv_files = [
+    ".env",
+    "backend/.env.test",
+]
+asyncio_mode = "auto"
+log_cli = true
+log_cli_level = "WARNING"
+addopts = "-vs --log-cli-level=WARNING -p no:httpx"
+testpaths = ["tests"]
+plugins = [
+    "anyio",
+    "pytest_asyncio",
+    "pytest_dotenv",
+    "pytest_mock",
+] 

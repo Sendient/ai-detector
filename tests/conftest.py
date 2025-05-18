@@ -1,7 +1,16 @@
 # tests/conftest.py
 import pytest
 import pytest_asyncio # <-- ADD IMPORT for pytest_asyncio.fixture
+import pytest_dotenv # <-- ADDED for explicit plugin loading
 # import pytest_httpx # Add explicit import
+
+# Force plugin loading for pytest-dotenv and pytest-asyncio
+pytest_plugins = [
+    "pytest_dotenv",
+    "pytest_asyncio",
+    "pytest_mock", # Already in pytest.ini but being explicit here too
+    "anyio"        # Already in pytest.ini but being explicit here too
+]
 
 # Explicitly check for and import pytest-httpx to encourage registration
 # pytest.importorskip("pytest_httpx") # Removed this line
@@ -32,9 +41,9 @@ blob_uploader_patcher = None
 def pytest_configure(config):
     """Apply global mocks before test collection and most module imports."""
     global blob_uploader_patcher
-    logger.info("pytest_configure: Patching app.services.blob_storage.upload_file_to_blob globally.")
+    logger.info("pytest_configure: Patching backend.app.services.blob_storage.upload_file_to_blob globally.")
     # Ensure the target string is exactly how it's imported in the module to be tested
-    blob_uploader_patcher = patch('app.services.blob_storage.upload_file_to_blob', new_callable=AsyncMock)
+    blob_uploader_patcher = patch('backend.app.services.blob_storage.upload_file_to_blob', new_callable=AsyncMock)
     mock_blob_uploader = blob_uploader_patcher.start()
     # Set a default return value; tests can override this if needed by accessing the mock
     mock_blob_uploader.return_value = "conftest_default_blob.pdf"
@@ -43,7 +52,7 @@ def pytest_unconfigure(config):
     """Stop global mocks after tests are done."""
     global blob_uploader_patcher
     if blob_uploader_patcher:
-        logger.info("pytest_unconfigure: Stopping global patch for app.services.blob_storage.upload_file_to_blob.")
+        logger.info("pytest_unconfigure: Stopping global patch for backend.app.services.blob_storage.upload_file_to_blob.")
         blob_uploader_patcher.stop()
         blob_uploader_patcher = None
 # --- End Global Patcher ---
@@ -92,6 +101,13 @@ from backend.app.tasks import batch_processor
 async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
     """Creates a FastAPI app instance for each test function, mocking startup/shutdown events."""
 
+    # --- Explicitly manage event loop for this fixture ---
+    # loop = asyncio.new_event_loop()
+    # asyncio.set_event_loop(loop)
+    # --- This explicit loop management might not be needed with asyncio_mode = auto or strict ---
+    # --- and can sometimes conflict if pytest-asyncio is already managing the loop. ---
+    # --- Reverted this change as it's generally handled by pytest-asyncio ---
+
     # --- Mock Lifecycle Functions BEFORE app import/lifespan ---
     logger.info("Mocking DB connect/disconnect and batch processor for app fixture...")
 
@@ -124,8 +140,8 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
     try:
         # Use asgi-lifespan to manage the app's lifespan events within the test
         # Timeout can likely be reduced now mocks are in place, but 15s is safe.
-        async with LifespanManager(fastapi_app, startup_timeout=15, shutdown_timeout=15):
-            yield fastapi_app
+        async with LifespanManager(fastapi_app, startup_timeout=15, shutdown_timeout=15) as manager: # Added 'as manager'
+            yield manager.app # Yield the app from the manager
     except TimeoutError:
         # This shouldn't happen now with mocked handlers
         logger.error("LifespanManager timed out unexpectedly even with mocked handlers.")
@@ -136,25 +152,29 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
 
 
 @pytest_asyncio.fixture(scope="function")
-async def db(app: FastAPI) -> AsyncIOMotorClient:
-    # --- This fixture might need adjustment --- 
-    # Since the app fixture now mocks connect_to_mongo and get_database,
-    # this db fixture might not be necessary for tests that *only* use the app fixture
-    # and mock CRUD operations directly.
-    # However, if some tests *do* need a real (but separate) test DB connection,
-    # this fixture can remain, but it will establish its *own* connection,
-    # independent of the (mocked) connection in the app's lifecycle.
-    # Consider if tests using this fixture should use the regular 'app' fixture
-    # or the 'app_with_mock_auth' fixture depending on their needs.
-    
-    logger.warning("The 'db' fixture provides a REAL connection to the test DB, separate from the mocked app lifecycle.")
-    if not settings.MONGODB_URL:
-        pytest.fail("MONGODB_URL environment variable is not set for tests.")
+async def db() -> AsyncIOMotorClient:
+    """Provides a dedicated test database session that is dropped after each test."""
+    # Ensure that pytest-dotenv has loaded .env and backend/.env.test
+    # MONGO_URL_TEST and MONGO_TEST_DB_NAME should be available in settings
 
-    test_db_name = settings.DB_NAME + "_test_via_db_fixture" # Make name distinct
-    logger.info(f"Connecting to MongoDB test database via 'db' fixture: {test_db_name}")
+    if not settings.MONGO_URL_TEST:
+        pytest.fail(
+            "MONGO_URL_TEST environment variable is not set or not loaded into settings. "
+            "Ensure it is defined in .env or backend/.env.test and loaded by core.config.py."
+        )
+    if not settings.MONGO_TEST_DB_NAME:
+        pytest.fail(
+            "MONGO_TEST_DB_NAME environment variable is not set or not loaded into settings. "
+            "Ensure it is defined in .env or backend/.env.test and loaded by core.config.py."
+        )
 
-    client = AsyncIOMotorClient(settings.MONGODB_URL, serverSelectionTimeoutMS=5000) # Add timeout
+    # Use the specific test database name from settings
+    test_db_name = settings.MONGO_TEST_DB_NAME 
+    mongo_url_for_tests = settings.MONGO_URL_TEST
+
+    logger.info(f"Connecting to MongoDB test database via 'db' fixture: {test_db_name} using URL ending with ...{mongo_url_for_tests[-30:]}")
+
+    client = AsyncIOMotorClient(mongo_url_for_tests, serverSelectionTimeoutMS=5000)
     try:
         # Check connection
         await client.admin.command('ping')

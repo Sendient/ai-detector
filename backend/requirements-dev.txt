@@ -66,10 +66,10 @@ yarl==1.20.0
 passlib[bcrypt]
 
 # requirements-dev.txt
-pytest>=6.0
-pytest-asyncio
 httpx
 # Add other development/testing specific dependencies here
 # e.g., pytest-cov for coverage, flake8, black, mypy, etc.
+asgi-lifespan
+pytest-mock
 
 # http://localhost:5173/?code=BHEFSLO9AlbRy5scOQtNasrf-MkzM9uTjS6SWKsIeXU.tYDsbvCaWZsA8h36dNSlU9oqNj_gvq5GFj4YYzYEXoQ&scope=email%20profile%20openid%20offline&state=eyJraW5kZSI6eyJldmVudCI6ImxvZ2luIn19
