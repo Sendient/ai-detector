@@ -11,7 +11,7 @@ from backend.app.models.teacher import TeacherCreate # Assuming model is here
 from backend.app.core.config import settings # Correct: Import the settings instance
 from backend.app.models.teacher import TeacherCreate, Teacher # Correct path: models directory
 # Import the get_current_user_payload to use as a key for dependency_overrides
-from app.core.security import get_current_user_payload 
+from backend.app.core.security import get_current_user_payload # UPDATED IMPORT PATH
 from fastapi import FastAPI, status, Depends
 from pytest_mock import MockerFixture
 from backend.app.models.teacher import Teacher # Import Teacher model for mock return
@@ -45,7 +45,7 @@ def sample_teacher_payload() -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_create_teacher_success(
-    app: FastAPI, # Use the standard 'app' fixture
+    managed_fastapi_app: FastAPI, # Use the standard 'app' fixture
     mocker: MockerFixture,
     sample_teacher_payload: dict[str, Any]
 ):
@@ -54,7 +54,7 @@ async def test_create_teacher_success(
 
     # Define a mock payload similar to what Kinde would provide
     default_mock_payload = {
-        "sub": "mock_kinde_user_id_from_test_patch", 
+        "sub": f"kinde_id_create_success_{uuid.uuid4()}", # Use a unique Kinde ID
         "iss": settings.KINDE_DOMAIN or "mock_issuer",
         "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
         "exp": time.time() + 3600, # Use time.time()
@@ -74,7 +74,7 @@ async def test_create_teacher_success(
     # Mock create_teacher to return a simulated Teacher object
     # Create a dictionary matching the Teacher response model structure
     mock_created_teacher_dict = {
-        "id": default_mock_payload["sub"], # Use 'id' and match the mock auth sub
+        "kinde_id": default_mock_payload["sub"], # Use 'id' and match the mock auth sub
         "first_name": sample_teacher_payload["first_name"],
         "last_name": sample_teacher_payload["last_name"],
         "email": sample_teacher_payload["email"],
@@ -100,7 +100,7 @@ async def test_create_teacher_success(
     }
 
     # Use the standard 'app' fixture
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client:
         response = await client.post(
             f"{api_prefix}/teachers/",
             json=sample_teacher_payload,
@@ -153,12 +153,12 @@ async def test_create_teacher_success(
 
 @pytest.mark.asyncio
 async def test_get_current_teacher_success(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture
 ):
     """Test successfully fetching the current authenticated user's teacher profile."""
     api_prefix = settings.API_V1_PREFIX
-    test_kinde_id = "get_teacher_test_kinde_id"
+    test_kinde_id = f"kinde_id_get_current_teacher_{uuid.uuid4()}" # Use a unique Kinde ID
 
     # Define a mock payload for the authenticated user
     default_mock_payload = {
@@ -176,7 +176,7 @@ async def test_get_current_teacher_success(
     # Mock the CRUD function to return an existing teacher
     # Simulate the Teacher object that would be returned from the DB
     mock_teacher_from_db = Teacher(
-        id=test_kinde_id, # Ensure this matches the mock auth sub
+        kinde_id=test_kinde_id, # ADD THIS - kinde_id is the string
         email=f"get_test.{int(time.time())}@example.com",
         first_name="GetTest",
         last_name="User",
@@ -198,7 +198,7 @@ async def test_get_current_teacher_success(
     get_url = f"{api_prefix}/teachers/me"
 
     # Use the HTTPX client provided by the 'app' fixture's lifespan manager
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://test") as client:
         response = await client.get(get_url, headers=headers)
 
     # --- Assertions ---
@@ -216,7 +216,7 @@ async def test_get_current_teacher_success(
 
 @pytest.mark.asyncio
 async def test_get_teacher_not_found(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture
 ):
     """Test requesting the current user's profile when it does not exist (expect 404)."""
@@ -243,7 +243,7 @@ async def test_get_teacher_not_found(
     headers = {"Authorization": "Bearer dummytoken"} # Token content doesn't matter
     get_url = f"{api_prefix}/teachers/me"
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://test") as client:
         response = await client.get(get_url, headers=headers)
 
     # --- Assertions ---
@@ -259,12 +259,12 @@ async def test_get_teacher_not_found(
 
 @pytest.mark.asyncio
 async def test_update_teacher_success(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture
 ):
     """Test successfully updating an existing teacher profile via PUT /me."""
     api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_update = "update_teacher_test_kinde_id"
+    test_kinde_id_update = f"kinde_id_update_teacher_{uuid.uuid4()}" # Use a unique Kinde ID
 
     # Mock authentication
     default_mock_payload = {
@@ -279,7 +279,7 @@ async def test_update_teacher_success(
 
     # Simulate the *existing* teacher data in the DB
     existing_teacher_in_db = Teacher(
-        id=test_kinde_id_update,
+        kinde_id=test_kinde_id_update, # ADD THIS
         email=f"update_test_initial.{int(time.time())}@example.com",
         first_name="UpdateTest",
         last_name="UserInitial",
@@ -320,7 +320,7 @@ async def test_update_teacher_success(
     }
     put_url = f"{api_prefix}/teachers/me"
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://test") as client:
         response = await client.put(put_url, headers=headers, json=update_payload)
 
     # --- Assertions ---
@@ -344,13 +344,13 @@ async def test_update_teacher_success(
 
 @pytest.mark.asyncio
 async def test_create_teacher_via_put_success(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture,
     sample_teacher_payload: dict[str, Any] # Re-use for new teacher data
 ):
     """Test successfully creating a new teacher profile via PUT /me when one doesn't exist."""
     api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_create_put = "create_put_teacher_test_kinde_id"
+    test_kinde_id_create_put = f"kinde_id_create_put_{uuid.uuid4()}" # Use a unique Kinde ID
 
     # Mock authentication (including email, which is needed for creation)
     default_mock_payload = {
@@ -381,7 +381,7 @@ async def test_create_teacher_via_put_success(
 
     # Simulate the teacher object that will be created and returned
     newly_created_teacher_in_db = Teacher(
-        id=test_kinde_id_create_put,
+        kinde_id=test_kinde_id_create_put, # ADD THIS
         email=sample_teacher_payload["email"], # Email from token is used
         first_name=create_payload_for_put["first_name"],
         last_name=create_payload_for_put["last_name"],
@@ -404,7 +404,7 @@ async def test_create_teacher_via_put_success(
     }
     put_url = f"{api_prefix}/teachers/me"
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://test") as client:
         response = await client.put(put_url, headers=headers, json=create_payload_for_put)
 
     # --- Assertions ---
@@ -426,12 +426,12 @@ async def test_create_teacher_via_put_success(
 
 @pytest.mark.asyncio
 async def test_delete_teacher_success(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture
 ):
     """Test successfully deleting an existing teacher profile via DELETE /me."""
     api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_delete = "delete_teacher_test_kinde_id"
+    test_kinde_id_delete = f"kinde_id_delete_teacher_{uuid.uuid4()}" # Use a unique Kinde ID
 
     # Mock authentication
     default_mock_payload = {
@@ -446,35 +446,31 @@ async def test_delete_teacher_success(
 
     # Simulate an existing teacher to be deleted
     # We don't need the full teacher object here, just need the mock to confirm existence
-    mocker.patch('backend.app.api.v1.endpoints.teachers.crud.get_teacher_by_kinde_id', return_value=Teacher(id=test_kinde_id_delete, email="del@test.com", first_name="Del", last_name="Me")) # Simplified mock
-
-    # Mock delete_teacher_by_kinde_id to indicate success (e.g., return True or a count > 0)
-    # The exact return value depends on your CRUD implementation for delete.
-    # If it returns the deleted object or None on success/failure, adjust accordingly.
-    # For a 204 response, the endpoint usually checks if the delete op was successful.
-    delete_mock = mocker.patch('backend.app.api.v1.endpoints.teachers.crud.delete_teacher', return_value=True) # Assume returns True on success
+    mocker.patch('backend.app.api.v1.endpoints.teachers.crud.get_teacher_by_kinde_id', return_value=Teacher(kinde_id=test_kinde_id_delete, email="del@test.com", first_name="Del", last_name="Me", school_name="Any School", country="US", state_county="CA")) # Simplified mock, ensure all required Teacher fields
+    # Mock the delete operation
+    mock_delete_teacher = mocker.patch('backend.app.api.v1.endpoints.teachers.crud.delete_teacher_by_kinde_id', return_value=True) # Assume it returns True on success
 
     # --- Make the Request ---
     headers = {"Authorization": "Bearer dummytoken"}
     delete_url = f"{api_prefix}/teachers/me"
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://test") as client:
         response = await client.delete(delete_url, headers=headers)
-
+        
     # --- Assertions ---
     # DELETE should return 204 No Content on success
     assert response.status_code == status.HTTP_204_NO_CONTENT, \
         f"Expected 204 No Content, got {response.status_code}. Response: {response.text}"
 
-    # Ensure the delete CRUD function was called with the correct Kinde ID
-    delete_mock.assert_called_once_with(kinde_id=test_kinde_id_delete)
+    # Ensure the delete CRUD function was called correctly with the target Kinde ID
+    mock_delete_teacher.assert_called_once_with(kinde_id=test_kinde_id_delete)
 
 
 # --- Test DELETE /me (Teacher Not Found) ---
 
 @pytest.mark.asyncio
 async def test_delete_teacher_not_found(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture
 ):
     """Test attempting to delete a teacher profile via DELETE /me when it does not exist."""
@@ -499,7 +495,7 @@ async def test_delete_teacher_not_found(
     headers = {"Authorization": "Bearer dummytoken"}
     delete_url = f"{api_prefix}/teachers/me"
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://test") as client:
         response = await client.delete(delete_url, headers=headers)
 
     # --- Assertions ---
@@ -514,13 +510,13 @@ async def test_delete_teacher_not_found(
 
 @pytest.mark.asyncio
 async def test_create_teacher_conflict(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture,
     sample_teacher_payload: dict[str, Any] # Re-use for structure
 ):
     """Test creating a teacher when a profile already exists for the user (expect 409)."""
     api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_conflict = "conflict_teacher_kinde_id"
+    test_kinde_id_conflict = f"kinde_id_conflict_teacher_{uuid.uuid4()}" # Use a unique Kinde ID
 
     # Mock authentication
     default_mock_payload = {
@@ -535,10 +531,13 @@ async def test_create_teacher_conflict(
 
     # Mock get_teacher_by_kinde_id to return an existing teacher, simulating a conflict
     existing_teacher = Teacher(
-        id=test_kinde_id_conflict,
+        kinde_id=test_kinde_id_conflict, # ADD THIS
         email=sample_teacher_payload["email"],
         first_name=sample_teacher_payload["first_name"],
         last_name=sample_teacher_payload["last_name"],
+        school_name=sample_teacher_payload.get("school_name", "Conflict School"), # Ensure required fields
+        country=sample_teacher_payload.get("country", "US"),
+        state_county=sample_teacher_payload.get("state_county", "CA")
         # ... other fields can be minimal as we only need to simulate existence
     )
     mocker.patch('backend.app.api.v1.endpoints.teachers.crud.get_teacher_by_kinde_id', return_value=existing_teacher)
@@ -552,7 +551,7 @@ async def test_create_teacher_conflict(
         "Content-Type": "application/json"
     }
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client:
         response = await client.post(
             f"{api_prefix}/teachers/",
             json=sample_teacher_payload, # Attempt to create with this data
@@ -570,7 +569,7 @@ async def test_create_teacher_conflict(
 
 @pytest.mark.asyncio
 async def test_create_teacher_missing_required_fields(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture,
     sample_teacher_payload: dict[str, Any] # Use for base payload
 ):
@@ -610,7 +609,7 @@ async def test_create_teacher_missing_required_fields(
         "Content-Type": "application/json"
     }
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with httpx.AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client:
         response = await client.post(
             f"{api_prefix}/teachers/",
             json=payload_missing_school,
@@ -1014,7 +1013,7 @@ async def test_get_teacher_by_id_as_admin_success(
     # 2. Prepare mock data for the target teacher and mock crud.get_teacher_by_kinde_id
     now = datetime.now(timezone.utc)
     target_teacher_data = Teacher(
-        id=target_teacher_kinde_id, # This is the Kinde ID, mapped to _id in DB model
+        kinde_id=target_teacher_kinde_id, # This is the Kinde ID, mapped to _id in DB model
         email="target_teacher@example.com",
         first_name="Target",
         last_name="Teacher",
@@ -1165,7 +1164,7 @@ async def test_get_teacher_by_id_as_non_admin_forbidden(
     mocked_crud_get_by_kinde_id = mocker.patch(
         'backend.app.api.v1.endpoints.teachers.crud.get_teacher_by_kinde_id',
         # Return a dummy teacher if it were called, though it shouldn't be
-        return_value=Teacher(id=target_teacher_kinde_id, email="dummy@example.com", first_name="Dummy", last_name="User")
+        return_value=Teacher(kinde_id=target_teacher_kinde_id, email="dummy@example.com", first_name="Dummy", last_name="User")
     )
 
     headers = {
@@ -1238,7 +1237,7 @@ async def test_update_teacher_by_id_as_admin_success(
     # 2. Simulate the existing teacher data in the DB (before update)
     now = datetime.now(timezone.utc)
     existing_teacher_in_db = Teacher(
-        id=target_teacher_kinde_id,
+        kinde_id=target_teacher_kinde_id, # ADD THIS
         email=f"target_before_update.{int(time.time())}@example.com",
         first_name="TargetFirstNameInitial",
         last_name="TargetLastNameInitial",
@@ -1399,7 +1398,7 @@ async def test_delete_teacher_by_id_as_admin_success(
     # Mock get_teacher_by_kinde_id to simulate the teacher exists before deletion
     # (Many DELETE endpoints check for existence first and return 404 if not found)
     mock_existing_teacher = Teacher(
-        id=target_teacher_kinde_id_to_delete,
+        kinde_id=target_teacher_kinde_id_to_delete,
         email="delete_target@example.com",
         first_name="TargetDelete",
         last_name="User"
@@ -1459,7 +1458,7 @@ protected_endpoints_config = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method, url_suffix, needs_kinde_id, body", protected_endpoints_config)
 async def test_protected_endpoints_unauthorized_access(
-    app: FastAPI, # Standard app fixture, not app_with_mock_auth
+    managed_fastapi_app: FastAPI, # Standard app fixture, not app_with_mock_auth
     mocker: MockerFixture,
     method: str,
     url_suffix: str,
@@ -1481,7 +1480,7 @@ async def test_protected_endpoints_unauthorized_access(
     full_url = f"{base_url_path}{formatted_url_suffix}"
 
     # --- Scenario 1: No token ---
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client:
         response_no_token = None
         if method == "GET":
             response_no_token = await client.get(full_url)
@@ -1522,7 +1521,7 @@ async def test_protected_endpoints_unauthorized_access(
     
     headers_with_bad_token = {"Authorization": "Bearer a_token_that_will_be_mocked_as_invalid"}
     
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client:
         response_invalid_token = None
         if method == "GET":
             response_invalid_token = await client.get(full_url, headers=headers_with_bad_token)
@@ -1591,7 +1590,7 @@ missing_claims_config = [
     missing_claims_config
 )
 async def test_protected_endpoints_missing_claims(
-    app: FastAPI,
+    managed_fastapi_app: FastAPI,
     mocker: MockerFixture,
     method_type: str,
     url_suffix: str,
@@ -1620,10 +1619,10 @@ async def test_protected_endpoints_missing_claims(
         # If 'sub' is what's missing, this path might not be hit as expected, but the test is for missing 'sub'.
         # The endpoint will fail before trying to fetch if 'sub' is missing from token.
         # If 'sub' IS present in token (e.g. testing missing email on update), this mock is relevant.
-        existing_teacher_id = mock_token_payload.get("sub", "dummy_id_for_put_update")
+        existing_teacher_id = mock_token_payload.get("sub", f"dummy_id_for_put_update_{uuid.uuid4()}")
         # Corrected: Provide all required fields for Teacher model
         mock_existing_teacher = Teacher(
-            id=existing_teacher_id,
+            kinde_id=existing_teacher_id, # ADD THIS - kinde_id is the string ID
             email="exists@example.com",
             first_name="ExistsFirstName",
             last_name="ExistsLastName", # Added missing last_name
@@ -1645,7 +1644,7 @@ async def test_protected_endpoints_missing_claims(
 
     headers = {"Authorization": "Bearer a_valid_token_format_wise_but_deficient_payload"}
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client:
         response = None
         if method == "GET":
             response = await client.get(full_url, headers=headers)

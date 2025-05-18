@@ -35,9 +35,9 @@ def generate_unique_kinde_id(prefix: str = "user_kinde_id") -> str:
 
 @pytest.mark.asyncio
 async def test_upload_document_success(
-    app: FastAPI, # Using the standard app fixture, will override auth manually
-    mocker: MockerFixture, # Keep for other mocks 
-    monkeypatch: pytest.MonkeyPatch # Can be removed if no longer used by this test
+    managed_fastapi_app: FastAPI, # RENAMED FIXTURE
+    mocker: MockerFixture, 
+    monkeypatch: pytest.MonkeyPatch
 ):
     """
     Test successful document upload (POST /documents/upload).
@@ -58,14 +58,11 @@ async def test_upload_document_success(
         "roles": ["teacher"] 
     }
     
-    # Override the dependency directly for this test's app instance
-    # Assuming 'app' fixture provides a fresh app instance for each test,
-    # or that pytest handles teardown correctly.
     async def override_get_current_user_payload() -> Dict[str, Any]:
         return mock_auth_payload
     
-    original_override = app.dependency_overrides.get(get_current_user_payload)
-    app.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
+    original_override = managed_fastapi_app.dependency_overrides.get(get_current_user_payload) # USE RENAMED FIXTURE
+    managed_fastapi_app.dependency_overrides[get_current_user_payload] = override_get_current_user_payload # USE RENAMED FIXTURE
 
     # 2. Prepare Test Data
     student_uuid = uuid.uuid4()
@@ -145,7 +142,7 @@ async def test_upload_document_success(
     }
 
     # 5. Make the API Request
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client: # USE RENAMED FIXTURE
         response = await client.post(
             upload_url,
             data=form_data, 
@@ -213,13 +210,13 @@ async def test_upload_document_success(
 
     # Clean up dependency override
     if original_override:
-        app.dependency_overrides[get_current_user_payload] = original_override
+        managed_fastapi_app.dependency_overrides[get_current_user_payload] = original_override # USE RENAMED FIXTURE
     else:
-        del app.dependency_overrides[get_current_user_payload]
+        del managed_fastapi_app.dependency_overrides[get_current_user_payload] # USE RENAMED FIXTURE
 
 @pytest.mark.asyncio
 async def test_upload_document_invalid_file_type(
-    app: FastAPI, mocker: MockerFixture # app fixture for the FastAPI instance, mocker for other mocks
+    managed_fastapi_app: FastAPI, mocker: MockerFixture # UPDATED PARAMETER NAME
 ):
     """Test document upload with an unsupported file type (e.g., .zip)."""
     api_prefix = settings.API_V1_PREFIX
@@ -236,8 +233,8 @@ async def test_upload_document_invalid_file_type(
     async def override_auth(): 
         return mock_auth_payload
     
-    original_override = app.dependency_overrides.get(get_current_user_payload)
-    app.dependency_overrides[get_current_user_payload] = override_auth
+    original_override = managed_fastapi_app.dependency_overrides.get(get_current_user_payload) # USE RENAMED FIXTURE
+    managed_fastapi_app.dependency_overrides[get_current_user_payload] = override_auth # USE RENAMED FIXTURE
 
     # 2. Prepare Test Data
     student_uuid = uuid.uuid4()
@@ -260,7 +257,7 @@ async def test_upload_document_invalid_file_type(
     }
 
     # 5. Make the API Request
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client: # USE RENAMED FIXTURE
         response = await client.post(
             upload_url,
             data=form_data,
@@ -284,13 +281,13 @@ async def test_upload_document_invalid_file_type(
 
     # 7. Clean up dependency override
     if original_override:
-        app.dependency_overrides[get_current_user_payload] = original_override
+        managed_fastapi_app.dependency_overrides[get_current_user_payload] = original_override # USE RENAMED FIXTURE
     else:
-        del app.dependency_overrides[get_current_user_payload]
+        del managed_fastapi_app.dependency_overrides[get_current_user_payload] # USE RENAMED FIXTURE
 
 @pytest.mark.asyncio
 async def test_upload_document_too_large(
-    app: FastAPI, mocker: MockerFixture
+    managed_fastapi_app: FastAPI, mocker: MockerFixture # UPDATED PARAMETER NAME
 ):
     """Test document upload with a file exceeding the default size limit (e.g., > 1MB)."""
     api_prefix = settings.API_V1_PREFIX
@@ -307,8 +304,8 @@ async def test_upload_document_too_large(
     async def override_auth(): 
         return mock_auth_payload
     
-    original_override = app.dependency_overrides.get(get_current_user_payload)
-    app.dependency_overrides[get_current_user_payload] = override_auth
+    original_override = managed_fastapi_app.dependency_overrides.get(get_current_user_payload) # USE RENAMED FIXTURE
+    managed_fastapi_app.dependency_overrides[get_current_user_payload] = override_auth # USE RENAMED FIXTURE
 
     # 2. Prepare Test Data - Create a file larger than 1MB
     # Starlette's default max_file_size for MultiPartParser is 1MB (1024 * 1024 bytes)
@@ -383,7 +380,7 @@ async def test_upload_document_too_large(
     }
 
     # 5. Make the API Request
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client: # USE RENAMED FIXTURE
         response = await client.post(
             upload_url,
             data=form_data,
@@ -424,13 +421,13 @@ async def test_upload_document_too_large(
 
     # 7. Clean up dependency override
     if original_override:
-        app.dependency_overrides[get_current_user_payload] = original_override
+        managed_fastapi_app.dependency_overrides[get_current_user_payload] = original_override # USE RENAMED FIXTURE
     else:
-        del app.dependency_overrides[get_current_user_payload]
+        del managed_fastapi_app.dependency_overrides[get_current_user_payload] # USE RENAMED FIXTURE
 
 @pytest.mark.asyncio
 async def test_upload_document_no_auth(
-    app: FastAPI, mocker: MockerFixture
+    managed_fastapi_app: FastAPI, mocker: MockerFixture # UPDATED PARAMETER NAME
 ):
     """Test document upload attempt without authentication."""
     api_prefix = settings.API_V1_PREFIX
@@ -469,7 +466,7 @@ async def test_upload_document_no_auth(
     # The `app` fixture used here will have the standard `get_current_user_payload` dependency.
     # Since no token is provided, FastAPI should return a 401/403.
     # By default, if SecurityScopes are used and no token is provided, it's often 401.
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client: # USE RENAMED FIXTURE
         response = await client.post(
             upload_url,
             data=form_data,
@@ -497,7 +494,7 @@ async def test_upload_document_no_auth(
 
 @pytest.mark.asyncio
 async def test_get_document_status_success(
-    app: FastAPI, mocker: MockerFixture
+    managed_fastapi_app: FastAPI, mocker: MockerFixture # UPDATED PARAMETER NAME
 ):
     """Test successfully getting the status of an uploaded document."""
     api_prefix = settings.API_V1_PREFIX
@@ -515,8 +512,8 @@ async def test_get_document_status_success(
     async def override_auth(): 
         return mock_auth_payload
     
-    original_override = app.dependency_overrides.get(get_current_user_payload)
-    app.dependency_overrides[get_current_user_payload] = override_auth
+    original_override = managed_fastapi_app.dependency_overrides.get(get_current_user_payload) # USE RENAMED FIXTURE
+    managed_fastapi_app.dependency_overrides[get_current_user_payload] = override_auth # USE RENAMED FIXTURE
 
     # 2. Prepare Mock Document Data
     # This is what crud.get_document is expected to return
@@ -547,7 +544,7 @@ async def test_get_document_status_success(
     )
 
     # 4. Make the API Request
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=managed_fastapi_app), base_url="http://testserver") as client: # USE RENAMED FIXTURE
         response = await client.get(status_url)
 
     # 5. Assertions
@@ -569,9 +566,9 @@ async def test_get_document_status_success(
 
     # 6. Clean up dependency override
     if original_override:
-        app.dependency_overrides[get_current_user_payload] = original_override
+        managed_fastapi_app.dependency_overrides[get_current_user_payload] = original_override # USE RENAMED FIXTURE
     else:
-        del app.dependency_overrides[get_current_user_payload]
+        del managed_fastapi_app.dependency_overrides[get_current_user_payload] # USE RENAMED FIXTURE
 
 # @pytest.mark.asyncio
 # async def test_get_document(test_client: AsyncClient):

@@ -75,12 +75,14 @@ if str(backend_root) not in sys.path:
 
 # --- Import App and Settings ---
 try:
-    # REMOVED: from backend.app.main import app as fastapi_app
+    # Attempt to import the main FastAPI app instance
+    # This 'fastapi_app' is the actual FastAPI instance from your main application
+    from backend.app.main import _original_fastapi_app as fastapi_app_instance # UPDATED IMPORT
     from backend.app.core.config import settings # Import settings
-    from app.core.security import get_current_user_payload
-    print("Successfully imported 'settings' and 'get_current_user_payload' from backend modules") # UPDATED message
+    from backend.app.core.security import get_current_user_payload # For dependency override key
+    print("Successfully imported '_original_fastapi_app', 'settings' and 'get_current_user_payload' from backend modules")
 except ImportError as e:
-    print(f"Error importing backend modules: {e}")
+    print(f"Conftest Import Error: Failed to import from backend modules: {e}")
     # Define dummy settings to allow tests to load if main settings fail
     # REMOVED: fastapi_app = FastAPI(title="Dummy App for Test Loading")
     class DummySettings:
@@ -98,7 +100,7 @@ from backend.app.tasks import batch_processor
 
 @pytest_asyncio.fixture(scope="function")
 # No event_loop needed with pytest-asyncio auto mode
-async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
+async def managed_fastapi_app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
     """Creates a FastAPI app instance for each test function, mocking startup/shutdown events."""
 
     # --- Explicitly manage event loop for this fixture ---
@@ -192,7 +194,7 @@ async def db() -> AsyncIOMotorClient:
 
 
 @pytest_asyncio.fixture(scope="function")
-async def app_with_mock_auth(app: FastAPI) -> FastAPI:
+async def app_with_mock_auth(managed_fastapi_app: FastAPI) -> FastAPI:
     """Fixture that provides the FastAPI app with auth dependency overridden."""
     
     default_mock_payload = {
@@ -211,16 +213,16 @@ async def app_with_mock_auth(app: FastAPI) -> FastAPI:
     logger.info(f"Applying dependency override for {get_current_user_payload} in app_with_mock_auth")
     # Store if there was a pre-existing override for this key, though unlikely with function scope
     # pre_existing_override = app.dependency_overrides.get(get_current_user_payload)
-    app.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
+    managed_fastapi_app.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
     
-    yield app
+    yield managed_fastapi_app
     
     logger.info(f"Cleaning up dependency override for {get_current_user_payload} in app_with_mock_auth")
     # More robust cleanup: only delete if we added it, or restore if it pre-existed.
     # For simplicity with function scope, just delete the key we set.
-    if get_current_user_payload in app.dependency_overrides and \
-       app.dependency_overrides[get_current_user_payload] == override_get_current_user_payload:
-        del app.dependency_overrides[get_current_user_payload]
+    if get_current_user_payload in managed_fastapi_app.dependency_overrides and \
+       managed_fastapi_app.dependency_overrides[get_current_user_payload] == override_get_current_user_payload:
+        del managed_fastapi_app.dependency_overrides[get_current_user_payload]
     # elif pre_existing_override: # If we wanted to restore a more complex pre-existing state
     #     app.dependency_overrides[get_current_user_payload] = pre_existing_override
 
