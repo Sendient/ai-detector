@@ -48,7 +48,7 @@ export default {
     daisyui: {
         themes: [
             {
-                sendient_theme: {
+                light: {
                     "primary": "#7070FF",
                     "primary-content": "#FFFFFF",
                     "secondary": "#f000b8",
