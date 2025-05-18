@@ -11,12 +11,13 @@ from pytest_mock import MockerFixture
 from io import BytesIO
 from datetime import datetime, timezone # Added timezone
 
-import app.services.blob_storage as blob_storage_module # ALIASED IMPORT
+import backend.app.services.blob_storage as blob_storage_module # NEW
 
 # Import app and settings (adjust path if your conftest modifies sys.path differently)
-from backend.app.main import app as fastapi_app 
+# from backend.app.main import app as fastapi_app # OLD - Unused if app fixture is used
 from backend.app.core.config import settings
-from app.core.security import get_current_user_payload # For dependency override
+# from app.core.security import get_current_user_payload # OLD
+from backend.app.core.security import get_current_user_payload # NEW - For dependency override
 from backend.app.models.document import Document, DocumentStatus # For asserting response and types
 from backend.app.models.result import Result, ResultStatus # For asserting result creation
 from backend.app.models.enums import FileType # For asserting file type
