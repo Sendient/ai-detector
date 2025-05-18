@@ -16,22 +16,22 @@ import re # Import re for word count calculation
 import asyncio # Added for asyncio.to_thread
 
 # Import models
-from app.models.document import Document, DocumentCreate, DocumentUpdate
-from app.models.result import Result, ResultCreate, ResultUpdate, ParagraphResult
-from app.models.enums import DocumentStatus, ResultStatus, FileType, BatchPriority, BatchStatus
-from app.models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
+from ....models.document import Document, DocumentCreate, DocumentUpdate
+from ....models.result import Result, ResultCreate, ResultUpdate, ParagraphResult
+from ....models.enums import DocumentStatus, ResultStatus, FileType, BatchPriority, BatchStatus
+from ....models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
 
 # Import CRUD functions
-from app.db import crud
+from ....db import crud
 
 # Import Authentication Dependency
-from app.core.security import get_current_user_payload
+from ....core.security import get_current_user_payload
 
 # Import Blob Storage Service
-from app.services.blob_storage import upload_file_to_blob, download_blob_as_bytes
+from ....services.blob_storage import upload_file_to_blob, download_blob_as_bytes
 
 # Import Text Extraction Service
-from app.services.text_extraction import extract_text_from_bytes
+from ....services.text_extraction import extract_text_from_bytes
 
 # Import external API URL from config (assuming you add it there)
 # from ....core.config import ML_API_URL, ML_RECAPTCHA_SECRET # Placeholder - add these to config.py

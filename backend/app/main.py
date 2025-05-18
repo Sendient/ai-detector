@@ -13,24 +13,24 @@ import os
 
 # Import config and database lifecycle functions
 # Adjust path '.' based on where main.py is relative to 'core' and 'db'
-from app.core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
-from app.db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
+from .core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
+from .db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
 
 # Import all endpoint routers
 # Adjust path '.' based on where main.py is relative to 'api'
 # Includes routers for all entities: schools, teachers, class_groups, students, assignments, documents, results
-from app.api.v1.endpoints.schools import router as schools_router
-from app.api.v1.endpoints.teachers import router as teachers_router
-from app.api.v1.endpoints.class_groups import router as class_groups_router
-from app.api.v1.endpoints.students import router as students_router
+from .api.v1.endpoints.schools import router as schools_router
+from .api.v1.endpoints.teachers import router as teachers_router
+from .api.v1.endpoints.class_groups import router as class_groups_router
+from .api.v1.endpoints.students import router as students_router
 # from app.api.v1.endpoints.assignments import router as assignments_router # COMMENTED OUT
-from app.api.v1.endpoints.documents import router as documents_router
-from app.api.v1.endpoints.results import router as results_router
-from app.api.v1.endpoints.dashboard import router as dashboard_router
-from app.api.v1.endpoints.analytics import router as analytics_router
+from .api.v1.endpoints.documents import router as documents_router
+from .api.v1.endpoints.results import router as results_router
+from .api.v1.endpoints.dashboard import router as dashboard_router
+from .api.v1.endpoints.analytics import router as analytics_router
 
 # Import batch processor
-from app.tasks import batch_processor
+from .tasks import batch_processor
 
 # Setup logging
 logger = logging.getLogger(__name__) # Use main module logger or project-specific
@@ -138,7 +138,7 @@ async def startup_event():
     # Start background tasks if any (like BatchProcessor)
     try:
         # Assuming BatchProcessor is designed to be started and run in the background
-        from app.tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
+        from .tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
         processor = BatchProcessor()
         asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
         logger.info("Batch processor started")

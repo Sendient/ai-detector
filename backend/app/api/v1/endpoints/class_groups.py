@@ -7,11 +7,11 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends # Removed ,
 from pydantic import ValidationError # Added ValidationError
 
 # Import Pydantic models for ClassGroup
-from app.models.class_group import ClassGroup, ClassGroupCreate, ClassGroupUpdate
+from ....models.class_group import ClassGroup, ClassGroupCreate, ClassGroupUpdate
 # Import CRUD functions for ClassGroup
-from app.db import crud
+from ....db import crud
 # Import the authentication dependency
-from app.core.security import get_current_user_payload
+from ....core.security import get_current_user_payload
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

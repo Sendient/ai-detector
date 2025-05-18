@@ -6,14 +6,14 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, status, Query, Depends
 
 # Import models
-from app.models.result import Result
-from app.models.document import Document # Needed for auth check
+from ....models.result import Result
+from ....models.document import Document # Needed for auth check
 
 # Import CRUD functions
-from app.db import crud
+from ....db import crud
 
 # Import Authentication Dependency
-from app.core.security import get_current_user_payload
+from ....core.security import get_current_user_payload
 
 # Setup logger
 logger = logging.getLogger(__name__)

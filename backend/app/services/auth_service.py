@@ -2,9 +2,9 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.core.config import settings
-from app.models.teacher import TeacherInDBBase, TeacherCreate
-from app.core.security import verify_token
+from ..core.config import settings
+from ..models.teacher import TeacherInDBBase, TeacherCreate
+from ..core.security import verify_token
 
 class AuthService:
     def __init__(self, db: AsyncIOMotorClient):

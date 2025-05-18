@@ -6,9 +6,9 @@ from typing import List, Optional, Dict, Any # Add Dict, Any
 from fastapi import APIRouter, HTTPException, status, Query, Depends # Add Depends
 
 # Use absolute imports from the 'app' package root
-from app.models.student import Student, StudentCreate, StudentUpdate
-from app.db import crud
-from app.core.security import get_current_user_payload
+from ....models.student import Student, StudentCreate, StudentUpdate
+from ....db import crud
+from ....core.security import get_current_user_payload
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
