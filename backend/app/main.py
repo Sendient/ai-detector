@@ -15,6 +15,7 @@ import os
 # Adjust path '.' based on where main.py is relative to 'core' and 'db'
 from app.core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
 from app.db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
+from app.db.init_db import init_db_indexes
 
 # Import all endpoint routers
 # Adjust path '.' based on where main.py is relative to 'api'
@@ -87,60 +88,21 @@ async def startup_event():
         logger.info("Startup event: Database connection successful.")
     except Exception as e:
         logger.error(f"Startup event: Failed to connect to database: {e}", exc_info=True)
-        # Optionally, re-raise or handle more gracefully depending on desired behavior
-        # For now, if DB connection fails, the app might not be usable, so re-raising is one option.
         raise
 
-    logger.info("Ensuring database indexes...")
-    db = get_database() # Get database instance
-    if db is None:
-        logger.error("Cannot ensure indexes: Database connection not available (db is None).")
-        return
-
+    logger.info("Ensuring all database collections and indexes via init_db_indexes...")
     try:
-        # Ensure indexes for Teachers collection
-        teachers_collection = db.get_collection("teachers")
-        # Check if running in an event loop for async operations
-        # No, this is already an async function, direct await is fine.
-        try:
-            await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
-            logger.info("Successfully created/verified non-unique index 'idx_teacher_kinde_id' on teachers.kinde_id")
-        except OperationFailure as e:
-            if e.code == 85: # IndexOptionsConflict
-                logger.warning(
-                    f"Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id. "
-                    f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
-                    f"This means an index with the same name exists but has different options (e.g., unique, sparse). "
-                    f"The application will continue, but please resolve this manually in Azure Portal/Cosmos DB "
-                    f"by deleting the existing 'idx_teacher_kinde_id' and allowing the application to recreate it, "
-                    f"or by updating the application's index definition in app/main.py to match the existing one."
-                )
-            else:
-                # For other operation failures, log and re-raise
-                logger.error(f"Database OperationFailure while creating index 'idx_teacher_kinde_id': {e.details.get('errmsg', str(e))}", exc_info=True)
-                raise # Re-raise other OperationFailures
-        except Exception as e:
-            # Catch any other unexpected errors during index creation for teachers
-            logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
-            # Depending on policy, you might want to raise this too
-
-        # Ensure indexes for Documents collection (example, adjust as needed)
-        # documents_collection = db[DOCUMENT_COLLECTION]
-        # await documents_collection.create_index([("teacher_id", 1), ("upload_timestamp", -1)], name="idx_doc_teacher_upload")
-        # logger.info("Successfully created/verified index 'idx_doc_teacher_upload' on documents")
-
-        logger.info("Database indexes ensured.")
-
+        await init_db_indexes()
+        logger.info("All collections and indexes ensured by init_db_indexes.")
     except Exception as e:
-        logger.error(f"An error occurred during index creation: {e}", exc_info=True)
-        # Decide if app should proceed if index creation fails for non-critical indexes
+        logger.error(f"An error occurred during init_db_indexes: {e}", exc_info=True)
+        raise
 
     # Start background tasks if any (like BatchProcessor)
     try:
-        # Assuming BatchProcessor is designed to be started and run in the background
         from app.tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
         processor = BatchProcessor()
-        asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
+        asyncio.create_task(processor.process_batches())
         logger.info("Batch processor started")
     except Exception as e:
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
