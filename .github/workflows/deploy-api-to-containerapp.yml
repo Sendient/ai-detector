@@ -55,33 +55,33 @@ jobs:
                 az bicep version
               continue-on-error: true # Allow to continue even if Bicep is already managed by az cli
 
-            # - name: Set Subscription
-            #   uses: azure/CLI@v2
-            #   with:
-            #     azcliversion: 2.72.0
-            #     inlineScript:
-            #       az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-        
-            # - name: Update container app
-            #   uses: azure/CLI@v2
-            #   with:
-            #     azcliversion: 2.72.0
-            #     inlineScript: |
-            #       az containerapp update --name "ca-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --resource-group "rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --image "acrsdtuksaid${{ github.event.inputs.environment || inputs.environment }}.azurecr.io/backend-api:${{ github.event.inputs.image_tag || inputs.image_tag }}"
-
             - name: Set Subscription
               uses: azure/CLI@v2
               with:
                 azcliversion: 2.72.0
                 inlineScript:
-                  az account set --subscription "sdt-dev"
+                  az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
         
             - name: Update container app
               uses: azure/CLI@v2
               with:
                 azcliversion: 2.72.0
                 inlineScript: |
-                  az containerapp  update --name ca-sdt-uks-orch-dev --resource-group "rg-sdt-uks-workloads-dev" --image acrsdtuksbedev.azurecr.io/sendient/smart-educator:queue-orchestrator-0834686d508f646a432a8833200322dce37e428e
+                  az containerapp update --name "ca-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --resource-group "rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}" --image "acrsdtuksaid${{ github.event.inputs.environment || inputs.environment }}.azurecr.io/backend-api:${{ github.event.inputs.image_tag || inputs.image_tag }}"
+
+            # - name: Set Subscription
+            #   uses: azure/CLI@v2
+            #   with:
+            #     azcliversion: 2.72.0
+            #     inlineScript:
+            #       az account set --subscription "sdt-dev"
+        
+            # - name: Update container app
+            #   uses: azure/CLI@v2
+            #   with:
+            #     azcliversion: 2.72.0
+            #     inlineScript: |
+            #       az containerapp  update --name ca-sdt-uks-orch-dev --resource-group "rg-sdt-uks-workloads-dev" --image acrsdtuksbedev.azurecr.io/sendient/smart-educator:queue-orchestrator-0834686d508f646a432a8833200322dce37e428e
         
             - name: Azure Logout
               run: az logout
