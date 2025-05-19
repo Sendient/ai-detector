@@ -52,6 +52,10 @@ param parIPRules array
 
 param parCorsAllowedOrigins array
 
+param parAllowCredentials bool
+
+param parFrontendUrl string
+
 module containerApp 'br/public:avm/res/app/container-app:0.11.0' = {
   scope: resourceGroup(parSubId, parRgName)
   name: 'containerAppDeployment-${parEnv}'
@@ -88,8 +92,8 @@ module containerApp 'br/public:avm/res/app/container-app:0.11.0' = {
     ipSecurityRestrictions: parIPRules
     roleAssignments: parRoleAssignments
     corsPolicy: {
+      allowCredentials: parAllowCredentials
       allowedOrigins: parCorsAllowedOrigins
-      
     }
     secrets: {
       secureList: parSecretList
@@ -97,6 +101,9 @@ module containerApp 'br/public:avm/res/app/container-app:0.11.0' = {
     lock: {
       kind: 'CanNotDelete'
       name: 'AccidentalDeletionPrevention'
+    }
+    tags: {
+      frontendUrl: parFrontendUrl
     }
   }
 }
