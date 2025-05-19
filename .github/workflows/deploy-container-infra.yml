@@ -50,13 +50,13 @@ jobs:
               uses: azure/cli@v1
               with:
                 inlineScript:
-                 az deployment sub create --name "containerAppEnvDeploy" --location "uksouth" --template-file ".\infra\containerApp\containerEnv.bicep" --parameters '.\infra\containerApp\params\containerEnvDev.bicepparam' --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}"
+                 az deployment sub create --name "containerAppEnvDeployDev" --location "uksouth" --template-file ".\infra\containerApp\containerEnv.bicep" --parameters '.\infra\containerApp\params\containerEnvDev.bicepparam' --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}"
 
             - name: Deploy Container App
               uses: azure/cli@v1
               with:
                 inlineScript:
-                 az deployment sub create --name "containerAppDeploy" --location "uksouth" --template-file ".\infra\containerApp\containerApp.bicep" --parameters '.\infra\containerApp\params\containerAppDev.bicepparam' --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" --parameters "parFrontendUrl=${{ vars.VITE_KINDE_LOGIN_REDIRECT_URI }}"
+                 az deployment sub create --name "containerAppDeployDev" --location "uksouth" --template-file ".\infra\containerApp\containerApp.bicep" --parameters '.\infra\containerApp\params\containerAppDev.bicepparam' --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" --parameters "parFrontendUrl=${{ vars.VITE_KINDE_LOGIN_REDIRECT_URI }}"
         
             - name: Azure Logout
               run: az logout
