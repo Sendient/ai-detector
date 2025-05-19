@@ -58,7 +58,7 @@ jobs:
             - name: Set Subscription
               uses: azure/CLI@v2
               with:
-                azcliversion: 2.63.0
+                azcliversion: 2.72.0
                 inlineScript:
                   az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
         
