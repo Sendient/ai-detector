@@ -1,6 +1,5 @@
 using '../containerApp.bicep'
 
-
 param parEnv =  'dev1'
 
 param parRgName =  'rg-sdt-uks-aid-${parEnv}'
