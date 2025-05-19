@@ -15,7 +15,7 @@ param parAllowConfigFileUpdates =  true
 
 param parAppName =  'app-sdt-uks-aid-${parEnv}'
 
-param parBackendId = 'https://ca-sdt-uks-aid-dev1.lemonfield-d5c79fcf.uksouth.azurecontainerapps.io'
+// param parBackendId = 'https://ca-sdt-uks-aid-dev1.lemonfield-d5c79fcf.uksouth.azurecontainerapps.io'
 
 param parSku =  'Standard'
 
