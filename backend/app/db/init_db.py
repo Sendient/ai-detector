@@ -12,7 +12,7 @@ async def init_db_indexes():
     NOTE: Cosmos DB requires unique indexes to be defined at collection creation. If you need to change a unique index, you must drop and recreate the collection.
     """
     db = get_database()
-    if not db:
+    if db is None:
         logger.error("Database connection is not available. Cannot create indexes.")
         return False
 
