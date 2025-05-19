@@ -51,7 +51,15 @@ param parEnvVariables01 = [
     value: 'aidetector_${parEnv}'
     // value: 'aidetector_dev'
   }
+  {
+    name: 'FRONTEND_URL'
+    value: parFrontendUrl
+  }
 ]
+
+param parFrontendUrl = 'https://gray-mud-0fe5b3703.6.azurestaticapps.net'
+
+param parAllowCredentials = true
 
 param parCorsAllowedOrigins = [
   'https://gray-mud-0fe5b3703.6.azurestaticapps.net'
