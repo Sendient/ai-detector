@@ -70,7 +70,7 @@ jobs:
       uses: azure/cli@v1
       with:
         inlineScript:
-          az deployment sub create --name "StaticWebAppDeploy" --location "uksouth" --template-file ".\infra\staticWebApp\staticWebApp.bicep" --parameters ".\infra\staticWebApp\params\staticWebApp.bicepparam" --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" --parameters "parBackendId=${{ steps.set_backend_id.outputs.backend_id }}"
+          az deployment sub create --name "StaticWebAppDeploy" --location "uksouth" --template-file ".\infra\staticWebApp\staticWebApp.bicep" --parameters ".\infra\staticWebApp\params\staticWebApp.bicepparam" --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" # --parameters "parBackendId=${{ steps.set_backend_id.outputs.backend_id }}"
   
 
     # 7. Azure Logout (Good practice)

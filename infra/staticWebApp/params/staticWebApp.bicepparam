@@ -1,8 +1,8 @@
 using '../staticWebApp.bicep'
 
 param parAppSettings =  {
-      foo: 'bar'
-      setting: 1
+      // foo: 'bar'
+      // setting: 1
     }
 
 param parEnv =  'dev1'
