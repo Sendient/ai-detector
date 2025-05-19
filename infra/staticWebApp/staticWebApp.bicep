@@ -17,7 +17,7 @@ param parSku string
 
 param parStagingEnvironmentPolicy string
 
-param parBackendId string
+// param parBackendId string
 
 param parLocation string
 
@@ -33,9 +33,9 @@ module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
     appSettings: parAppSettings
     enterpriseGradeCdnStatus: 'Disabled'
     functionAppSettings: parAppSettings
-    linkedBackend: {
-      resourceId: parBackendId
-    }
+    // linkedBackend: {
+    //   resourceId: parBackendId
+    // }
     // privateEndpoints: [
     //   {
     //     privateDnsZoneGroup: {

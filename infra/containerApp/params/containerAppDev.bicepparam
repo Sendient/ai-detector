@@ -54,6 +54,16 @@ param parEnvVariables01 = [
   }
 ]
 
+param parCorsAllowedOrigins = [
+  'https://gray-mud-0fe5b3703.6.azurestaticapps.net'
+  'https://nice-stone-0864d4c03.6.azurestaticapps.net'
+  'https://calm-sand-0d8c25a03.6.azurestaticapps.net'
+  'https://smartdetector.ai'
+  'https://dev.smartdetector.ai'
+  'https://staging.smartdetector.ai'
+  'http://localhost:5173'
+]
+
 // Follow the secret refs from the env variables and registries
 param parSecretList = [
         {
