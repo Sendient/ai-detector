@@ -1,4 +1,4 @@
-# Detector Backend
+# AI Detector Backend
 
 This is the backend service for the AI Detector application, built with FastAPI and designed to handle document processing, AI analysis, and data management.
 
