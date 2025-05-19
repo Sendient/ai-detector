@@ -1,87 +1,96 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import IndexModel, ASCENDING, DESCENDING
 from .database import get_database
-import logging
-
-logger = logging.getLogger(__name__)
 
 async def init_db_indexes():
     """
-    Initialize MongoDB indexes for all collections used by the app.
+    Initialize MongoDB indexes for collections.
     This should be called during application startup.
-    NOTE: Cosmos DB requires unique indexes to be defined at collection creation. If you need to change a unique index, you must drop and recreate the collection.
     """
     db = get_database()
-    if db is None:
+    if not db:
         logger.error("Database connection is not available. Cannot create indexes.")
         return False
 
     try:
-        # Students
-        logger.info("Ensuring indexes for students collection...")
+        # Student Collection Indexes
         student_indexes = [
+            # Index for internal ID (should be created automatically by MongoDB)
             IndexModel([("_id", ASCENDING)], name="internal_id_index"),
-            IndexModel([("external_student_id", ASCENDING)], name="external_student_id_unique", unique=True, sparse=True),
-            IndexModel([("last_name", ASCENDING), ("first_name", ASCENDING)], name="name_lookup")
+            
+            # Sparse unique index for external_student_id
+            # Only indexes documents where external_student_id exists
+            IndexModel(
+                [("external_student_id", ASCENDING)],
+                name="external_student_id_unique",
+                unique=True,
+                sparse=True
+            ),
+            
+            # Compound index for efficient filtering and sorting
+            IndexModel(
+                [
+                    ("last_name", ASCENDING),
+                    ("first_name", ASCENDING)
+                ],
+                name="name_lookup"
+            )
         ]
-        await db["students"].create_indexes(student_indexes)
-
-        # Batches
-        logger.info("Ensuring indexes for batches collection...")
+        
+        # Batch Collection Indexes
         batch_indexes = [
+            # Index for internal ID
             IndexModel([("_id", ASCENDING)], name="batch_id_index"),
+            
+            # Index for user_id for quick lookup of user's batches
             IndexModel([("user_id", ASCENDING)], name="batch_user_index"),
-            IndexModel([("status", ASCENDING), ("created_at", DESCENDING)], name="batch_status_time_index"),
-            IndexModel([("priority", ASCENDING)], name="batch_priority_index"),
-            IndexModel([("status", ASCENDING), ("created_at", DESCENDING)], name="status_1_created_at_-1")
+            
+            # Compound index for status and creation time
+            IndexModel(
+                [
+                    ("status", ASCENDING),
+                    ("created_at", DESCENDING)
+                ],
+                name="batch_status_time_index"
+            ),
+            
+            # Index for batch priority
+            IndexModel([("priority", ASCENDING)], name="batch_priority_index")
         ]
-        await db["batches"].create_indexes(batch_indexes)
 
-        # Documents
-        logger.info("Ensuring indexes for documents collection...")
+        # Document Collection Indexes
         document_indexes = [
+            # Index for internal ID
             IndexModel([("_id", ASCENDING)], name="document_id_index"),
+            
+            # Index for batch_id for quick lookup of documents in a batch
             IndexModel([("batch_id", ASCENDING)], name="document_batch_index"),
-            IndexModel([("batch_id", ASCENDING), ("queue_position", ASCENDING)], name="batch_queue_position_index"),
-            IndexModel([("processing_priority", DESCENDING), ("status", ASCENDING)], name="document_processing_index"),
-            IndexModel([("teacher_id", ASCENDING), ("upload_timestamp", DESCENDING)], name="teacher_upload_index")
+            
+            # Compound index for queue position within a batch
+            IndexModel(
+                [
+                    ("batch_id", ASCENDING),
+                    ("queue_position", ASCENDING)
+                ],
+                name="batch_queue_position_index"
+            ),
+            
+            # Compound index for processing priority and status
+            IndexModel(
+                [
+                    ("processing_priority", DESCENDING),
+                    ("status", ASCENDING)
+                ],
+                name="document_processing_index"
+            )
         ]
+        
+        # Create indexes
+        await db["students"].create_indexes(student_indexes)
+        await db["batches"].create_indexes(batch_indexes)
         await db["documents"].create_indexes(document_indexes)
-
-        # Teachers
-        logger.info("Ensuring indexes for teachers collection...")
-        teacher_indexes = [
-            IndexModel([("_id", ASCENDING)], name="teacher_id_index"),
-            IndexModel([("kinde_id", ASCENDING)], name="unique_kinde_id", unique=True),
-            IndexModel([("email", ASCENDING)], name="unique_email", unique=True),
-            IndexModel([("is_deleted", ASCENDING)], name="is_deleted_index"),
-            IndexModel([("kinde_id", ASCENDING), ("is_deleted", ASCENDING)], name="kinde_id_is_deleted_index"),
-            IndexModel([("school_id", ASCENDING), ("is_deleted", ASCENDING)], name="school_id_is_deleted_index")
-        ]
-        await db["teachers"].create_indexes(teacher_indexes)
-
-        # Results
-        logger.info("Ensuring indexes for results collection...")
-        result_indexes = [
-            IndexModel([("_id", ASCENDING)], name="result_id_index"),
-            IndexModel([("is_deleted", ASCENDING)], name="result_is_deleted_index"),
-            IndexModel([("document_id", ASCENDING), ("is_deleted", ASCENDING)], name="document_id_is_deleted_index"),
-            IndexModel([("teacher_id", ASCENDING), ("status", ASCENDING), ("score", ASCENDING), ("updated_at", ASCENDING)], name="dashboard_stats_index")
-        ]
-        await db["results"].create_indexes(result_indexes)
-
-        # Schools
-        logger.info("Ensuring indexes for schools collection...")
-        school_indexes = [IndexModel([("_id", ASCENDING)], name="school_id_index")]
-        await db["schools"].create_indexes(school_indexes)
-
-        # Classgroups
-        logger.info("Ensuring indexes for classgroups collection...")
-        classgroup_indexes = [IndexModel([("_id", ASCENDING)], name="classgroup_id_index")]
-        await db["classgroups"].create_indexes(classgroup_indexes)
-
-        logger.info("All collections and indexes ensured.")
+        
         return True
     except Exception as e:
-        logger.error(f"Error creating indexes: {e}")
+        print(f"Error creating indexes: {e}")
         return False 
