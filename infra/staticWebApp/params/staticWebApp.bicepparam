@@ -22,3 +22,10 @@ param parSku =  'Standard'
 param parStagingEnvironmentPolicy =  'Enabled'
 
 param parLocation =  'westeurope'
+
+param parCustomDomains = [
+  {
+    name: 'dev-app.smartdetector.ai'
+    validationMethod: 'CNAME'
+  }
+]

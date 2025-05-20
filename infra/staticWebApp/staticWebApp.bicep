@@ -17,6 +17,8 @@ param parSku string
 
 param parStagingEnvironmentPolicy string
 
+param parCustomDomains array
+
 // param parBackendId string
 
 param parLocation string
@@ -55,6 +57,7 @@ module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
     // ]
     sku: parSku
     stagingEnvironmentPolicy: parStagingEnvironmentPolicy
+    customDomains: parCustomDomains
     tags: {
       AutoDelete: 'No'
     }
