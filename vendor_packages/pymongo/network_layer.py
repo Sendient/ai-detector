@@ -46,18 +46,22 @@ except ImportError:
     _HAVE_SSL = False
 
 try:
-    from pymongo.pyopenssl_context import _sslConn
+    from pymongo.pyopenssl_context import (
+        BLOCKING_IO_LOOKUP_ERROR,
+        BLOCKING_IO_READ_ERROR,
+        BLOCKING_IO_WRITE_ERROR,
+        _sslConn,
+    )
 
     _HAVE_PYOPENSSL = True
 except ImportError:
     _HAVE_PYOPENSSL = False
-    _sslConn = SSLSocket  # type: ignore[assignment, misc]
-
-from pymongo.ssl_support import (
-    BLOCKING_IO_LOOKUP_ERROR,
-    BLOCKING_IO_READ_ERROR,
-    BLOCKING_IO_WRITE_ERROR,
-)
+    _sslConn = SSLSocket  # type: ignore
+    from pymongo.ssl_support import (  # type: ignore[assignment]
+        BLOCKING_IO_LOOKUP_ERROR,
+        BLOCKING_IO_READ_ERROR,
+        BLOCKING_IO_WRITE_ERROR,
+    )
 
 if TYPE_CHECKING:
     from pymongo.asynchronous.pool import AsyncConnection
@@ -67,7 +71,7 @@ _UNPACK_HEADER = struct.Struct("<iiii").unpack
 _UNPACK_COMPRESSION_HEADER = struct.Struct("<iiB").unpack
 _POLL_TIMEOUT = 0.5
 # Errors raised by sockets (and TLS sockets) when in non-blocking mode.
-BLOCKING_IO_ERRORS = (BlockingIOError, *BLOCKING_IO_LOOKUP_ERROR, *ssl_support.BLOCKING_IO_ERRORS)
+BLOCKING_IO_ERRORS = (BlockingIOError, BLOCKING_IO_LOOKUP_ERROR, *ssl_support.BLOCKING_IO_ERRORS)
 
 
 # These socket-based I/O methods are for KMS requests and any other network operations that do not use
@@ -357,12 +361,7 @@ def receive_data(conn: Connection, length: int, deadline: Optional[float]) -> me
             except socket.timeout:
                 if conn.cancel_context.cancelled:
                     raise _OperationCancelled("operation cancelled") from None
-                if (
-                    _PYPY
-                    or not conn.is_sdam
-                    and deadline is not None
-                    and deadline - time.monotonic() < 0
-                ):
+                if _PYPY:
                     # We reached the true deadline.
                     raise
                 continue
