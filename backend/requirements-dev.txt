@@ -1,4 +1,3 @@
-
 passlib[bcrypt]
 # requirements-dev.txt
 httpx
@@ -6,4 +5,5 @@ httpx
 # e.g., pytest-cov for coverage, flake8, black, mypy, etc.
 asgi-lifespan
 pytest-mock
+PyJWT
 
