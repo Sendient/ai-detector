@@ -10,11 +10,17 @@ dotenv_files = [
 asyncio_mode = "auto"
 log_cli = true
 log_cli_level = "WARNING"
-addopts = "-vs --log-cli-level=WARNING -p no:httpx"
+# addopts = "-vs --log-cli-level=WARNING -p no:httpx"
+addopts = "-vs --log-cli-level=INFO -p no:httpx"
 testpaths = ["tests"]
 plugins = [
     "anyio",
     "pytest_asyncio",
     "pytest_dotenv",
     "pytest_mock",
+]
+pythonpath = [".", "backend"]
+env_files = [
+    ".env",
+    "backend/.env.test",
 ] 

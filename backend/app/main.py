@@ -13,24 +13,24 @@ import os
 
 # Import config and database lifecycle functions
 # Adjust path '.' based on where main.py is relative to 'core' and 'db'
-from app.core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
-from app.db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
+from .core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
+from .db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
 
 # Import all endpoint routers
 # Adjust path '.' based on where main.py is relative to 'api'
 # Includes routers for all entities: schools, teachers, class_groups, students, assignments, documents, results
-from app.api.v1.endpoints.schools import router as schools_router
-from app.api.v1.endpoints.teachers import router as teachers_router
-from app.api.v1.endpoints.class_groups import router as class_groups_router
-from app.api.v1.endpoints.students import router as students_router
+from .api.v1.endpoints.schools import router as schools_router
+from .api.v1.endpoints.teachers import router as teachers_router
+from .api.v1.endpoints.class_groups import router as class_groups_router
+from .api.v1.endpoints.students import router as students_router
 # from app.api.v1.endpoints.assignments import router as assignments_router # COMMENTED OUT
-from app.api.v1.endpoints.documents import router as documents_router
-from app.api.v1.endpoints.results import router as results_router
-from app.api.v1.endpoints.dashboard import router as dashboard_router
-from app.api.v1.endpoints.analytics import router as analytics_router
+from .api.v1.endpoints.documents import router as documents_router
+from .api.v1.endpoints.results import router as results_router
+from .api.v1.endpoints.dashboard import router as dashboard_router
+from .api.v1.endpoints.analytics import router as analytics_router
 
 # Import batch processor
-from app.tasks import batch_processor
+from .tasks import batch_processor
 
 # Setup logging
 logger = logging.getLogger(__name__) # Use main module logger or project-specific
@@ -54,7 +54,7 @@ origins = [
 origins = [o for o in origins if o]
 
 # Create FastAPI app instance with detailed configuration
-app = FastAPI(
+_original_fastapi_app = FastAPI(
     title=f"{PROJECT_NAME} - Sentient AI Detector App",
     version=VERSION, # Use version from config
     description="API for detecting AI-generated content in educational settings",
@@ -66,7 +66,7 @@ app = FastAPI(
 )
 
 # Add CORS middleware
-app.add_middleware(
+_original_fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
@@ -75,7 +75,7 @@ app.add_middleware(
 )
 
 # --- Event Handlers for DB Connection and Batch Processor ---
-@app.on_event("startup")
+@_original_fastapi_app.on_event("startup")
 async def startup_event():
     """
     Event handler for application startup.
@@ -138,14 +138,14 @@ async def startup_event():
     # Start background tasks if any (like BatchProcessor)
     try:
         # Assuming BatchProcessor is designed to be started and run in the background
-        from app.tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
+        from .tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
         processor = BatchProcessor()
         asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
         logger.info("Batch processor started")
     except Exception as e:
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
 
-@app.on_event("shutdown")
+@_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
     """Stop batch processor and disconnect from MongoDB on application shutdown."""
     logger.info("Executing shutdown event...")
@@ -159,12 +159,12 @@ async def shutdown_event():
     await close_mongo_connection()
 
 # --- API Endpoints ---
-@app.get("/", tags=["Root"], include_in_schema=False) # Hide from API docs if desired
+@_original_fastapi_app.get("/", tags=["Root"], include_in_schema=False) # Decorate _original_fastapi_app
 async def read_root():
     """Root endpoint welcome message."""
     return {"message": f"Welcome to {PROJECT_NAME}"}
 
-@app.get("/health", status_code=200, tags=["Health Check"])
+@_original_fastapi_app.get("/health", status_code=200, tags=["Health Check"]) # Decorate _original_fastapi_app
 async def health_check() -> Dict[str, Any]:
     """
     Comprehensive health check endpoint that verifies:
@@ -209,12 +209,12 @@ async def health_check() -> Dict[str, Any]:
     return health_info
 
 # --- Liveness and Readiness Probes ---
-@app.get("/healthz", tags=["Probes"], status_code=status.HTTP_200_OK)
+@_original_fastapi_app.get("/healthz", tags=["Probes"], status_code=status.HTTP_200_OK) # Decorate _original_fastapi_app
 async def liveness_probe():
     """Liveness probe: Checks if the application process is running and responsive."""
     return {"status": "live"}
 
-@app.get("/readyz", tags=["Probes"])
+@_original_fastapi_app.get("/readyz", tags=["Probes"]) # Decorate _original_fastapi_app
 async def readiness_probe(response: Response):
     """Readiness probe: Checks if the application is ready to serve traffic (e.g., DB connected)."""
     db_health = await check_database_health()
@@ -228,29 +228,31 @@ async def readiness_probe(response: Response):
 
 # --- Include API Routers ---
 # Apply the configured prefix (e.g., /api/v1) to all included routers
-app.include_router(schools_router, prefix=API_V1_PREFIX)
-app.include_router(teachers_router, prefix=API_V1_PREFIX)
-app.include_router(class_groups_router, prefix=API_V1_PREFIX)
-app.include_router(students_router, prefix=API_V1_PREFIX)
-# app.include_router(assignments_router, prefix=API_V1_PREFIX) # COMMENTED OUT
-app.include_router(documents_router, prefix=API_V1_PREFIX) # Includes documents router
-app.include_router(results_router, prefix=API_V1_PREFIX)   # Includes results router
-app.include_router(dashboard_router, prefix=API_V1_PREFIX) # NEW: Include dashboard router
-app.include_router(analytics_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(schools_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(teachers_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(class_groups_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(students_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+# _original_fastapi_app.include_router(assignments_router, prefix=API_V1_PREFIX) # COMMENTED OUT
+_original_fastapi_app.include_router(documents_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(results_router, prefix=API_V1_PREFIX)   # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(dashboard_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(analytics_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
 
 # Add a simple health check endpoint directly to the app
-@app.get("/api/v1/test-health")
-def read_root():
+@_original_fastapi_app.get("/api/v1/test-health") # Decorate _original_fastapi_app
+def read_root_test_health(): # Renamed function to avoid conflict if 'read_root' is used elsewhere
     return {"Status": "OK"}
+
+# This 'app' will be used by the ASGI server (e.g., uvicorn).
+# If state_middleware.app_with_state exists and is used, it would wrap _original_fastapi_app here.
+# For now, assuming direct usage or middleware is added via .add_middleware.
+app = _original_fastapi_app # The app served by uvicorn is the original, unless wrapped.
+
+# Example if you had an app_with_state wrapper:
+# from backend.app.utils.state_middleware import app_with_state # Hypothetical import
+# app = app_with_state(_original_fastapi_app)
+# Tests would import _original_fastapi_app, uvicorn would run 'app'.
 
 # --- TODOs & Future Enhancements ---
 # TODO: Add middleware, CORS configuration, and global exception handlers
-# from fastapi.middleware.cors import CORSMiddleware
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # SECURITY: Update for production environments!
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
 
