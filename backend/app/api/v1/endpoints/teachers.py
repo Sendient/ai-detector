@@ -9,11 +9,11 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends, Request
 from pydantic import ValidationError
 
 # Import Pydantic models for Teacher
-from app.models.teacher import Teacher, TeacherCreate, TeacherUpdate
+from ....models.teacher import Teacher, TeacherCreate, TeacherUpdate
 # Import CRUD functions for Teacher
-from app.db import crud
+from ....db import crud
 # Import the authentication dependency
-from app.core.security import get_current_user_payload
+from ....core.security import get_current_user_payload
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

@@ -49,7 +49,7 @@ jobs:
     - name: Login to Azure
       uses: azure/login@v1
       with:
-        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}' 
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
         enable-AzPSSession: false
 
     # 3. (Optional) Install/Verify Bicep CLI
@@ -66,12 +66,81 @@ jobs:
         BACKEND_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}/providers/Microsoft.App/containerApps/ca-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}"
         echo "backend_id=$BACKEND_ID" >> $GITHUB_OUTPUT
 
+    - name: Set to DNS Subscription
+      run: |
+        SUBSCRIPTION_ID="${{ vars.DNS_SUBSCRIPTION_ID }}"
+        az account set --subscription "$SUBSCRIPTION_ID"
+        echo "Set Azure CLI to use subscription ID: $SUBSCRIPTION_ID"
+
+    # NEW STEP: Determine DNS CNAME records and apply them
+    - name: Add DNS CNAME Records
+      uses: azure/cli@v1
+      with:
+        inlineScript: |
+          ENVIRONMENT="${{ github.event.inputs.environment || inputs.environment }}"
+          DNS_RESOURCE_GROUP="rg-sdt-uks-dns-prod" # Assuming this RG holds the DNS zone for all environments
+          DNS_ZONE="smartdetector.ai"
+          CNAME_NAME=""
+          CNAME_TARGET=""
+
+          if [ "$ENVIRONMENT" == "prod" ]; then
+            CNAME_NAME="app"
+            CNAME_TARGET="nice-stone-0864d4c03.6.azurestaticapps.net"
+          elif [ "$ENVIRONMENT" == "staging" ]; then
+            CNAME_NAME="staging-app"
+            CNAME_TARGET="agreeable-grass-0e5b07903.6.azurestaticapps.net"
+          elif [ "$ENVIRONMENT" == "dev1" ]; then
+            # Assuming 'dev-app' for consistency with custom domain pattern
+            CNAME_NAME="dev-app"
+            CNAME_TARGET="gray-mud-0fe5b3703.6.azurestaticapps.net"
+          fi
+
+          if [ -n "$CNAME_NAME" ] && [ -n "$CNAME_TARGET" ]; then
+            echo "Setting CNAME record for $ENVIRONMENT: $CNAME_NAME.$DNS_ZONE pointing to $CNAME_TARGET"
+            az network dns record-set cname set-record \
+              --resource-group "$DNS_RESOURCE_GROUP" \
+              --zone-name "$DNS_ZONE" \
+              --record-set-name "$CNAME_NAME" \
+              --cname "$CNAME_TARGET"
+          else
+            echo "No CNAME record defined for environment: $ENVIRONMENT. Skipping DNS update."
+          fi
+
+    # 5. Set to the main subscription for deployment
+    - name: Set to Main Subscription
+      run: |
+        SUBSCRIPTION_ID="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+        az account set --subscription "$SUBSCRIPTION_ID"
+        echo "Set Azure CLI to use subscription ID: $SUBSCRIPTION_ID"
+
+    # Determine Custom Domain based on environment
+    - name: Determine Custom Domain
+      id: set_custom_domain
+      run: |
+        ENVIRONMENT="${{ github.event.inputs.environment || inputs.environment }}"
+        CUSTOM_DOMAIN=""
+        if [ "$ENVIRONMENT" == "prod" ]; then
+          CUSTOM_DOMAIN="app.smartdetector.ai"
+        elif [ "$ENVIRONMENT" == "staging" ]; then
+          CUSTOM_DOMAIN="staging-app.smartdetector.ai"
+        elif [ "$ENVIRONMENT" == "dev1" ]; then
+          CUSTOM_DOMAIN="dev-app.smartdetector.ai" # Assuming a pattern for 'dev'
+        fi
+        echo "custom_domain=$CUSTOM_DOMAIN" >> $GITHUB_OUTPUT
+        echo "Calculated custom domain for $ENVIRONMENT: $CUSTOM_DOMAIN"
+
     - name: Deploy Static Web App
       uses: azure/cli@v1
       with:
-        inlineScript:
-          az deployment sub create --name "StaticWebAppDeploy" --location "uksouth" --template-file ".\infra\staticWebApp\staticWebApp.bicep" --parameters ".\infra\staticWebApp\params\staticWebApp.bicepparam" --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" --parameters "parBackendId=${{ steps.set_backend_id.outputs.backend_id }}"
-  
+        inlineScript: |
+          az deployment sub create \
+            --name "StaticWebAppDeploy" \
+            --location "uksouth" \
+            --template-file "./infra/staticWebApp/staticWebApp.bicep" \
+            --parameters "./infra/staticWebApp/params/staticWebApp.bicepparam" \
+            --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" \
+            --parameters "parCustomDomainName=${{ steps.set_custom_domain.outputs.custom_domain }}" 
+
 
     # 7. Azure Logout (Good practice)
     - name: Azure Logout

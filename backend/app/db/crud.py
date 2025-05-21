@@ -24,21 +24,21 @@ from fastapi import HTTPException # Import HTTPException
 from .database import get_database
 
 # --- Pydantic Models ---
-from app.models.school import SchoolCreate, SchoolUpdate, School
+from ..models.school import SchoolCreate, SchoolUpdate, School
 # --- CORRECTED Teacher model imports ---
 # Import TeacherCreate as defined in your teacher.py
-from app.models.teacher import Teacher, TeacherCreate, TeacherUpdate, TeacherRole
+from ..models.teacher import Teacher, TeacherCreate, TeacherUpdate, TeacherRole
 # ------------------------------------
-from app.models.class_group import ClassGroup, ClassGroupCreate, ClassGroupUpdate
-from app.models.student import Student, StudentCreate, StudentUpdate
-from app.models.document import Document, DocumentCreate, DocumentUpdate
-from app.models.result import Result, ResultCreate, ResultUpdate, ResultStatus
+from ..models.class_group import ClassGroup, ClassGroupCreate, ClassGroupUpdate
+from ..models.student import Student, StudentCreate, StudentUpdate
+from ..models.document import Document, DocumentCreate, DocumentUpdate
+from ..models.result import Result, ResultCreate, ResultUpdate, ResultStatus
 # --- Import Enums used in Teacher model ---
-from app.models.enums import DocumentStatus, ResultStatus, FileType, MarketingSource
-from app.models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
+from ..models.enums import DocumentStatus, ResultStatus, FileType, MarketingSource
+from ..models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
 
 # --- Service Imports --- ADD THIS SECTION IF IT DOESN'T EXIST
-from app.services.blob_storage import delete_blob as service_delete_blob # ADD THIS IMPORT
+from ..services.blob_storage import delete_blob as service_delete_blob # ADD THIS IMPORT
 
 # --- Logging Setup ---
 logger = logging.getLogger(__name__)
@@ -1269,7 +1269,11 @@ async def get_dashboard_stats(current_user_payload: Dict[str, Any]) -> Dict[str,
         logger.debug(f"[Stats] Flagged recent query result: {flagged_recent}")
 
         # Pending/Processing Documents (based on Document status)
-        pending_statuses = [DocumentStatus.QUEUED.value, DocumentStatus.PROCESSING.value]
+        pending_statuses = [
+            DocumentStatus.QUEUED.value,
+            DocumentStatus.PROCESSING.value,
+            DocumentStatus.RETRYING.value,
+        ]
         pending = await docs_collection.count_documents({"teacher_id": teacher_kinde_id, "status": {"$in": pending_statuses}})
         logger.debug(f"[Stats] Pending query result: {pending}")
 

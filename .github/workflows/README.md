@@ -10,6 +10,7 @@ The following environment variables and secrets must be set in your GitHub repos
 - `VITE_KINDE_DOMAIN`: Kinde domain (environment variable)
 - `VITE_KINDE_LOGIN_REDIRECT_URI`: Kinde login redirect URI (environment variable)
 - `VITE_KINDE_LOGOUT_REDIRECT_URI`: Kinde logout redirect URI (environment variable)
+- `DNS_SUBSCRIPTION_ID`: Management SUB ID that contains DNS (environment variable)
 
 ### Backend (API & Infrastructure) and Frontend
 - `AZURE_CLIENT_ID` (**REQUIRED SECRET**): The client ID of your Azure service principal
