@@ -1,5 +1,3 @@
-# backend/app/api/v1/endpoints/documents.py
-
 import uuid
 import logging
 import os # Needed for path operations (splitext)
@@ -32,6 +30,7 @@ from ....services.blob_storage import upload_file_to_blob, download_blob_as_byte
 
 # Import Text Extraction Service
 from ....services.text_extraction import extract_text_from_bytes
+from ....queue import enqueue_assessment_task # RESOLVED CONFLICT 1
 
 # Import external API URL from config (assuming you add it there)
 # from ....core.config import ML_API_URL, ML_RECAPTCHA_SECRET # Placeholder - add these to config.py
@@ -143,9 +142,29 @@ async def upload_document(
         logger.error(f"Failed to create initial pending result record for document {created_document.id}")
         # Decide if this should cause the whole upload request to fail - maybe not?
 
-    # 4. TODO: Trigger background task for analysis here (using created_document.id)
-    # For now, assessment is triggered manually via the /assess endpoint
-    logger.info(f"Document {created_document.id} uploaded. Ready for assessment.")
+    # 4. Enqueue document for assessment
+    enqueue_success = await enqueue_assessment_task(
+        document_id=created_document.id,
+        user_id=user_kinde_id,
+        priority_level=created_document.processing_priority or 0,
+    )
+
+    if enqueue_success:
+        updated_doc = await crud.update_document_status(
+            document_id=created_document.id,
+            teacher_id=user_kinde_id,
+            status=DocumentStatus.QUEUED,
+        )
+        if updated_doc:
+            created_document = updated_doc
+    else:
+        logger.error(
+            f"Failed to enqueue assessment task for document {created_document.id}"
+        )
+
+    logger.info(
+        f"Document {created_document.id} uploaded and queued for assessment."
+    )
 
     return created_document
 
@@ -190,6 +209,7 @@ async def trigger_assessment(
     logger.warning(f"Authorization check needed for user {user_kinde_id} triggering assessment for document {document_id}")
 
     # Check if assessment can be triggered (e.g., only if UPLOADED or maybe ERROR)
+    # RESOLVED CONFLICT 2 - Using multi-line style from 'main'
     if document.status not in [
         DocumentStatus.UPLOADED,
         DocumentStatus.ERROR,
@@ -205,11 +225,11 @@ async def trigger_assessment(
                 ResultStatus.ASSESSING,
                 ResultStatus.RETRYING,
             ]:
-                 logger.info(f"Assessment already completed or in progress for doc {document_id}. Returning existing result.")
-                 return existing_result
+                logger.info(f"Assessment already completed or in progress for doc {document_id}. Returning existing result.")
+                return existing_result
             else:
-                 # If status is PENDING or ERROR, allow re-triggering below
-                 pass
+                # If status is PENDING or ERROR, allow re-triggering below
+                pass
         else:
             # This case is odd (doc status implies assessment happened, but no result found)
             raise HTTPException(
@@ -282,7 +302,7 @@ async def trigger_assessment(
             # This implies an error during extraction or unsupported type by the extraction func itself
             logger.warning(f"Text extraction returned None for document {document.id} ({document.file_type}).")
             # Return empty string if extraction fails, or raise specific error if preferred
-            return "" # Or raise HTTPException(500, "Text extraction failed.")
+            extracted_text = "" # Ensure it's a string for later use
         
         # Calculate character count
         character_count = len(extracted_text)
@@ -297,9 +317,8 @@ async def trigger_assessment(
             document_id=document.id, 
             teacher_id=auth_teacher_id, 
             status=DocumentStatus.ERROR,
-            # Optionally pass character_count and word_count as None or 0 if known
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error accessing document file for text extraction.")
     except ValueError as e: # Catch specific error from text_extraction if it raises one for unsupported types
         logger.error(f"Text extraction error for document {document.id}: {e}", exc_info=True)
@@ -308,7 +327,7 @@ async def trigger_assessment(
             teacher_id=auth_teacher_id, 
             status=DocumentStatus.ERROR
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error during text extraction for document {document_id}: {e}", exc_info=True)
@@ -317,26 +336,25 @@ async def trigger_assessment(
             teacher_id=auth_teacher_id, 
             status=DocumentStatus.ERROR
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to extract text from document.")
 
-    if extracted_text is None: # Should be caught by specific exceptions above, but as a safeguard
-        logger.error(f"Text extraction resulted in None for document {document_id}")
-        await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
-        raise HTTPException(status_code=500, detail="Text content could not be extracted.")
+    # This check should be redundant if extracted_text = "" is used above when None.
+    # if extracted_text is None: 
+    #     logger.error(f"Text extraction resulted in None for document {document_id}")
+    #     await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
+    #     if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
+    #     raise HTTPException(status_code=500, detail="Text content could not be extracted.")
         
     # --- ML API Call ---
     ai_score: Optional[float] = None
     ml_label: Optional[str] = None
     ml_ai_generated: Optional[bool] = None
     ml_human_generated: Optional[bool] = None
-    # --- Store the RAW list of paragraph dicts ---
     ml_paragraph_results_raw: Optional[List[Dict[str, Any]]] = None
-    # --- END ---
 
     try:
-        ml_payload = {"text": extracted_text if extracted_text else ""}
+        ml_payload = {"text": extracted_text} # No need for `if extracted_text else ""` due to earlier assignment
         headers = {'Content-Type': 'application/json'}
 
         logger.info(f"Calling ML API for document {document_id} at {ML_API_URL}")
@@ -354,17 +372,15 @@ async def trigger_assessment(
                 if not isinstance(ml_human_generated, bool): ml_human_generated = None
 
                 if ("results" in ml_response_data and isinstance(ml_response_data["results"], list)):
-                    # --- Store the raw list directly ---
                     ml_paragraph_results_raw = ml_response_data["results"]
                     logger.info(f"Extracted {len(ml_paragraph_results_raw)} raw paragraph results.")
-                    # --- END ---
-
+                    
                     if len(ml_paragraph_results_raw) > 0 and isinstance(ml_paragraph_results_raw[0], dict):
-                        first_result = ml_paragraph_results_raw[0]
-                        ml_label = first_result.get("label")
+                        first_paragraph_result = ml_paragraph_results_raw[0] # Renamed for clarity
+                        ml_label = first_paragraph_result.get("label")
                         if not isinstance(ml_label, str): ml_label = None
 
-                        score_value = first_result.get("probability")
+                        score_value = first_paragraph_result.get("probability")
                         if isinstance(score_value, (int, float)):
                             ai_score = float(score_value)
                             ai_score = max(0.0, min(1.0, ai_score))
@@ -376,7 +392,6 @@ async def trigger_assessment(
                 else: logger.warning("ML API response missing 'results' list.")
             else: raise ValueError("ML API response format unexpected (not a dict).")
 
-    # ... (error handling for ML API call remains the same) ...
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error calling ML API for document {document_id}: {e.response.status_code} - {e.response.text}", exc_info=False)
         await crud.update_document_status(
@@ -386,7 +401,7 @@ async def trigger_assessment(
             character_count=character_count,
             word_count=word_count
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Error communicating with AI detection service: {e.response.status_code}")
     except ValueError as e:
         logger.error(f"Error processing ML API response for document {document_id}: {e}", exc_info=True)
@@ -397,7 +412,7 @@ async def trigger_assessment(
             character_count=character_count,
             word_count=word_count
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process AI detection result: {e}")
     except Exception as e:
         logger.error(f"Unexpected error during ML API call or processing for document {document_id}: {e}", exc_info=True)
@@ -408,39 +423,34 @@ async def trigger_assessment(
             character_count=character_count,
             word_count=word_count
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get AI detection result: {e}")
 
 
     # --- Update DB with Result ---
-    final_result: Optional[Result] = None
+    final_result_obj: Optional[Result] = None # Renamed to avoid clash
     try:
-        if result:
-            # --- MODIFIED: Prepare a simple dictionary for the update ---
+        if result: # Result object should exist
             update_payload_dict = {
-                "status": ResultStatus.COMPLETED.value, # Store enum value
+                "status": ResultStatus.COMPLETED.value, 
                 "result_timestamp": datetime.now(timezone.utc)
             }
             if ai_score is not None: update_payload_dict["score"] = ai_score
             if ml_label is not None: update_payload_dict["label"] = ml_label
             if ml_ai_generated is not None: update_payload_dict["ai_generated"] = ml_ai_generated
             if ml_human_generated is not None: update_payload_dict["human_generated"] = ml_human_generated
-            # Add the raw list of paragraph dicts if available
+            
             if ml_paragraph_results_raw is not None:
-                 # Basic check: ensure it's a list of dicts before saving
-                 if isinstance(ml_paragraph_results_raw, list) and all(isinstance(item, dict) for item in ml_paragraph_results_raw):
-                     update_payload_dict["paragraph_results"] = ml_paragraph_results_raw
-                 else:
-                     logger.error(f"ml_paragraph_results_raw is not a list of dicts for doc {document_id}. Skipping save.")
+                if isinstance(ml_paragraph_results_raw, list) and all(isinstance(item, dict) for item in ml_paragraph_results_raw):
+                    update_payload_dict["paragraph_results"] = ml_paragraph_results_raw
+                else:
+                    logger.error(f"ml_paragraph_results_raw is not a list of dicts for doc {document_id}. Skipping save.")
 
-            # --- Call CRUD update function with the dictionary ---
-            # +++ ADDED: Log payload before update +++
             logger.debug(f"Attempting to update Result {result.id} with payload: {update_payload_dict}")
-            final_result = await crud.update_result(result_id=result.id, update_data=update_payload_dict, teacher_id=auth_teacher_id) # Added teacher_id
+            final_result_obj = await crud.update_result(result_id=result.id, update_data=update_payload_dict, teacher_id=auth_teacher_id)
 
-            if final_result:
+            if final_result_obj:
                 logger.info(f"Successfully updated result for document {document_id}")
-                # Update document status to COMPLETED after successfully updating result
                 logger.debug(
                     f"Calling update_document_status for COMPLETED. Doc ID: {document_id}, "
                     f"Char Count: {character_count}, Word Count: {word_count}"
@@ -449,30 +459,26 @@ async def trigger_assessment(
                     document_id=document_id,
                     teacher_id=auth_teacher_id,
                     status=DocumentStatus.COMPLETED,
-                    character_count=character_count, # Pass calculated counts
+                    character_count=character_count, 
                     word_count=word_count
                 )
-            else:
+            else: # crud.update_result returned None
                 logger.error(f"Failed to update result record for document {document_id} after ML processing.")
-                # If result update failed, set document status back to ERROR
                 await crud.update_document_status(
                     document_id=document_id,
                     teacher_id=auth_teacher_id,
                     status=DocumentStatus.ERROR,
-                    character_count=character_count, # Still pass counts even on error
+                    character_count=character_count, 
                     word_count=word_count
                 )
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save analysis results.")
-
-        else:
-            # This case should ideally not be reached if result creation on upload is robust
+        else: # This case should ideally not be reached
             logger.error(f"Result record not found during final update stage for document {document_id}")
-            # Update document status back to ERROR
             await crud.update_document_status(
                 document_id=document_id,
                 teacher_id=auth_teacher_id,
                 status=DocumentStatus.ERROR,
-                character_count=character_count, # Pass counts
+                character_count=character_count, 
                 word_count=word_count
             )
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error: Result record missing during final update.")
@@ -483,18 +489,18 @@ async def trigger_assessment(
             document_id=document_id,
             teacher_id=auth_teacher_id,
             status=DocumentStatus.ERROR,
-            character_count=character_count, # Pass counts if calculated
+            character_count=character_count, 
             word_count=word_count
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save assessment result.")
 
 
-    if not final_result:
-         logger.error(f"Final result object is None after attempting DB update for doc {document_id}.")
-         raise HTTPException(status_code=500, detail="Failed to retrieve final result after update.")
+    if not final_result_obj: # Renamed variable
+       logger.error(f"Final result object is None after attempting DB update for doc {document_id}.")
+       raise HTTPException(status_code=500, detail="Failed to retrieve final result after update.")
 
-    return final_result # Return the complete, updated Result object
+    return final_result_obj
 
 
 @router.get(
@@ -513,11 +519,10 @@ async def read_document(
     logger.info(f"User {user_kinde_id} attempting to read document ID: {document_id}")
     document = await crud.get_document_by_id(
         document_id=document_id,
-        teacher_id=user_kinde_id # <<< ADDED
+        teacher_id=user_kinde_id 
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document with ID {document_id} not found.")
-    # TODO: Add fine-grained authorization check
     return document
 
 @router.get(
@@ -544,52 +549,46 @@ async def get_document_text(
     user_kinde_id = current_user_payload.get("sub")
     logger.info(f"User {user_kinde_id} attempting to retrieve text for document ID: {document_id}")
 
-    # --- Get Document & Authorization Check ---
     document = await crud.get_document_by_id(
         document_id=document_id,
-        teacher_id=user_kinde_id # Ensures document belongs to the user
+        teacher_id=user_kinde_id 
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document with ID {document_id} not found or not accessible by user.")
 
-    # Convert file_type string from DB (if it's a string) to FileType enum member
     file_type_enum_member: Optional[FileType] = None
     if isinstance(document.file_type, str):
-        for member in FileType:
-            if member.value.lower() == document.file_type.lower():
-                file_type_enum_member = member
-                break
+        try: # Attempt to convert string to Enum
+            file_type_enum_member = FileType(document.file_type.lower())
+        except ValueError:
+            logger.error(f"Invalid file_type string '{document.file_type}' from DB for doc {document_id} in get_document_text")
+            # Fall through, will be handled by "if not file_type_enum_member"
     elif isinstance(document.file_type, FileType):
-        file_type_enum_member = document.file_type # It's already an enum
+        file_type_enum_member = document.file_type
 
     if not file_type_enum_member:
         logger.error(f"Could not map document.file_type '{document.file_type}' to FileType enum for doc {document_id} in get_document_text")
         raise HTTPException(status_code=500, detail="Internal error: Could not determine file type for text extraction.")
 
-    # Check if text extraction is supported for this file type
     if file_type_enum_member not in [FileType.PDF, FileType.DOCX, FileType.TXT, FileType.TEXT]:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Text extraction not supported for file type: {document.file_type}. Supported types for text extraction: PDF, DOCX, TXT."
         )
 
-    # --- Download and Extract Text ---
     try:
         file_bytes = await download_blob_as_bytes(document.storage_blob_path)
         if file_bytes is None:
             logger.error(f"Failed to download blob {document.storage_blob_path} for document {document_id} text retrieval")
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Error downloading file content.")
         
-        # Call the synchronous extract_text_from_bytes in a separate thread
         logger.info(f"Offloading text extraction for document {document_id} (get_document_text) to a separate thread.")
         extracted_text = await asyncio.to_thread(extract_text_from_bytes, file_bytes, file_type_enum_member)
         logger.info(f"Text extraction completed for document {document_id} (get_document_text). Chars: {len(extracted_text) if extracted_text else 0}")
 
         if extracted_text is None:
-            # This implies an error during extraction or unsupported type by the extraction func itself
             logger.warning(f"Text extraction returned None for document {document.id} ({document.file_type}).")
-            # Return empty string if extraction fails, or raise specific error if preferred
-            return "" # Or raise HTTPException(500, "Text extraction failed.")
+            return "" 
         
         return extracted_text
     except Exception as e:
@@ -613,25 +612,22 @@ async def read_documents(
     sort_order_str: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    """Protected endpoint to retrieve a list of document metadata."""
     user_kinde_id = current_user_payload.get("sub")
     logger.info(f"User {user_kinde_id} attempting to read list of documents with filters/sorting.")
-    # TODO: Add authorization logic (filter results based on user's access)
 
-    # Map sort_order_str to integer
+    sort_order_int: int
     if sort_order_str.lower() == "asc":
         sort_order_int = 1
     elif sort_order_str.lower() == "desc":
         sort_order_int = -1
     else:
-        # Raise error if the value is invalid
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid sort_order value. Use 'asc' or 'desc'."
         )
 
     documents = await crud.get_all_documents(
-        teacher_id=user_kinde_id, # Pass teacher_id
+        teacher_id=user_kinde_id, 
         student_id=student_id,
         assignment_id=assignment_id,
         status=status,
@@ -640,18 +636,14 @@ async def read_documents(
         sort_by=sort_by,
         sort_order=sort_order_int
     )
-    # <<< START EDIT: Add debug log before returning >>>
-    # Log the content being returned, limiting length if needed for brevity
     docs_to_log = []
     for doc in documents:
         try:
-            # Use model_dump to get a dict, might reveal issues if model is complex
             docs_to_log.append(doc.model_dump(mode='json')) 
         except Exception as log_e:
             logger.warning(f"Could not serialize document {getattr(doc, 'id', 'N/A')} for logging: {log_e}")
             docs_to_log.append({"id": str(getattr(doc, 'id', 'N/A')), "error": "Serialization failed for log"})
     logger.debug(f"Returning documents for GET /documents endpoint: {docs_to_log}")
-    # <<< END EDIT >>>
     return documents
 
 @router.put(
@@ -663,36 +655,33 @@ async def read_documents(
 )
 async def update_document_processing_status(
     document_id: uuid.UUID,
-    status_update: DocumentUpdate, # Expects {'status': DocumentStatus}
+    status_update: DocumentUpdate, 
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    """Protected endpoint to update the status of a document."""
     user_kinde_id = current_user_payload.get("sub")
     logger.info(f"User {user_kinde_id} attempting to update status for document ID: {document_id} to {status_update.status}")
     if status_update.status is None: raise HTTPException(status.HTTP_400_BAD_REQUEST, "Status field is required.")
 
-    # --- Authorization Check ---
-    # Check if the document exists AND belongs to the current user before updating status
     doc_to_update = await crud.get_document_by_id(
         document_id=document_id,
-        teacher_id=user_kinde_id # Use authenticated user's ID
+        teacher_id=user_kinde_id 
     )
     if not doc_to_update:
-        # Raise 404 whether it doesn't exist or belongs to another user
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with ID {document_id} not found or access denied."
         )
-    # --- End Authorization Check ---
 
-    # Proceed with status update only if the check above passed
-    updated_document = await crud.update_document_status(document_id=document_id, status=status_update.status)
+    # Pass teacher_id to update_document_status for scoped update
+    updated_document = await crud.update_document_status(
+        document_id=document_id, 
+        status=status_update.status, 
+        teacher_id=user_kinde_id 
+    )
     if updated_document is None:
-        # This might happen if the doc was deleted between the check and the update (race condition)
-        # Or if crud.update_document_status failed for another reason
         logger.error(f"Failed to update status for doc {document_id} even after ownership check passed for user {user_kinde_id}.")
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Document {document_id} not found during status update.")
-    # Log the string value from the input
+    
     logger.info(f"Document {document_id} status updated to {status_update.status.value} by user {user_kinde_id}.")
     return updated_document
 
@@ -702,36 +691,24 @@ async def update_document_processing_status(
     summary="Delete a document and associated data (Protected)",
     description="Soft-deletes a document metadata record, and attempts to delete the associated file from Blob Storage and the analysis result. Requires authentication."
 )
-async def delete_document(
+async def delete_document_endpoint( # Renamed to avoid potential clash
     document_id: uuid.UUID,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    """
-    Protected endpoint to soft-delete a document and its associated blob/result.
-    Deletion is handled by the CRUD layer.
-    """
     user_kinde_id = current_user_payload.get("sub")
     logger.info(f"User {user_kinde_id} attempting to delete document ID: {document_id}")
 
     try:
-        # Call the updated CRUD function which now handles auth, blob, result, and soft delete
         success = await crud.delete_document(document_id=document_id, teacher_id=user_kinde_id)
-
         if not success:
             logger.warning(f"crud.delete_document returned False for document {document_id} initiated by user {user_kinde_id}.")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found or delete operation failed.")
-
         logger.info(f"Successfully processed delete request for document {document_id} by user {user_kinde_id}.")
-        # No explicit return needed here for 204 status code
-
-    except Exception as e: # Catch ALL exceptions here
-        if isinstance(e, HTTPException):
-            # If it's an HTTPException we intentionally raised (like the 404)
-            raise e # Re-raise it as is
-        else:
-            # For any other unexpected exception
-            logger.error(f"Unexpected error in delete document endpoint for {document_id}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during document deletion.")
+    except HTTPException: # Re-raise known HTTP exceptions
+        raise
+    except Exception as e: 
+        logger.error(f"Unexpected error in delete document endpoint for {document_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during document deletion.")
 
 @router.post(
     "/batch",
@@ -747,16 +724,11 @@ async def upload_batch(
     priority: BatchPriority = Form(BatchPriority.NORMAL, description="Processing priority for the batch"),
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    """
-    Protected endpoint to upload multiple documents in a batch, store them,
-    create metadata, and initiate the analysis process.
-    """
     user_kinde_id = current_user_payload.get("sub")
     logger.info(f"User {user_kinde_id} attempting to upload batch of {len(files)} documents")
 
-    # Create batch record
     batch_data = BatchCreate(
-        teacher_id=user_kinde_id,
+        teacher_id=user_kinde_id, # Assuming Batch model's user_id field stores Kinde ID
         total_files=len(files),
         status=BatchStatus.UPLOADING,
         priority=priority
@@ -768,59 +740,47 @@ async def upload_batch(
             detail="Failed to create batch record"
         )
 
-    documents = []
-    failed_files = []
+    created_docs_list = [] # Renamed to avoid clash
+    failed_files_list = [] # Renamed
 
-    # Process each file
-    for file in files:
+    # Map BatchPriority to integer processing_priority for Document
+    priority_value_map = {
+        BatchPriority.LOW: 0,
+        BatchPriority.NORMAL: 1,
+        BatchPriority.HIGH: 2,
+        BatchPriority.URGENT: 3,
+    }
+    doc_processing_priority = priority_value_map.get(priority, 1) # Default to 1 (NORMAL)
+
+    for file_item in files: # Renamed to avoid clash
+        original_filename = file_item.filename or "unknown_file"
         try:
-            original_filename = file.filename or "unknown_file"
-            
-            # File type validation
-            content_type = file.content_type
+            content_type = file_item.content_type
             file_extension = os.path.splitext(original_filename)[1].lower()
-            file_type_enum = None
+            file_type_enum: Optional[FileType] = None
             
-            if file_extension == ".pdf" and content_type == "application/pdf": 
-                file_type_enum = FileType.PDF
-            elif file_extension == ".docx" and content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document": 
-                file_type_enum = FileType.DOCX
-            elif file_extension == ".txt" and content_type == "text/plain": 
-                file_type_enum = FileType.TXT
-            elif file_extension == ".png" and content_type == "image/png": 
-                file_type_enum = FileType.PNG
-            elif file_extension in [".jpg", ".jpeg"] and content_type == "image/jpeg": 
-                file_type_enum = FileType.JPG
+            if file_extension == ".pdf" and content_type == "application/pdf": file_type_enum = FileType.PDF
+            elif file_extension == ".docx" and content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document": file_type_enum = FileType.DOCX
+            elif file_extension == ".txt" and content_type == "text/plain": file_type_enum = FileType.TXT
+            elif file_extension == ".png" and content_type == "image/png": file_type_enum = FileType.PNG
+            elif file_extension in [".jpg", ".jpeg"] and content_type == "image/jpeg": file_type_enum = FileType.JPG
 
             if file_type_enum is None:
-                failed_files.append({
+                failed_files_list.append({
                     "filename": original_filename,
                     "error": f"Unsupported file type: {content_type}"
                 })
                 continue
 
-            # Upload to blob storage
-            blob_name = await upload_file_to_blob(upload_file=file)
+            blob_name = await upload_file_to_blob(upload_file=file_item)
             if not blob_name:
-                failed_files.append({
+                failed_files_list.append({
                     "filename": original_filename,
                     "error": "Failed to upload to storage"
                 })
                 continue
 
-            # Create document record
             now = datetime.now(timezone.utc)
-            # Convert priority enum to integer
-            priority_value = 0  # Default
-            if priority == BatchPriority.LOW:
-                priority_value = 0
-            elif priority == BatchPriority.NORMAL:
-                priority_value = 1
-            elif priority == BatchPriority.HIGH:
-                priority_value = 2
-            elif priority == BatchPriority.URGENT:
-                priority_value = 3
-
             document_data = DocumentCreate(
                 original_filename=original_filename,
                 storage_blob_path=blob_name,
@@ -828,67 +788,95 @@ async def upload_batch(
                 upload_timestamp=now,
                 student_id=student_id,
                 assignment_id=assignment_id,
-                status=DocumentStatus.UPLOADED,
+                status=DocumentStatus.UPLOADED, # Start as UPLOADED, then QUEUED after enqueue
                 batch_id=batch.id,
-                queue_position=len(documents) + 1,
-                processing_priority=priority_value,  # Use the converted integer value
+                queue_position=len(created_docs_list) + 1, # Tentative, may not be strictly used if priority queue
+                processing_priority=doc_processing_priority,
                 teacher_id=user_kinde_id
             )
             
-            document = await crud.create_document(document_in=document_data)
-            if not document:
-                failed_files.append({
+            document_obj = await crud.create_document(document_in=document_data) # Renamed
+            if not document_obj:
+                failed_files_list.append({
                     "filename": original_filename,
                     "error": "Failed to create document record"
                 })
                 continue
 
-            # Create initial result record
             result_data = ResultCreate(
-                score=None,
-                status=ResultStatus.PENDING,
-                result_timestamp=now,
-                document_id=document.id,
-                teacher_id=user_kinde_id
+                score=None, status=ResultStatus.PENDING, result_timestamp=now,
+                document_id=document_obj.id, teacher_id=user_kinde_id
             )
-            created_result = await crud.create_result(result_in=result_data)
-            # --- ADDED: Log result creation outcome ---
-            if created_result:
-                logger.info(f"Successfully created initial Result record {created_result.id} for Document {document.id}")
+            batch_created_result = await crud.create_result(result_in=result_data) # Renamed
+            if batch_created_result:
+                logger.info(f"Successfully created initial Result record {batch_created_result.id} for Document {document_obj.id}")
             else:
-                logger.error(f"!!! Failed to create initial Result record for Document {document.id}. crud.create_result returned None.")
-            # --- END ADDED ---
-            
-            documents.append(document)
+                logger.error(f"!!! Failed to create initial Result record for Document {document_obj.id}. crud.create_result returned None.")
+
+            enqueue_success_item = await enqueue_assessment_task( # Renamed
+                document_id=document_obj.id,
+                user_id=user_kinde_id,
+                priority_level=doc_processing_priority, # Use mapped priority
+            )
+            if enqueue_success_item:
+                updated_doc_item = await crud.update_document_status( # Renamed
+                    document_id=document_obj.id,
+                    teacher_id=user_kinde_id,
+                    status=DocumentStatus.QUEUED,
+                )
+                if updated_doc_item:
+                    document_obj = updated_doc_item # Refresh with new status
+            else: # Enqueue failed
+                logger.error(f"Failed to enqueue assessment task for document {document_obj.id}. Setting status to ERROR.")
+                error_doc_item = await crud.update_document_status( # Renamed
+                     document_id=document_obj.id, teacher_id=user_kinde_id, status=DocumentStatus.ERROR
+                )
+                if error_doc_item: document_obj = error_doc_item # Refresh with ERROR status
+
+
+            created_docs_list.append(document_obj)
 
         except Exception as e:
-            logger.error(f"Error processing file {file.filename}: {str(e)}")
-            failed_files.append({
-                "filename": file.filename,
+            logger.error(f"Error processing file {original_filename} in batch: {str(e)}", exc_info=True)
+            failed_files_list.append({
+                "filename": original_filename,
                 "error": str(e)
             })
 
-    # Update batch status
+    batch_status_val = BatchStatus.QUEUED # Default if some docs are queued
+    if not created_docs_list and failed_files_list: # All failed if files were provided
+        batch_status_val = BatchStatus.ERROR
+    elif failed_files_list: # Some succeeded, some failed
+        batch_status_val = BatchStatus.PARTIAL_FAILURE if created_docs_list else BatchStatus.ERROR
+
     batch_update = BatchUpdate(
-        completed_files=0,
-        failed_files=len(failed_files),
-        status=BatchStatus.QUEUED if documents else BatchStatus.ERROR,
-        error_message=f"Failed to process {len(failed_files)} files" if failed_files else None
+        completed_files=0, # To be updated by worker
+        failed_files=len(failed_files_list),
+        status=batch_status_val,
+        error_message=f"Failed to process {len(failed_files_list)} files during batch upload." if failed_files_list else None
     )
     updated_batch = await crud.update_batch(batch_id=batch.id, batch_in=batch_update)
+    if not updated_batch : updated_batch = batch # Fallback if update fails
 
-    if not documents:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "message": "Failed to process any files in the batch",
-                "failed_files": failed_files
-            }
-        )
+    if not created_docs_list and files: # If files were provided but none made it to a document object
+        # Consider if a 201 is still appropriate or if an error reflecting partial/total failure should be raised.
+        # For now, returning 201 as batch object was created. Client inspects BatchWithDocuments.
+        logger.warning(f"Batch {updated_batch.id}: No documents successfully processed from the {len(files)} provided files. Failures: {len(failed_files_list)}")
 
+
+    # Ensure all fields for BatchWithDocuments are correctly populated from updated_batch
     return BatchWithDocuments(
-        **updated_batch.dict(),
-        document_ids=[doc.id for doc in documents]
+        id=updated_batch.id,
+        user_id=updated_batch.user_id, # Ensure this field name matches your Batch model
+        created_at=updated_batch.created_at,
+        updated_at=updated_batch.updated_at,
+        total_files=updated_batch.total_files,
+        completed_files=updated_batch.completed_files,
+        failed_files=updated_batch.failed_files,
+        status=updated_batch.status,
+        priority=updated_batch.priority,
+        error_message=updated_batch.error_message,
+        document_ids=[doc.id for doc in created_docs_list]
     )
 
 @router.get(
@@ -898,36 +886,39 @@ async def upload_batch(
     summary="Get batch upload status (Protected)",
     description="Get the status of a batch upload including all documents in the batch. Requires authentication."
 )
-async def get_batch_status(
+async def get_batch_status_endpoint( # Renamed
     batch_id: uuid.UUID,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    """
-    Protected endpoint to get the status of a batch upload and its documents.
-    """
     user_kinde_id = current_user_payload.get("sub")
     
-    # Get batch
-    batch = await crud.get_batch_by_id(batch_id=batch_id)
-    if not batch:
+    batch_obj = await crud.get_batch_by_id(batch_id=batch_id) # Renamed
+    if not batch_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Batch with ID {batch_id} not found"
         )
 
-    # Authorization check
-    if batch.user_id != user_kinde_id:
+    if batch_obj.user_id != user_kinde_id: # Check against user_id from Batch model
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this batch"
         )
 
-    # Get all documents in batch
-    documents = await crud.get_documents_by_batch_id(batch_id=batch_id)
+    batch_documents = await crud.get_documents_by_batch_id(batch_id=batch_id, teacher_id=user_kinde_id) # Scoped document fetch
     
     return BatchWithDocuments(
-        **batch.dict(),
-        document_ids=[doc.id for doc in documents]
+        id=batch_obj.id,
+        user_id=batch_obj.user_id,
+        created_at=batch_obj.created_at,
+        updated_at=batch_obj.updated_at,
+        total_files=batch_obj.total_files,
+        completed_files=batch_obj.completed_files,
+        failed_files=batch_obj.failed_files,
+        status=batch_obj.status,
+        priority=batch_obj.priority,
+        error_message=batch_obj.error_message,
+        document_ids=[doc.id for doc in batch_documents]
     )
 
 @router.post(
@@ -935,145 +926,130 @@ async def get_batch_status(
     status_code=status.HTTP_200_OK,
     summary="Reset a stuck document assessment (Protected)",
     description="Sets the status of a document and its associated result back to ERROR. Useful for assessments stuck in PROCESSING/ASSESSING.",
-    response_model=Dict[str, str] # Simple confirmation message
+    response_model=Dict[str, str] 
 )
-async def reset_assessment_status(
+async def reset_assessment_status_endpoint( # Renamed
     document_id: uuid.UUID,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     user_kinde_id = current_user_payload.get("sub")
-    if not user_kinde_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    # No need to check user_kinde_id for None as Depends handles it
 
     logger.info(f"User {user_kinde_id} attempting to reset status for document {document_id}")
 
-    # --- Get Document and Result (Check Ownership) ---
-    document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id, include_deleted=True)
-    if not document:
+    document_obj = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id, include_deleted=True) # Renamed
+    if not document_obj:
         logger.warning(f"Reset attempt failed: Document {document_id} not found or not owned by user {user_kinde_id}.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found or access denied.")
 
-    result = await crud.get_result_by_document_id(document_id=document_id, include_deleted=True)
+    # Use teacher_id from the fetched document for subsequent scoped CRUD calls
+    auth_teacher_id = document_obj.teacher_id
+    if not auth_teacher_id: # Should be present if fetched with teacher_id scope
+        logger.error(f"Critical: auth_teacher_id is missing for document {document_obj.id} during reset operation by {user_kinde_id}")
+        raise HTTPException(status_code=500, detail="Internal error: Teacher identifier missing.")
 
-    # --- Update Document Status ---    
-    logger.info(f"Resetting document {document_id} status to ERROR.")
-    updated_doc = await crud.update_document_status(
-        document_id=document_id,
-        teacher_id=document.teacher_id, # ADDED teacher_id from the fetched document
+
+    logger.info(f"Resetting document {document_obj.id} status to ERROR.")
+    updated_doc_obj = await crud.update_document_status( # Renamed
+        document_id=document_obj.id,
+        teacher_id=auth_teacher_id, 
         status=DocumentStatus.ERROR
-        # Note: We don't know the counts here, so don't provide them
     )
-    if not updated_doc:
-        logger.error(f"Failed to update document status to ERROR during reset for {document_id}.")
-        # Proceed to try and update result anyway, but log this issue
+    doc_reset_failed = not updated_doc_obj
+    if doc_reset_failed:
+        logger.error(f"Failed to update document status to ERROR during reset for {document_obj.id}.")
 
-    # --- Update Result Status --- 
-    if result:
-        logger.info(f"Resetting result {result.id} status to ERROR.")
-        updated_result = await crud.update_result(
-            result_id=result.id,
-            update_data={"status": ResultStatus.ERROR}
+    result_obj = await crud.get_result_by_document_id(document_id=document_obj.id, teacher_id=auth_teacher_id, include_deleted=True) # Renamed, scoped
+    result_reset_failed = False
+    if result_obj:
+        logger.info(f"Resetting result {result_obj.id} status to ERROR.")
+        updated_result_obj = await crud.update_result( # Renamed
+            result_id=result_obj.id,
+            teacher_id=auth_teacher_id, # Pass teacher_id if supported for scoping
+            update_data={"status": ResultStatus.ERROR.value} # Use .value for enums in payload
         )
-        if not updated_result:
-            logger.error(f"Failed to update result status to ERROR during reset for {result.id} (doc: {document_id}).")
-            # If document update succeeded but result failed, raise error
-            if updated_doc: 
-                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fully reset result status.")
-            # If both failed, let the final error handle it
+        if not updated_result_obj:
+            logger.error(f"Failed to update result status to ERROR during reset for {result_obj.id} (doc: {document_obj.id}).")
+            result_reset_failed = True
     else:
-        logger.warning(f"No result record found to reset for document {document_id}. Document status may have been reset.")
+        logger.warning(f"No result record found to reset for document {document_obj.id}. Document status reset attempt was made.")
 
-    # If either update failed earlier, this might not be reached if an exception was raised
-    if not updated_doc and not result: # If doc failed and no result found
-         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset document status (no result found)." )
-    elif not updated_doc and result and not updated_result: # If both failed
-         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset both document and result status.")
+    if doc_reset_failed and (not result_obj or result_reset_failed):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset document and related result status.")
+    if doc_reset_failed:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset document status, result handling may have varied.")
+    if result_reset_failed: # Implies doc_reset was OK
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Document status reset, but failed to reset result status.")
 
-    logger.info(f"Successfully reset status for document {document_id} and associated result (if found).")
+    logger.info(f"Successfully reset status for document {document_obj.id} and associated result (if found).")
     return {"message": f"Successfully reset status for document {document_id} to ERROR."}
 
 @router.post(
     "/{document_id}/cancel",
     status_code=status.HTTP_200_OK,
     summary="Cancel a stuck document assessment (Protected)",
-    description="Sets the status of a document (if PROCESSING) and its associated result (if ASSESSING) back to ERROR. Functionally similar to reset, provides a cancel semantic.",
-    response_model=Dict[str, str] # Simple confirmation message
+    description="Sets the status of a document (if PROCESSING or RETRYING) and its associated result (if ASSESSING or RETRYING) back to ERROR.",
+    response_model=Dict[str, str] 
 )
-async def cancel_assessment_status(
+async def cancel_assessment_status_endpoint( # Renamed
     document_id: uuid.UUID,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     user_kinde_id = current_user_payload.get("sub")
-    if not user_kinde_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
-
     logger.info(f"User {user_kinde_id} attempting to CANCEL status for document {document_id}")
 
-    # --- Get Document and Result (Check Ownership) ---
-    # Fetch document, including deleted=True just in case it was soft-deleted during processing
-    document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id, include_deleted=True)
-    if not document:
+    document_obj = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id, include_deleted=True) # Renamed
+    if not document_obj:
         logger.warning(f"Cancel attempt failed: Document {document_id} not found or not owned by user {user_kinde_id}.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found or access denied.")
 
-    # --- Check if Cancellable --- 
-    # Only allow cancellation if it's actually in a processing state
-    if document.status not in [
-        DocumentStatus.PROCESSING,
-        DocumentStatus.RETRYING,
-    ]:  # Only allow cancelling active processing states
-         logger.warning(f"Document {document_id} is not in PROCESSING state (currently {document.status}). Cannot cancel.")
-         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Cannot cancel assessment. Document status is {document.status}.")
+    auth_teacher_id = document_obj.teacher_id
+    if not auth_teacher_id:
+        logger.error(f"Critical: auth_teacher_id is missing for document {document_obj.id} during cancel operation by {user_kinde_id}")
+        raise HTTPException(status_code=500, detail="Internal error: Teacher identifier missing.")
 
-    result = await crud.get_result_by_document_id(document_id=document_id, include_deleted=True)
 
-    # --- Update Document Status to ERROR ---    
-    logger.info(f"Cancelling document {document_id} by setting status to ERROR.")
-    updated_doc = await crud.update_document_status(
-        document_id=document_id,
-        teacher_id=document.teacher_id, # ADDED teacher_id from the fetched document
+    cancellable_doc_statuses = [DocumentStatus.PROCESSING, DocumentStatus.RETRYING, DocumentStatus.QUEUED, DocumentStatus.UPLOADED] # Expanded list
+    if document_obj.status not in cancellable_doc_statuses: 
+        logger.warning(f"Document {document_obj.id} is not in a cancellable state (currently {document_obj.status}). Cannot cancel.")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Cannot cancel assessment. Document status is {document_obj.status.value}.")
+
+    logger.info(f"Cancelling document {document_obj.id} by setting status to ERROR.")
+    updated_doc_obj = await crud.update_document_status( # Renamed
+        document_id=document_obj.id,
+        teacher_id=auth_teacher_id, 
         status=DocumentStatus.ERROR
     )
-    if not updated_doc:
-        logger.error(f"Failed to update document status to ERROR during cancel for {document_id}.")
-        # Proceed to try and update result anyway, but log this issue
+    doc_cancel_failed = not updated_doc_obj
+    if doc_cancel_failed:
+        logger.error(f"Failed to update document status to ERROR during cancel for {document_obj.id}.")
 
-    # --- Update Result Status to ERROR (if applicable) --- 
-    updated_result = None # Initialize to track if update was attempted and failed
-    result_updated_or_skipped = False # Track if update succeeded OR was skipped correctly
+    result_obj = await crud.get_result_by_document_id(document_id=document_obj.id, teacher_id=auth_teacher_id, include_deleted=True) # Renamed, scoped
+    result_handling_issue = False
 
-    if result:
-         # Only try to update result if it's currently ASSESSING
-        if result.status in [ResultStatus.ASSESSING, ResultStatus.RETRYING]:
-            logger.info(f"Cancelling result {result.id} by setting status to ERROR.")
-            updated_result = await crud.update_result(
-                result_id=result.id,
-                update_data={"status": ResultStatus.ERROR}
+    if result_obj:
+        cancellable_result_statuses = [ResultStatus.ASSESSING, ResultStatus.RETRYING, ResultStatus.PENDING] # Expanded list
+        if result_obj.status in cancellable_result_statuses:
+            logger.info(f"Cancelling result {result_obj.id} by setting status to ERROR.")
+            updated_result_obj = await crud.update_result( # Renamed
+                result_id=result_obj.id,
+                teacher_id=auth_teacher_id, # Pass teacher_id if supported
+                update_data={"status": ResultStatus.ERROR.value}
             )
-            if not updated_result:
-                logger.error(f"Failed to update result status to ERROR during cancel for {result.id} (doc: {document_id}).")
-                # If document update succeeded but result failed, raise error now
-                if updated_doc: 
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fully cancel result status after updating document.")
-                result_updated_or_skipped = False # Mark as failed
-            else:
-                 result_updated_or_skipped = True # Mark as succeeded
+            if not updated_result_obj:
+                logger.error(f"Failed to update result status to ERROR during cancel for {result_obj.id} (doc: {document_obj.id}).")
+                result_handling_issue = True
         else:
-            logger.info(f"Result {result.id} status is {result.status} (not ASSESSING). Not changing result status during cancel.")
-            result_updated_or_skipped = True # Mark as skipped correctly
+            logger.info(f"Result {result_obj.id} status is {result_obj.status.value} (not actively processing). Not changing result status during cancel.")
     else:
-        logger.warning(f"No result record found to cancel for document {document_id}. Document status may have been set to ERROR.")
-        result_updated_or_skipped = True # Treat as success since there was no result to update
+        logger.warning(f"No result record found to cancel for document {document_obj.id}. Document status cancel attempt was made.")
+    
+    if doc_cancel_failed and (not result_obj or result_handling_issue):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to cancel document and encountered issues with result handling.")
+    if doc_cancel_failed:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to cancel document status; result handling may have varied.")
+    if result_handling_issue: # Implies doc_cancel was OK
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Document status cancelled, but failed to update associated result status.")
 
-    # --- Final Check & Response --- 
-    # Raise error if document update failed AND result update/skip failed
-    if not updated_doc and not result_updated_or_skipped: 
-         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to cancel document and result status.")
-    # Raise error if only document update failed (and result was ok/skipped)
-    elif not updated_doc: 
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to cancel document status.")
-    # If result update failed after doc succeeded, exception was already raised inside the block
-
-    logger.info(f"Successfully cancelled assessment processing for document {document_id} (set status to ERROR).")
+    logger.info(f"Successfully cancelled assessment processing for document {document_obj.id} (set status to ERROR).")
     return {"message": f"Successfully cancelled assessment for document {document_id}. Status set to ERROR."}
-

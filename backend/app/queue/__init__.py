@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+from pydantic import BaseModel, Field
+from pymongo import ReturnDocument
+
+from app.db.database import get_database
+
+# Default configuration values
+DEFAULT_VISIBILITY_TIMEOUT = 60  # seconds
+MAX_ATTEMPTS = 5
+
+class AssessmentTask(BaseModel):
+    """Model representing a queued assessment task."""
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, alias="_id")
+    document_id: uuid.UUID
+    user_id: str
+    priority_level: int = 0
+    attempts: int = 0
+    status: str = "PENDING"
+    available_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    class Config:
+        allow_population_by_field_name = True
+        arbitrary_types_allowed = True
+
+async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority_level: int) -> bool:
+    """Add a new assessment task to the queue."""
+    db = get_database()
+    if db is None:
+        return False
+    task = AssessmentTask(document_id=document_id, user_id=user_id, priority_level=priority_level)
+    result = await db.assessment_tasks.insert_one(task.model_dump(by_alias=True))
+    return bool(result.acknowledged)
+
+async def _claim_next_task(db, visibility_timeout: int) -> Optional[dict]:
+    now = datetime.now(timezone.utc)
+    filter_query = {
+        "$or": [
+            {"status": "PENDING"},
+            {"status": "IN_PROGRESS", "available_at": {"$lte": now}},
+        ]
+    }
+    update_doc = {
+        "$set": {
+            "status": "IN_PROGRESS",
+            "available_at": now + timedelta(seconds=visibility_timeout),
+            "updated_at": now,
+        },
+        "$inc": {"attempts": 1},
+    }
+    sort = [("priority_level", -1), ("created_at", 1)]
+    return await db.assessment_tasks.find_one_and_update(
+        filter=filter_query,
+        update=update_doc,
+        sort=sort,
+        return_document=ReturnDocument.AFTER,
+    )
+
+async def dequeue_assessment_task(visibility_timeout: int = DEFAULT_VISIBILITY_TIMEOUT, max_attempts: int = MAX_ATTEMPTS) -> Optional[AssessmentTask]:
+    """Retrieve the highest priority task, handling dead letters and at-least-once delivery."""
+    db = get_database()
+    if db is None:
+        return None
+
+    while True:
+        task_dict = await _claim_next_task(db, visibility_timeout)
+        if task_dict is None:
+            return None
+        if task_dict.get("attempts", 0) > max_attempts:
+            await db.assessment_tasks.delete_one({"_id": task_dict["_id"]})
+            task_dict["status"] = "DEAD_LETTER"
+            await db.assessment_deadletter.insert_one(task_dict)
+            # try to get another task
+            continue
+        return AssessmentTask(**task_dict)
