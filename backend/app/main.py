@@ -4,7 +4,7 @@ import time   # For uptime calculation
 import sys    # For sys.stdout in logging configuration
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone # For uptime calculation
 import asyncio
 from fastapi import status
@@ -28,9 +28,9 @@ from .api.v1.endpoints.results import router as results_router
 from .api.v1.endpoints.dashboard import router as dashboard_router
 from .api.v1.endpoints.analytics import router as analytics_router
 
-# Import batch processor and assessment worker
-# RESOLVED CONFLICT 1
-from .tasks import batch_processor, assessment_worker
+# Import worker and processor classes directly
+from .tasks.batch_processor import BatchProcessor
+from .tasks.assessment_worker import AssessmentWorker
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -61,6 +61,12 @@ _original_fastapi_app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json"
 )
+
+# Initialize app.state for storing worker/processor instances and tasks
+_original_fastapi_app.state.assessment_worker_instance = None
+_original_fastapi_app.state.assessment_worker_task = None
+_original_fastapi_app.state.batch_processor_instance = None
+_original_fastapi_app.state.batch_processor_task = None
 
 # Add CORS middleware
 _original_fastapi_app.add_middleware(
@@ -93,14 +99,12 @@ async def startup_event():
 
     # Check if a handler with our specific formatter already exists to avoid duplicates if reloaded
     # This is a simple check; more robust would be to name the handler or check its type/formatter more precisely.
-    handler_exists = False
-    for handler in root_logger.handlers:
-        if isinstance(handler, logging.StreamHandler) and isinstance(handler.formatter, logging.Formatter):
-            if handler.formatter._fmt == "%(asctime)s - %(name)s - %(levelname)s - %(message)s":
-                handler_exists = True
-                # Optionally, ensure its level is also consistent if needed
-                # handler.setLevel(numeric_log_level) 
-                break
+    handler_exists = any(
+        isinstance(h, logging.StreamHandler) and 
+        isinstance(h.formatter, logging.Formatter) and 
+        h.formatter._fmt == "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        for h in root_logger.handlers
+    )
     
     if not handler_exists:
         stream_handler = logging.StreamHandler(sys.stdout)
@@ -119,135 +123,59 @@ async def startup_event():
         logger_to_use.info(f"StreamHandler with correct formatter already exists. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
     # --- End Logging Configuration ---
 
-    # Test log message from the main app logger
-    logger.info(f"Executing startup event: Connecting to database... Root logger effective level: {logging.getLevelName(logger.getEffectiveLevel())}")
+    logger.info(f"Logging configured. Root level: {logging.getLevelName(root_logger.level)}.")
+
+    logger.info("Executing startup event: Connecting to database...")
     try:
-        await connect_to_mongo() # Ensure this is awaited
+        await connect_to_mongo()
         logger.info("Startup event: Database connection successful.")
     except Exception as e:
-        # FORCEFUL LOGGING START
-        logger.critical(f"[STARTUP_EVENT_CRITICAL] connect_to_mongo() FAILED: {e}", exc_info=True)
-        # FORCEFUL LOGGING END
-        logger.error(f"Startup event: Failed to connect to database: {e}", exc_info=True)
+        logger.critical(f"[STARTUP_CRITICAL] connect_to_mongo() FAILED: {e}", exc_info=True)
         raise
 
     logger.info("Ensuring database indexes...")
-    db = get_database() # Get database instance
+    db = get_database()
     if db is None:
-        # FORCEFUL LOGGING START
-        logger.critical("[STARTUP_EVENT_CRITICAL] get_database() returned None. Cannot ensure collections/indexes.")
-        # FORCEFUL LOGGING END
-        logger.error("Cannot ensure collections/indexes: Database connection not available (db is None).")
+        logger.critical("[STARTUP_CRITICAL] get_database() returned None. Cannot ensure indexes.")
         return
-
     try:
-        # Ensure indexes for Teachers collection
-        teachers_collection = db.get_collection("teachers")
-        try:
-            await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
-            # FORCEFUL LOGGING START
-            logger.critical("[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_teacher_kinde_id' on teachers.kinde_id.")
-            # FORCEFUL LOGGING END
-            logger.info("Successfully created/verified non-unique index 'idx_teacher_kinde_id' on teachers.kinde_id")
-        except OperationFailure as e:
-            if e.code == 85: # IndexOptionsConflict
-                # FORCEFUL LOGGING START
-                logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id: {e.details.get('errmsg', str(e))}")
-                # FORCEFUL LOGGING END
-                logger.warning(
-                    f"Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id. "
-                    f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
-                    f"This means an index with the same name exists but has different options (e.g., unique, sparse). "
-                    f"The application will continue, but please resolve this manually in Azure Portal/Cosmos DB "
-                    f"by deleting the existing 'idx_teacher_kinde_id' and allowing the application to recreate it, "
-                    f"or by updating the application's index definition in app/main.py to match the existing one."
-                )
-            else:
-                # For other operation failures, log and re-raise
-                logger.error(f"Database OperationFailure while creating index 'idx_teacher_kinde_id': {e.details.get('errmsg', str(e))}", exc_info=True)
-                raise
-        except Exception as e:
-            # Catch any other unexpected errors during index creation for teachers
-            logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
-            # Depending on policy, you might want to raise this too
-
-        # --- Ensure indexes for Assessment Tasks collection ---
-        ASSESSMENT_TASKS_COLLECTION_NAME = "assessment_tasks"
-        assessment_tasks_collection = db.get_collection(ASSESSMENT_TASKS_COLLECTION_NAME)
-        if assessment_tasks_collection is not None:
-            idx_assessment_tasks_dequeue = IndexModel(
-                [("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)],
-                name="idx_assessment_tasks_dequeue_order"
-            )
-            try:
-                await assessment_tasks_collection.create_indexes([idx_assessment_tasks_dequeue])
-                logger.critical(f"[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}.")
-                logger.info(f"Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}")
-            except OperationFailure as e:
-                if e.code == 85: # IndexOptionsConflict
-                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}")
-                    logger.warning(
-                        f"Index conflict for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}. "
-                        f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
-                        f"This means an index with the same name exists but has different options. "
-                        f"The application will continue, but please resolve this manually in Azure Portal/Cosmos DB "
-                        f"by deleting the existing index and allowing the application to recreate it, "
-                        f"or by updating the application's index definition to match."
-                    )
-                elif "The order by query does not have a corresponding composite index that it can be served from." in e.details.get('errmsg', ''):
-                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Cosmos DB specific error for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}. This indicates the composite index is still missing or not usable by Cosmos DB despite creation attempt.")
-                    logger.error(f"Cosmos DB indexing issue for 'idx_assessment_tasks_dequeue_order': {e.details.get('errmsg', str(e))}", exc_info=True)
-                    # Potentially raise here if this index is absolutely critical for startup
-                else:
-                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Database OperationFailure while creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}")
-                    logger.error(f"Database OperationFailure while creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}", exc_info=True)
-                    raise
-            except Exception as e:
-                logger.critical(f"[STARTUP_EVENT_CRITICAL] Unexpected error creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e}")
-                logger.error(f"Unexpected error creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e}", exc_info=True)
-                # Potentially raise here
+        await db.teachers.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
+        logger.info("Index on teachers.kinde_id ensured.")
+        idx_assessment_dequeue = IndexModel([("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)], name="idx_assessment_tasks_dequeue_order")
+        await db.assessment_tasks.create_indexes([idx_assessment_dequeue])
+        logger.info("Index on assessment_tasks for dequeue order ensured.")
+    except OperationFailure as e:
+        if e.code == 85 or "The order by query does not have a corresponding composite index" in e.details.get('errmsg', ''):
+            logger.warning(f"Index creation/verification conflict/issue: {e.details.get('errmsg', str(e))}. App will continue.")
         else:
-            logger.critical(f"[STARTUP_EVENT_CRITICAL] Could not get collection '{ASSESSMENT_TASKS_COLLECTION_NAME}' to create indexes.")
-            logger.error(f"Could not get collection '{ASSESSMENT_TASKS_COLLECTION_NAME}' to create indexes.")
-
-        # Ensure indexes for Documents collection (example, adjust as needed)
-        # documents_collection = db[DOCUMENT_COLLECTION]
-        # await documents_collection.create_index([("teacher_id", 1), ("upload_timestamp", -1)], name="idx_doc_teacher_upload")
-        # logger.info("Successfully created/verified index 'idx_doc_teacher_upload' on documents")
-
-        logger.info("Database indexes ensured.")
-
+            logger.error(f"Database OperationFailure during index creation: {e}", exc_info=True)
+            raise
     except Exception as e:
-        logger.error(f"An error occurred during index creation: {e}", exc_info=True)
-        # Decide if app should proceed if index creation fails for non-critical indexes
+        logger.error(f"Error during index creation: {e}", exc_info=True)
 
     # Start BatchProcessor
     try:
-        # Assuming BatchProcessor is designed to be started and run in the background
-        from .tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
-        processor = BatchProcessor()
-        asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
-        logger.info("Batch processor started")
+        bp_instance = BatchProcessor() # Uses imported class
+        _original_fastapi_app.state.batch_processor_instance = bp_instance
+        _original_fastapi_app.state.batch_processor_task = asyncio.create_task(bp_instance.process_batches())
+        logger.info("BatchProcessor started and stored in app.state.")
     except Exception as e:
-        # FORCEFUL LOGGING START
-        logger.critical(f"[STARTUP_EVENT_CRITICAL] Failed to start batch processor: {e}", exc_info=True)
-        # FORCEFUL LOGGING END
-        logger.error(f"Failed to start batch processor: {e}", exc_info=True)
+        logger.critical(f"[STARTUP_CRITICAL] Failed to start BatchProcessor: {e}", exc_info=True)
 
-    # FORCEFUL LOGGING START
-    logger.critical("############################################################")
-    logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function COMPLETED.")
-    logger.critical("############################################################")
-    # FORCEFUL LOGGING END
-
-    # Start AssessmentWorker (Integrated from Codex branch)
+    # Start AssessmentWorker
     try:
-        from .tasks.assessment_worker import AssessmentWorker # Consistent relative import
-        worker = AssessmentWorker()
-        asyncio.create_task(worker.run())
-        logger.info("Assessment worker started")
+        db_for_worker = get_database() # Re-fetch or ensure db is still valid if startup is long
+        if db_for_worker is not None:
+            aw_instance = AssessmentWorker(db=db_for_worker) # Uses imported class
+            _original_fastapi_app.state.assessment_worker_instance = aw_instance
+            _original_fastapi_app.state.assessment_worker_task = asyncio.create_task(aw_instance.run())
+            logger.info("AssessmentWorker started and stored in app.state.")
+        else:
+            logger.error("Failed to get DB for AssessmentWorker post-index creation. Worker not started.")
     except Exception as e:
-        logger.error(f"Failed to start assessment worker: {e}", exc_info=True)
+        logger.critical(f"[STARTUP_CRITICAL] Failed to start AssessmentWorker: {e}", exc_info=True)
+    
+    logger.info("[STARTUP_EVENT] >>> FastAPI startup_event function COMPLETED.")
 
 @_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
@@ -255,24 +183,46 @@ async def shutdown_event():
     logger.info("Executing shutdown event...")
 
     # Stop batch processor
-    # Ensure batch_processor module (imported at top) has a stop() method or adjust accordingly
-    if hasattr(batch_processor, 'stop') and callable(batch_processor.stop): # Defensive check
-        batch_processor.stop()
-        logger.info("Batch processor stop requested")
-    else:
-        logger.warning("batch_processor module does not have a callable stop() method as expected.")
-
-
+    bp_instance = getattr(_original_fastapi_app.state, 'batch_processor_instance', None)
+    bp_task = getattr(_original_fastapi_app.state, 'batch_processor_task', None)
+    if bp_instance and hasattr(bp_instance, 'stop'):
+        logger.info("Requesting BatchProcessor to stop...")
+        bp_instance.stop()
+        if bp_task and not bp_task.done():
+            logger.info("Waiting for BatchProcessor task to complete...")
+            try:
+                await asyncio.wait_for(bp_task, timeout=10.0)
+                logger.info("BatchProcessor task completed.")
+            except asyncio.TimeoutError:
+                logger.warning("BatchProcessor task timed out. Cancelling...")
+                bp_task.cancel()
+            except Exception as e_bp_shutdown:
+                logger.error(f"Error during BatchProcessor task shutdown: {e_bp_shutdown}", exc_info=True)
+    
     # Stop assessment worker
-    # Ensure assessment_worker module (imported at top) has a stop() method or adjust accordingly
-    if hasattr(assessment_worker, 'stop') and callable(assessment_worker.stop): # Defensive check
-        assessment_worker.stop()
-        logger.info("Assessment worker stop requested")
-    else:
-        logger.warning("assessment_worker module does not have a callable stop() method as expected.")
+    aw_instance = getattr(_original_fastapi_app.state, 'assessment_worker_instance', None)
+    aw_task = getattr(_original_fastapi_app.state, 'assessment_worker_task', None)
+    if aw_instance and hasattr(aw_instance, 'stop'):
+        logger.info("Requesting AssessmentWorker to stop...")
+        aw_instance.stop()
+        if aw_task and not aw_task.done():
+            logger.info("Waiting for AssessmentWorker task to complete...")
+            try:
+                timeout_aw = getattr(aw_instance, 'poll_interval', 10.0) + 5.0
+                await asyncio.wait_for(aw_task, timeout=timeout_aw)
+                logger.info("AssessmentWorker task completed.")
+            except asyncio.TimeoutError:
+                logger.warning("AssessmentWorker task timed out. Cancelling...")
+                aw_task.cancel()
+                try: await aw_task
+                except asyncio.CancelledError: logger.info("AssessmentWorker task successfully cancelled.")
+                except Exception as e_aw_cancel: logger.error(f"Error awaiting cancelled AW task: {e_aw_cancel}", exc_info=True)
+            except Exception as e_aw_shutdown:
+                logger.error(f"Error during AssessmentWorker task shutdown: {e_aw_shutdown}", exc_info=True)
 
     logger.info("Disconnecting from database...")
     await close_mongo_connection()
+    logger.info("Database connection closed. Shutdown event complete.")
 
 # --- API Endpoints ---
 @_original_fastapi_app.get("/", tags=["Root"], include_in_schema=False)

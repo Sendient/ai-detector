@@ -6,6 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..db.database import get_database
 
@@ -30,16 +31,18 @@ class AssessmentTask(BaseModel):
         allow_population_by_field_name = True
         arbitrary_types_allowed = True
 
-async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority_level: int) -> bool:
+async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority_level: int, db: Optional[AsyncIOMotorDatabase] = None) -> bool:
     """Add a new assessment task to the queue."""
-    db = get_database()
+    if db is None:
+        db = get_database()
+    
     if db is None:
         return False
     task = AssessmentTask(document_id=document_id, user_id=user_id, priority_level=priority_level)
     result = await db.assessment_tasks.insert_one(task.model_dump(by_alias=True))
     return bool(result.acknowledged)
 
-async def _claim_next_task(db, visibility_timeout: int) -> Optional[dict]:
+async def _claim_next_task(db: AsyncIOMotorDatabase, visibility_timeout: int) -> Optional[dict]:
     now = datetime.now(timezone.utc)
     filter_query = {
         "$or": [
@@ -63,20 +66,28 @@ async def _claim_next_task(db, visibility_timeout: int) -> Optional[dict]:
         return_document=ReturnDocument.AFTER,
     )
 
-async def dequeue_assessment_task(visibility_timeout: int = DEFAULT_VISIBILITY_TIMEOUT, max_attempts: int = MAX_ATTEMPTS) -> Optional[AssessmentTask]:
+async def dequeue_assessment_task(
+    visibility_timeout: int = DEFAULT_VISIBILITY_TIMEOUT, 
+    max_attempts: int = MAX_ATTEMPTS,
+    db: Optional[AsyncIOMotorDatabase] = None
+) -> Optional[AssessmentTask]:
     """Retrieve the highest priority task, handling dead letters and at-least-once delivery."""
-    db = get_database()
     if db is None:
+        current_db = get_database()
+    else:
+        current_db = db
+        
+    if current_db is None:
         return None
 
     while True:
-        task_dict = await _claim_next_task(db, visibility_timeout)
+        task_dict = await _claim_next_task(current_db, visibility_timeout)
         if task_dict is None:
             return None
         if task_dict.get("attempts", 0) > max_attempts:
-            await db.assessment_tasks.delete_one({"_id": task_dict["_id"]})
+            await current_db.assessment_tasks.delete_one({"_id": task_dict["_id"]})
             task_dict["status"] = "DEAD_LETTER"
-            await db.assessment_deadletter.insert_one(task_dict)
+            await current_db.assessment_deadletter.insert_one(task_dict)
             # try to get another task
             continue
         return AssessmentTask(**task_dict)

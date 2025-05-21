@@ -4,4 +4,5 @@ from .batch_processor import BatchProcessor
 from .assessment_worker import AssessmentWorker
 
 batch_processor = BatchProcessor()
-assessment_worker = AssessmentWorker()
+# The line below was causing a TypeError and should be removed.
+# assessment_worker = AssessmentWorker()

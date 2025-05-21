@@ -43,6 +43,9 @@ function DocumentsPage() {
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
+  // Polling interval in milliseconds
+  const POLLING_INTERVAL = 5000; // 5 seconds
+
   const fetchResultsForDocuments = useCallback(async (docIds, token) => {
     if (!token || !docIds || docIds.length === 0) return;
     console.log(`[DocumentsPage] Fetching results for docs: ${docIds.join(', ')}`);
@@ -88,9 +91,11 @@ function DocumentsPage() {
     });
   }, [COMPLETED_STATUS]);
 
-  const fetchDocuments = useCallback(async () => {
+  const fetchDocuments = useCallback(async (isPoll = false) => {
     if (isAuthenticated) {
-      setIsLoading(true); setError(null);
+      if (!isPoll) setIsLoading(true);
+      if (!isPoll) setError(null);
+
       try {
         const token = await getToken();
         if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
@@ -103,23 +108,31 @@ function DocumentsPage() {
         const data = await response.json();
         const mappedData = data.map(doc => ({ ...doc, id: doc._id || doc.id })).filter(doc => doc.id);
         console.log('[DocumentsPage] Mapped data before setting state:', mappedData);
-        setDocuments(mappedData);
+        setDocuments(prevDocs => {
+          return mappedData;
+        });
+        
         const completedDocIds = mappedData.filter(doc => doc.status === COMPLETED_STATUS).map(doc => doc.id);
-        if (completedDocIds.length > 0 && token) {
-            await fetchResultsForDocuments(completedDocIds, token);
+        const currentCompletedIdsInResults = Object.keys(assessmentResults);
+        const newCompletedIdsToFetchResults = completedDocIds.filter(id => !currentCompletedIdsInResults.includes(id));
+
+        if (newCompletedIdsToFetchResults.length > 0 && token) {
+            await fetchResultsForDocuments(newCompletedIdsToFetchResults, token);
         }
       } catch (err) {
         console.error("Error fetching documents:", err);
-        setError(err.message || t('messages_error_unexpected'));
-      } finally { setIsLoading(false); }
+        if (!isPoll) setError(err.message || t('messages_error_unexpected'));
+      } finally { 
+        if (!isPoll) setIsLoading(false); 
+      }
     } else {
         setDocuments([]);
-        setIsLoading(false);
-        if (!isAuthLoading) {
+        if (!isPoll) setIsLoading(false);
+        if (!isAuthLoading && !isPoll) {
             setError(t('messages_error_loginRequired_viewDocs'));
         }
     }
-  }, [isAuthenticated, isAuthLoading, getToken, fetchResultsForDocuments, t, COMPLETED_STATUS]);
+  }, [isAuthenticated, isAuthLoading, getToken, fetchResultsForDocuments, t, COMPLETED_STATUS, assessmentResults]);
 
   const handleFileChange = (event) => {
     if (event.target.files && event.target.files[0]) { setSelectedFile(event.target.files[0]); setUploadStatus(''); }
@@ -241,11 +254,11 @@ function DocumentsPage() {
         throw new Error(t('messages_delete_failed', { detail: errorDetail }));
       }
       setDeleteSuccess(t('messages_delete_success'));
+      await fetchDocuments();
       setTimeout(() => {
         setShowDeleteModal(false);
         setDeletingDocId(null);
         setDeleteSuccess(null);
-        fetchDocuments();
       }, 1000);
     } catch (err) {
       setDeleteError(err.message || t('messages_delete_failed_default'));
@@ -312,10 +325,43 @@ function DocumentsPage() {
     }
   };
 
+  // Effect for initial document load
   useEffect(() => {
-    if (!isAuthLoading && isAuthenticated) { fetchDocuments(); }
-    else if (!isAuthLoading && !isAuthenticated) { setDocuments([]); setError(null); }
-  }, [isAuthenticated, isAuthLoading, fetchDocuments]);
+    if (isAuthenticated && !isAuthLoading) {
+      fetchDocuments();
+    } else if (!isAuthenticated && !isAuthLoading) {
+      setDocuments([]);
+      setIsLoading(false);
+      setError(t('messages_error_loginRequired_viewDocs'));
+    }
+  }, [isAuthenticated, isAuthLoading, fetchDocuments, t]);
+
+  // Effect for polling
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const activePollingDocs = () => documents.filter(doc => 
+      doc.status === PROCESSING_STATUS || doc.status === QUEUED_STATUS
+    ).map(doc => doc.id);
+
+    let intervalId;
+
+    if (activePollingDocs().length > 0) {
+      intervalId = setInterval(() => {
+        console.log('[DocumentsPage] Polling for active documents...');
+        fetchDocuments(true); // Pass true for isPoll
+      }, POLLING_INTERVAL);
+    } else {
+      console.log('[DocumentsPage] No active documents to poll.');
+    }
+    
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        console.log('[DocumentsPage] Polling interval cleared.');
+      }
+    };
+  }, [documents, isAuthenticated, fetchDocuments]);
 
   return (
     <div>
