@@ -30,7 +30,7 @@ from app.api.v1.endpoints.dashboard import router as dashboard_router
 from app.api.v1.endpoints.analytics import router as analytics_router
 
 # Import batch processor
-from app.tasks import batch_processor
+from app.tasks import batch_processor, assessment_worker
 
 # Setup logging
 logger = logging.getLogger(__name__) # Use main module logger or project-specific
@@ -145,6 +145,14 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
 
+    try:
+        from app.tasks.assessment_worker import AssessmentWorker
+        worker = AssessmentWorker()
+        asyncio.create_task(worker.run())
+        logger.info("Assessment worker started")
+    except Exception as e:
+        logger.error(f"Failed to start assessment worker: {e}", exc_info=True)
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop batch processor and disconnect from MongoDB on application shutdown."""
@@ -153,6 +161,10 @@ async def shutdown_event():
     # Stop batch processor
     batch_processor.stop()
     logger.info("Batch processor stopped")
+
+    # Stop assessment worker
+    assessment_worker.stop()
+    logger.info("Assessment worker stopped")
     
     # Disconnect from database
     logger.info("Disconnecting from database...")
