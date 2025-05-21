@@ -40,6 +40,8 @@ class DocumentStatus(str, Enum):
     PROCESSING = "PROCESSING" # Actively being analyzed by ML model (Changed to uppercase)
     COMPLETED = "COMPLETED"   # Analysis finished, result available (Changed to uppercase)
     ERROR = "ERROR"           # An error occurred during processing (Changed to uppercase)
+    RETRYING = "RETRYING"     # Document processing is being retried
+    FAILED = "FAILED"         # Processing failed after retries
 
 # --- Result Related Enums ---
 
@@ -49,6 +51,8 @@ class ResultStatus(str, Enum):
     ASSESSING = "ASSESSING"   # Analysis in progress (Changed to uppercase)
     COMPLETED = "COMPLETED"   # Analysis complete, score available (Changed to uppercase)
     ERROR = "ERROR"           # Error during analysis, score may be unavailable (Changed to uppercase)
+    RETRYING = "RETRYING"     # Analysis is being retried after a failure
+    FAILED = "FAILED"         # Analysis failed after retries
 
 class BatchStatus(str, Enum):
     """Enumeration for the status of a document batch upload."""
