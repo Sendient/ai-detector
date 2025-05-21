@@ -38,8 +38,10 @@ class DocumentStatus(str, Enum):
     UPLOADED = "UPLOADED"     # File received and stored (Changed to uppercase)
     QUEUED = "QUEUED"         # Queued for AI analysis (Changed to uppercase)
     PROCESSING = "PROCESSING" # Actively being analyzed by ML model (Changed to uppercase)
+    RETRYING = "RETRYING"     # Retry attempt in progress
     COMPLETED = "COMPLETED"   # Analysis finished, result available (Changed to uppercase)
     ERROR = "ERROR"           # An error occurred during processing (Changed to uppercase)
+    FAILED = "FAILED"         # Processing failed permanently
 
 # --- Result Related Enums ---
 
@@ -48,7 +50,9 @@ class ResultStatus(str, Enum):
     PENDING = "PENDING"       # Analysis requested but not yet started/completed (Changed to uppercase)
     ASSESSING = "ASSESSING"   # Analysis in progress (Changed to uppercase)
     COMPLETED = "COMPLETED"   # Analysis complete, score available (Changed to uppercase)
+    RETRYING = "RETRYING"     # Retry attempt in progress
     ERROR = "ERROR"           # Error during analysis, score may be unavailable (Changed to uppercase)
+    FAILED = "FAILED"         # Analysis failed permanently
 
 class BatchStatus(str, Enum):
     """Enumeration for the status of a document batch upload."""
