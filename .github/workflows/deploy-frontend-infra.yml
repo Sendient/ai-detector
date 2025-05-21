@@ -135,23 +135,13 @@ jobs:
       uses: azure/cli@v1
       with:
         inlineScript: |
-          # Construct the --parameters string for parCustomDomains only if it's not empty
-          # This assumes your Bicep parameter 'parCustomDomains' expects an array of strings.
-          CUSTOM_DOMAIN_PARAM=""
-          CUSTOM_DOMAIN_VALUE="${{ steps.set_custom_domain.outputs.custom_domain }}"
-          if [ -n "$CUSTOM_DOMAIN_VALUE" ]; then
-            # Format as a JSON array string, escaping inner quotes for the shell
-            FORMATTED_CUSTOM_DOMAIN_ARRAY="[\"${CUSTOM_DOMAIN_VALUE}\"]"
-            CUSTOM_DOMAIN_PARAM="--parameters parCustomDomains='$FORMATTED_CUSTOM_DOMAIN_ARRAY'"
-          fi
-
-          az deployment sub create \
+          az deployment sub create 
             --name "StaticWebAppDeploy" \
             --location "uksouth" \
             --template-file "./infra/staticWebApp/staticWebApp.bicep" \
             --parameters "./infra/staticWebApp/params/staticWebApp.bicepparam" \
             --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" \
-            $CUSTOM_DOMAIN_PARAM \
+            --parameters "parCustomDomainName=${{ steps.set_custom_domain.outputs.custom_domain }}" \
             # --parameters "parBackendId=${{ steps.set_backend_id.outputs.backend_id }}"
 
 

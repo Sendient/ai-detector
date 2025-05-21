@@ -23,9 +23,5 @@ param parStagingEnvironmentPolicy =  'Enabled'
 
 param parLocation =  'westeurope'
 
-param parCustomDomains = [
-  {
-    name: 'dev-app.smartdetector.ai'
-    validationMethod: 'CNAME'
-  }
-]
+
+param parCustomDomainName =  'dev-app.smartdetector.ai'
