@@ -33,3 +33,7 @@ az deployment sub create --name "containerAppEnvDeployProd" --location "uksouth"
 az deployment sub create --name "containerAppDeployDev" --location "uksouth" --template-file ".\infra\containerApp\containerApp.bicep" --parameters '.\infra\containerApp\params\containerAppDev.bicepparam'
 az deployment sub create --name "containerAppDeployStaging" --location "uksouth" --template-file ".\bicep\containerApp\containerApp.bicep" --parameters '.\bicep\containerApp\params\containerAppStaging.bicepparam'
 az deployment sub create --name "containerAppDeployProd" --location "uksouth" --template-file ".\bicep\containerApp\containerApp.bicep" --parameters '.\bicep\containerApp\params\containerAppProd.bicepparam'
+
+//Frontend Subdomain DNS
+az network dns record-set cname set-record -g rg-sdt-uks-dns-prod -z smartdetector.ai -n app -c nice-stone-0864d4c03.6.azurestaticapps.net
+az staticwebapp hostname set -n app-sdt-uks-aid-prod --hostname app.smartdetector.ai

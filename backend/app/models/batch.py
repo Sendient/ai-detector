@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, ConfigDict # Added ConfigDict
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from app.models.enums import BatchStatus, BatchPriority
+from .enums import BatchStatus, BatchPriority
 
 class BatchBase(BaseModel):
     # Renamed user_id to teacher_id for consistency

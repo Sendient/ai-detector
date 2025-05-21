@@ -12,7 +12,8 @@ const collections = {
   ],
   batches: [
     { key: { _id: 1 } },
-    { key: { priority: -1, created_at: 1 }, name: 'priority_-1_created_at_1' }
+    { key: { priority: -1, created_at: 1 }, name: 'priority_-1_created_at_1' },
+    { key: { status: 1, created_at: -1 }, name: 'status_1_created_at_-1' } // <-- Add this line
   ],
   classgroups: [
     { key: { _id: 1 } }

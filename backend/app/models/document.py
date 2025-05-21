@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 # Import Enums with correct names
-from app.models.enums import FileType, DocumentStatus # Corrected: DocumentStatus
+from .enums import FileType, DocumentStatus # Corrected: DocumentStatus
 
 # --- Base Model ---
 class DocumentBase(BaseModel):

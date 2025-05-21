@@ -6,7 +6,7 @@ from datetime import datetime, timezone # Added timezone import
 
 # Import configuration from your core config module
 # Adjust path if needed
-from app.core.config import MONGODB_URL, DB_NAME, PROJECT_NAME
+from ..core.config import MONGODB_URL, DB_NAME, PROJECT_NAME
 
 # Setup logging using your project name
 # Ensure logging is configured elsewhere (e.g., main.py)
@@ -101,7 +101,7 @@ async def check_database_health() -> Dict[str, Any]:
     # Define expected collections based on crud.py constants (assuming crud.py is accessible or names are hardcoded/configured)
     # If importing crud causes circular dependencies, list names directly
     try:
-        from ..db import crud # Try importing crud to get constants
+        from . import crud # Try importing crud to get constants
         EXPECTED_COLLECTIONS = [
             crud.SCHOOL_COLLECTION,
             crud.TEACHER_COLLECTION,

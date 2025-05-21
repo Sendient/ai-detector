@@ -1,24 +1,36 @@
-# Python Virtual Environments and Cache
+# Python bytecode and cache
 __pycache__/
 *.py[cod]
-*$py.class
+
+# Compiled extensions
+*.so
+*.pyd
+*.dll
+*.lib
+
+# Virtual environments
 .venv/
-venv/
-ENV/
-env/
-
-# Environment variables - IMPORTANT
-*.env
+.env
 .env.*
-.env.test
 
-# IDE / OS specific files
+# Wheel and egg files
+*.whl
+*.egg-info/
+*.dist-info/
+
+# VS Code and IDE configs
 .vscode/
-.DS_Store
-*.swp
+.idea/
 
-# Add other specific files/folders to ignore later if needed
-# e.g., build/
-# e.g., node_modules/"scripts/" 
-scripts/ 
-backend/scripts/ 
+# Vendor cleanup (unless explicitly tracked)
+vendor/*.whl
+vendor_packages/**/*.so
+vendor_packages/**/*.dll
+vendor_packages/**/*.pyd
+vendor_packages/**/*.lib
+vendor_packages/**/*.dist-info/
+
+vendor/
+vendor_packages/
+vendor/
+vendor_packages/
