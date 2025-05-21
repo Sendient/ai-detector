@@ -94,16 +94,16 @@ async def test_upload_document_success(
         "id": created_doc_id,
         "original_filename": mock_file_name,
         "storage_blob_path": mock_blob_name,
-        "file_type": FileType.PDF.value, 
-        "upload_timestamp": now_utc, 
+        "file_type": FileType.PDF.value,
+        "upload_timestamp": now_utc,
         "student_id": student_uuid,
         "assignment_id": assignment_uuid,
-        "status": DocumentStatus.UPLOADED.value, 
+        "status": DocumentStatus.QUEUED.value,
         "teacher_id": test_user_kinde_id,
         "character_count": None,
         "word_count": None,
-        "created_at": now_utc, 
-        "updated_at": now_utc  
+        "created_at": now_utc,
+        "updated_at": now_utc
     }
     mock_created_document_instance = Document(**mock_created_document_data)
     # Mock crud.create_document using AsyncMock as it's an async CRUD function
@@ -132,6 +132,12 @@ async def test_upload_document_success(
         'backend.app.api.v1.endpoints.documents.crud.create_result',
         new_callable=AsyncMock, # Use AsyncMock for async functions
         return_value=mock_created_result_instance
+    )
+
+    enqueue_mock = mocker.patch(
+        'app.api.v1.endpoints.documents.enqueue_assessment_task',
+        new_callable=AsyncMock,
+        return_value=True,
     )
 
     # 4. Prepare form data and file for upload
@@ -163,7 +169,7 @@ async def test_upload_document_success(
     assert response_data["file_type"] == FileType.PDF.value
     assert response_data["student_id"] == str(student_uuid)
     assert response_data["assignment_id"] == str(assignment_uuid)
-    assert response_data["status"] == DocumentStatus.UPLOADED.value
+    assert response_data["status"] == DocumentStatus.QUEUED.value
     assert response_data["teacher_id"] == test_user_kinde_id
     assert "_id" in response_data 
     assert response_data["_id"] == str(created_doc_id) 
@@ -197,10 +203,10 @@ async def test_upload_document_success(
     document_in_arg = call_args_create_doc['document_in']
     assert document_in_arg.original_filename == mock_file_name
     assert document_in_arg.storage_blob_path == mock_blob_name
-    assert document_in_arg.file_type == FileType.PDF 
+    assert document_in_arg.file_type == FileType.PDF
     assert document_in_arg.student_id == student_uuid
     assert document_in_arg.assignment_id == assignment_uuid
-    assert document_in_arg.status == DocumentStatus.UPLOADED
+    assert document_in_arg.status == DocumentStatus.QUEUED
     assert document_in_arg.teacher_id == test_user_kinde_id
 
     mock_crud_create_result.assert_called_once()
@@ -209,6 +215,12 @@ async def test_upload_document_success(
     assert result_in_arg.document_id == created_doc_id
     assert result_in_arg.teacher_id == test_user_kinde_id
     assert result_in_arg.status == ResultStatus.PENDING
+
+    enqueue_mock.assert_awaited_once_with(
+        document_id=created_doc_id,
+        user_id=test_user_kinde_id,
+        priority_level=0,
+    )
 
     # Clean up dependency override
     if original_override:
@@ -341,7 +353,7 @@ async def test_upload_document_too_large(
     mock_doc_instance_for_large_file.upload_timestamp = now_utc_for_large_file
     mock_doc_instance_for_large_file.student_id = student_uuid_for_large_file
     mock_doc_instance_for_large_file.assignment_id = assignment_uuid_for_large_file
-    mock_doc_instance_for_large_file.status = DocumentStatus.UPLOADED
+    mock_doc_instance_for_large_file.status = DocumentStatus.QUEUED
     mock_doc_instance_for_large_file.teacher_id = test_user_kinde_id # from auth mock
     mock_doc_instance_for_large_file.character_count = None
     mock_doc_instance_for_large_file.word_count = None
