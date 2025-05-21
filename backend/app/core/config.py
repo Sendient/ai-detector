@@ -27,23 +27,29 @@ class Settings(BaseSettings):
 
     # Database Settings
     MONGODB_URL: Optional[str] = None
-    DB_NAME: str = "aidetector_dev"
+    DB_NAME: str = "aidetector_dev1"
 
     # Kinde Backend Settings
     KINDE_DOMAIN: Optional[str] = None
     KINDE_AUDIENCE: Optional[str] = None # This can be a single string
+    KINDE_CLIENT_ID: Optional[str] = None # For machine-to-machine if used
     # If KINDE_AUDIENCE can be multiple, use: KINDE_AUDIENCE: Optional[List[str]] = None
 
     # Azure Blob Storage Settings
     AZURE_BLOB_CONNECTION_STRING: Optional[str] = None
     AZURE_BLOB_CONTAINER_NAME: str = "uploaded-documents"
 
+    # ML API Endpoint
+    ML_API_URL: Optional[str] = "https://fa-sdt-uks-aitextdet-prod.azurewebsites.net/api/ai-text-detection?code=PZrMzMk1VBBCyCminwvgUfzv_YGhVU-5E1JIs2if7zqiAzFuMhUC-g%3D%3D" # Default Production URL
+
     # Stripe Settings (Placeholders)
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
 
+    # Optional: Allowed origins for CORS (can be a list or a comma-separated string)
+    ALLOWED_ORIGINS: List[str] = []
+
     # Add other environment variables as needed
-    # e.g., ML_API_URL: Optional[str] = None
     # e.g., ML_API_KEY: Optional[str] = None
 
     # Pydantic-settings can automatically load from .env if configured here
