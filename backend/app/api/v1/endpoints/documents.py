@@ -190,13 +190,21 @@ async def trigger_assessment(
     logger.warning(f"Authorization check needed for user {user_kinde_id} triggering assessment for document {document_id}")
 
     # Check if assessment can be triggered (e.g., only if UPLOADED or maybe ERROR)
-    if document.status not in [DocumentStatus.UPLOADED, DocumentStatus.ERROR]:
+    if document.status not in [
+        DocumentStatus.UPLOADED,
+        DocumentStatus.ERROR,
+        DocumentStatus.FAILED,
+    ]:
         logger.warning(f"Document {document_id} status is '{document.status}'. Assessment cannot be triggered.")
         # Return the existing result instead of erroring if it's already completed/processing
         existing_result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=auth_teacher_id) # Pass teacher_id here too
         if existing_result:
             # Return 200 OK with the existing result if already completed or processing
-            if existing_result.status in [ResultStatus.COMPLETED, ResultStatus.ASSESSING]:
+            if existing_result.status in [
+                ResultStatus.COMPLETED,
+                ResultStatus.ASSESSING,
+                ResultStatus.RETRYING,
+            ]:
                  logger.info(f"Assessment already completed or in progress for doc {document_id}. Returning existing result.")
                  return existing_result
             else:
@@ -1010,7 +1018,10 @@ async def cancel_assessment_status(
 
     # --- Check if Cancellable --- 
     # Only allow cancellation if it's actually in a processing state
-    if document.status not in [DocumentStatus.PROCESSING]: # Only allow cancelling PROCESSING doc status
+    if document.status not in [
+        DocumentStatus.PROCESSING,
+        DocumentStatus.RETRYING,
+    ]:  # Only allow cancelling active processing states
          logger.warning(f"Document {document_id} is not in PROCESSING state (currently {document.status}). Cannot cancel.")
          raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Cannot cancel assessment. Document status is {document.status}.")
 
@@ -1033,7 +1044,7 @@ async def cancel_assessment_status(
 
     if result:
          # Only try to update result if it's currently ASSESSING
-        if result.status == ResultStatus.ASSESSING:
+        if result.status in [ResultStatus.ASSESSING, ResultStatus.RETRYING]:
             logger.info(f"Cancelling result {result.id} by setting status to ERROR.")
             updated_result = await crud.update_result(
                 result_id=result.id,
