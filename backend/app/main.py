@@ -91,17 +91,35 @@ async def startup_event():
         # For now, if DB connection fails, the app might not be usable, so re-raising is one option.
         raise
 
-    logger.info("Ensuring database indexes...")
+    logger.info("Ensuring database collections and indexes...")
     db = get_database() # Get database instance
     if db is None:
-        logger.error("Cannot ensure indexes: Database connection not available (db is None).")
+        logger.error("Cannot ensure collections/indexes: Database connection not available (db is None).")
         return
 
     try:
+        # --- Ensure Collections Exist ---
+        collection_names_to_ensure = ["teachers", "results"] # Add other collections as needed
+        existing_collections = await db.list_collection_names()
+
+        for coll_name in collection_names_to_ensure:
+            if coll_name not in existing_collections:
+                try:
+                    await db.create_collection(coll_name)
+                    logger.info(f"Successfully created collection '{coll_name}'.")
+                except OperationFailure as e:
+                    # Handle cases where creation might fail even if it doesn't exist (e.g., auth issues not caught by get_database)
+                    logger.error(f"OperationFailure creating collection '{coll_name}': {e.details.get('errmsg', str(e))}", exc_info=True)
+                    # Depending on policy, you might want to raise this
+                except Exception as e:
+                    logger.error(f"Unexpected error creating collection '{coll_name}': {e}", exc_info=True)
+                    # Depending on policy, you might want to raise this
+            else:
+                logger.info(f"Collection '{coll_name}' already exists.")
+
+        # --- Ensure Indexes ---
         # Ensure indexes for Teachers collection
         teachers_collection = db.get_collection("teachers")
-        # Check if running in an event loop for async operations
-        # No, this is already an async function, direct await is fine.
         try:
             await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
             logger.info("Successfully created/verified non-unique index 'idx_teacher_kinde_id' on teachers.kinde_id")
@@ -113,7 +131,7 @@ async def startup_event():
                     f"This means an index with the same name exists but has different options (e.g., unique, sparse). "
                     f"The application will continue, but please resolve this manually in Azure Portal/Cosmos DB "
                     f"by deleting the existing 'idx_teacher_kinde_id' and allowing the application to recreate it, "
-                    f"or by updating the application's index definition in app/main.py to match the existing one."
+                    f"or by updating the application\'s index definition in app/main.py to match the existing one."
                 )
             else:
                 # For other operation failures, log and re-raise
@@ -125,15 +143,20 @@ async def startup_event():
             # Depending on policy, you might want to raise this too
 
         # Ensure indexes for Documents collection (example, adjust as needed)
-        # documents_collection = db[DOCUMENT_COLLECTION]
+        # documents_collection = db.get_collection("documents") # Assuming "documents" is the collection name
         # await documents_collection.create_index([("teacher_id", 1), ("upload_timestamp", -1)], name="idx_doc_teacher_upload")
         # logger.info("Successfully created/verified index 'idx_doc_teacher_upload' on documents")
 
-        logger.info("Database indexes ensured.")
+        # Example for ensuring indexes on 'results' collection if needed
+        # results_collection = db.get_collection("results")
+        # await results_collection.create_index("document_id", name="idx_result_document_id", unique=True) # Example: if result is unique per document
+        # logger.info("Successfully created/verified index 'idx_result_document_id' on results.document_id")
+
+        logger.info("Database collections and indexes ensured.")
 
     except Exception as e:
-        logger.error(f"An error occurred during index creation: {e}", exc_info=True)
-        # Decide if app should proceed if index creation fails for non-critical indexes
+        logger.error(f"An error occurred during collection or index creation: {e}", exc_info=True)
+        # Decide if app should proceed if creation fails
 
     # Start background tasks if any (like BatchProcessor)
     try:
