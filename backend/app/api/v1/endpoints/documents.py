@@ -29,6 +29,7 @@ from app.core.security import get_current_user_payload
 
 # Import Blob Storage Service
 from app.services.blob_storage import upload_file_to_blob, download_blob_as_bytes
+from app.queue import enqueue_assessment_task
 
 # Import Text Extraction Service
 from app.services.text_extraction import extract_text_from_bytes
@@ -124,8 +125,8 @@ async def upload_document(
         upload_timestamp=now,
         student_id=student_id,
         assignment_id=assignment_id,
-        status=DocumentStatus.UPLOADED, # Correctly uses Enum
-        teacher_id=user_kinde_id # ADDED: Pass the teacher's Kinde ID
+        status=DocumentStatus.QUEUED,
+        teacher_id=user_kinde_id
     )
     created_document = await crud.create_document(document_in=document_data)
     if not created_document:
@@ -143,9 +144,13 @@ async def upload_document(
         logger.error(f"Failed to create initial pending result record for document {created_document.id}")
         # Decide if this should cause the whole upload request to fail - maybe not?
 
-    # 4. TODO: Trigger background task for analysis here (using created_document.id)
-    # For now, assessment is triggered manually via the /assess endpoint
-    logger.info(f"Document {created_document.id} uploaded. Ready for assessment.")
+    # 4. Enqueue background task for analysis
+    await enqueue_assessment_task(
+        document_id=created_document.id,
+        user_id=user_kinde_id,
+        priority_level=0,
+    )
+    logger.info(f"Document {created_document.id} uploaded and queued for assessment.")
 
     return created_document
 
