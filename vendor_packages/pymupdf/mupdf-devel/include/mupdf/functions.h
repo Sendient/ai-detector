@@ -952,7 +952,7 @@ FZ_FUNCTION int ll_fz_compare_separations(const ::fz_separations *sep1, const ::
 	Creates a stream assuming the default PDF parameters,
 	except the number of columns.
 */
-FZ_FUNCTION ::fz_buffer *ll_fz_compress_ccitt_fax_g3(const unsigned char *data, int columns, int rows, ptrdiff_t stride);
+FZ_FUNCTION ::fz_buffer *ll_fz_compress_ccitt_fax_g3(const unsigned char *data, int columns, int rows, int stride);
 
 /** Low-level wrapper for `::fz_compress_ccitt_fax_g4()`. */
 /**
@@ -960,7 +960,7 @@ FZ_FUNCTION ::fz_buffer *ll_fz_compress_ccitt_fax_g3(const unsigned char *data, 
 	Creates a stream assuming the default PDF parameters, except
 	K=-1 and the number of columns.
 */
-FZ_FUNCTION ::fz_buffer *ll_fz_compress_ccitt_fax_g4(const unsigned char *data, int columns, int rows, ptrdiff_t stride);
+FZ_FUNCTION ::fz_buffer *ll_fz_compress_ccitt_fax_g4(const unsigned char *data, int columns, int rows, int stride);
 
 /** Low-level wrapper for `::fz_compressed_buffer_size()`. */
 /**
@@ -11315,7 +11315,7 @@ FZ_FUNCTION ::pdf_token ll_pdf_lex_no_string(::fz_stream *f, ::pdf_lexbuf *lexbu
 FZ_FUNCTION void ll_pdf_lexbuf_fin(::pdf_lexbuf *lexbuf);
 
 /** Low-level wrapper for `::pdf_lexbuf_grow()`. */
-FZ_FUNCTION ptrdiff_t ll_pdf_lexbuf_grow(::pdf_lexbuf *lexbuf);
+FZ_FUNCTION int ll_pdf_lexbuf_grow(::pdf_lexbuf *lexbuf);
 
 /** Low-level wrapper for `::pdf_lexbuf_init()`. */
 FZ_FUNCTION void ll_pdf_lexbuf_init(::pdf_lexbuf *lexbuf, int size);

@@ -926,7 +926,7 @@ namespace mupdf
 		Creates a stream assuming the default PDF parameters,
 		except the number of columns.
 	*/
-	FZ_FUNCTION FzBuffer fz_compress_ccitt_fax_g3(const unsigned char *data, int columns, int rows, ptrdiff_t stride);
+	FZ_FUNCTION FzBuffer fz_compress_ccitt_fax_g3(const unsigned char *data, int columns, int rows, int stride);
 
 	/** Class-aware wrapper for `::fz_compress_ccitt_fax_g4()`.  */
 	/**
@@ -934,7 +934,7 @@ namespace mupdf
 		Creates a stream assuming the default PDF parameters, except
 		K=-1 and the number of columns.
 	*/
-	FZ_FUNCTION FzBuffer fz_compress_ccitt_fax_g4(const unsigned char *data, int columns, int rows, ptrdiff_t stride);
+	FZ_FUNCTION FzBuffer fz_compress_ccitt_fax_g4(const unsigned char *data, int columns, int rows, int stride);
 
 	/** Class-aware wrapper for `::fz_compressed_buffer_size()`.  */
 	/**
@@ -10177,7 +10177,7 @@ namespace mupdf
 	FZ_FUNCTION void pdf_lexbuf_fin(const PdfLexbuf& lexbuf);
 
 	/** Class-aware wrapper for `::pdf_lexbuf_grow()`.  */
-	FZ_FUNCTION ptrdiff_t pdf_lexbuf_grow(const PdfLexbuf& lexbuf);
+	FZ_FUNCTION int pdf_lexbuf_grow(const PdfLexbuf& lexbuf);
 
 	/** Class-aware wrapper for `::pdf_lexbuf_init()`.  */
 	FZ_FUNCTION void pdf_lexbuf_init(const PdfLexbuf& lexbuf, int size);

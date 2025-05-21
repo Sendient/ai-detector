@@ -7603,9 +7603,9 @@ struct FzOutput2 : FzOutput
 	FZ_FUNCTION void use_virtual_truncate( bool use=true);
 
 	/** Default virtual method implementations; these all throw an exception. */
-	FZ_FUNCTION virtual void write(::fz_context *arg_0, const void *arg_2, unsigned long long arg_3);
-	FZ_FUNCTION virtual void seek(::fz_context *arg_0, long long arg_2, int arg_3);
-	FZ_FUNCTION virtual long long tell(::fz_context *arg_0);
+	FZ_FUNCTION virtual void write(::fz_context *arg_0, const void *arg_2, unsigned long arg_3);
+	FZ_FUNCTION virtual void seek(::fz_context *arg_0, long arg_2, int arg_3);
+	FZ_FUNCTION virtual long tell(::fz_context *arg_0);
 	FZ_FUNCTION virtual void close(::fz_context *arg_0);
 	FZ_FUNCTION virtual void drop(::fz_context *arg_0);
 	FZ_FUNCTION virtual void reset(::fz_context *arg_0);
@@ -9232,7 +9232,7 @@ struct FzPixmap
 	FZ_FUNCTION unsigned char s();
 	FZ_FUNCTION unsigned char alpha();
 	FZ_FUNCTION unsigned char flags();
-	FZ_FUNCTION ptrdiff_t stride();
+	FZ_FUNCTION int stride();
 	FZ_FUNCTION FzSeparations seps();
 	FZ_FUNCTION int xres();
 	FZ_FUNCTION int yres();
@@ -16392,7 +16392,7 @@ struct PdfLexbuf
 	FZ_FUNCTION void pdf_lexbuf_fin() const;
 
 	/** Class-aware wrapper for `::pdf_lexbuf_grow()`.  */
-	FZ_FUNCTION ptrdiff_t pdf_lexbuf_grow() const;
+	FZ_FUNCTION int pdf_lexbuf_grow() const;
 
 	/** Class-aware wrapper for `::pdf_lexbuf_init()`.  */
 	FZ_FUNCTION void pdf_lexbuf_init(int size) const;
@@ -18022,9 +18022,9 @@ struct PdfProcessor2 : PdfProcessor
 	FZ_FUNCTION virtual void op_Tm(::fz_context *arg_0, float arg_2, float arg_3, float arg_4, float arg_5, float arg_6, float arg_7);
 	FZ_FUNCTION virtual void op_Tstar(::fz_context *arg_0);
 	FZ_FUNCTION virtual void op_TJ(::fz_context *arg_0, ::pdf_obj *arg_2);
-	FZ_FUNCTION virtual void op_Tj(::fz_context *arg_0, char *arg_2, unsigned long long arg_3);
-	FZ_FUNCTION virtual void op_squote(::fz_context *arg_0, char *arg_2, unsigned long long arg_3);
-	FZ_FUNCTION virtual void op_dquote(::fz_context *arg_0, float arg_2, float arg_3, char *arg_4, unsigned long long arg_5);
+	FZ_FUNCTION virtual void op_Tj(::fz_context *arg_0, char *arg_2, unsigned long arg_3);
+	FZ_FUNCTION virtual void op_squote(::fz_context *arg_0, char *arg_2, unsigned long arg_3);
+	FZ_FUNCTION virtual void op_dquote(::fz_context *arg_0, float arg_2, float arg_3, char *arg_4, unsigned long arg_5);
 	FZ_FUNCTION virtual void op_d0(::fz_context *arg_0, float arg_2, float arg_3);
 	FZ_FUNCTION virtual void op_d1(::fz_context *arg_0, float arg_2, float arg_3, float arg_4, float arg_5, float arg_6, float arg_7);
 	FZ_FUNCTION virtual void op_CS(::fz_context *arg_0, const char *arg_2, ::fz_colorspace *arg_3);
