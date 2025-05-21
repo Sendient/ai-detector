@@ -81,50 +81,112 @@ async def startup_event():
     Event handler for application startup.
     Connects to the database and ensures necessary indexes are created.
     """
+    # FORCEFUL LOGGING START
+    print("[STARTUP_EVENT_DEBUG] >>> startup_event function ENTERED")
+    logger.critical("############################################################")
+    logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function ENTERED.")
+    logger.critical("############################################################")
+    # FORCEFUL LOGGING END
+
     logger.info("Executing startup event: Connecting to database...")
     try:
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] Attempting connect_to_mongo()")
+        # FORCEFUL LOGGING END
         await connect_to_mongo() # Ensure this is awaited
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] connect_to_mongo() SUCCEEDED")
+        # FORCEFUL LOGGING END
         logger.info("Startup event: Database connection successful.")
     except Exception as e:
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] connect_to_mongo() FAILED: {e}", exc_info=True)
+        # FORCEFUL LOGGING END
         logger.error(f"Startup event: Failed to connect to database: {e}", exc_info=True)
-        # Optionally, re-raise or handle more gracefully depending on desired behavior
-        # For now, if DB connection fails, the app might not be usable, so re-raising is one option.
         raise
 
-    logger.info("Ensuring database collections and indexes...")
+    # FORCEFUL LOGGING START
+    logger.critical("[STARTUP_EVENT_CRITICAL] Attempting to get_database()")
+    # FORCEFUL LOGGING END
     db = get_database() # Get database instance
     if db is None:
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] get_database() returned None. Cannot ensure collections/indexes.")
+        # FORCEFUL LOGGING END
         logger.error("Cannot ensure collections/indexes: Database connection not available (db is None).")
         return
+    
+    # FORCEFUL LOGGING START
+    logger.critical(f"[STARTUP_EVENT_CRITICAL] get_database() SUCCEEDED. DB object: {db}")
+    logger.critical("[STARTUP_EVENT_CRITICAL] Ensuring database collections and indexes...")
+    # FORCEFUL LOGGING END
+    logger.info("Ensuring database collections and indexes...")
 
     try:
         # --- Ensure Collections Exist ---
-        collection_names_to_ensure = ["teachers", "results"] # Add other collections as needed
+        # Updated to include all known collections from crud.py constants
+        collection_names_to_ensure = [
+            "schools", "teachers", "classgroups", "students", 
+            "documents", "results", "batches" # Added "batches" as it's in crud.py too
+        ]
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] Collections to ensure: {collection_names_to_ensure}")
+        logger.critical("[STARTUP_EVENT_CRITICAL] Attempting db.list_collection_names()")
+        # FORCEFUL LOGGING END
         existing_collections = await db.list_collection_names()
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] Existing collections from DB: {existing_collections}")
+        # FORCEFUL LOGGING END
 
         for coll_name in collection_names_to_ensure:
+            # FORCEFUL LOGGING START
+            logger.critical(f"[STARTUP_EVENT_CRITICAL] Checking collection: '{coll_name}'")
+            # FORCEFUL LOGGING END
             if coll_name not in existing_collections:
+                # FORCEFUL LOGGING START
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Collection '{coll_name}' NOT FOUND. Attempting to create.")
+                # FORCEFUL LOGGING END
                 try:
                     await db.create_collection(coll_name)
+                    # FORCEFUL LOGGING START
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Successfully CREATED collection '{coll_name}'.")
+                    # FORCEFUL LOGGING END
                     logger.info(f"Successfully created collection '{coll_name}'.")
                 except OperationFailure as e:
-                    # Handle cases where creation might fail even if it doesn't exist (e.g., auth issues not caught by get_database)
+                    # FORCEFUL LOGGING START
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] OperationFailure CREATING collection '{coll_name}': {e.details.get('errmsg', str(e))}", exc_info=True)
+                    # FORCEFUL LOGGING END
                     logger.error(f"OperationFailure creating collection '{coll_name}': {e.details.get('errmsg', str(e))}", exc_info=True)
                     # Depending on policy, you might want to raise this
                 except Exception as e:
+                    # FORCEFUL LOGGING START
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Unexpected error CREATING collection '{coll_name}': {e}", exc_info=True)
+                    # FORCEFUL LOGGING END
                     logger.error(f"Unexpected error creating collection '{coll_name}': {e}", exc_info=True)
                     # Depending on policy, you might want to raise this
             else:
+                # FORCEFUL LOGGING START
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Collection '{coll_name}' ALREADY EXISTS.")
+                # FORCEFUL LOGGING END
                 logger.info(f"Collection '{coll_name}' already exists.")
 
         # --- Ensure Indexes ---
         # Ensure indexes for Teachers collection
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] Ensuring indexes for 'teachers' collection.")
+        # FORCEFUL LOGGING END
         teachers_collection = db.get_collection("teachers")
         try:
             await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
+            # FORCEFUL LOGGING START
+            logger.critical("[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_teacher_kinde_id' on teachers.kinde_id.")
+            # FORCEFUL LOGGING END
             logger.info("Successfully created/verified non-unique index 'idx_teacher_kinde_id' on teachers.kinde_id")
         except OperationFailure as e:
             if e.code == 85: # IndexOptionsConflict
+                # FORCEFUL LOGGING START
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id: {e.details.get('errmsg', str(e))}")
+                # FORCEFUL LOGGING END
                 logger.warning(
                     f"Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id. "
                     f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
@@ -134,39 +196,62 @@ async def startup_event():
                     f"or by updating the application\'s index definition in app/main.py to match the existing one."
                 )
             else:
-                # For other operation failures, log and re-raise
+                # FORCEFUL LOGGING START
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Database OperationFailure while creating index 'idx_teacher_kinde_id' on teachers: {e.details.get('errmsg', str(e))}", exc_info=True)
+                # FORCEFUL LOGGING END
                 logger.error(f"Database OperationFailure while creating index 'idx_teacher_kinde_id': {e.details.get('errmsg', str(e))}", exc_info=True)
                 raise # Re-raise other OperationFailures
         except Exception as e:
-            # Catch any other unexpected errors during index creation for teachers
+            # FORCEFUL LOGGING START
+            logger.critical(f"[STARTUP_EVENT_CRITICAL] Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
+            # FORCEFUL LOGGING END
             logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
             # Depending on policy, you might want to raise this too
 
-        # Ensure indexes for Documents collection (example, adjust as needed)
-        # documents_collection = db.get_collection("documents") # Assuming "documents" is the collection name
-        # await documents_collection.create_index([("teacher_id", 1), ("upload_timestamp", -1)], name="idx_doc_teacher_upload")
-        # logger.info("Successfully created/verified index 'idx_doc_teacher_upload' on documents")
-
         # Example for ensuring indexes on 'results' collection if needed
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] Ensuring indexes for 'results' collection (example shown). Adjust as needed.")
+        # FORCEFUL LOGGING END
         # results_collection = db.get_collection("results")
         # await results_collection.create_index("document_id", name="idx_result_document_id", unique=True) # Example: if result is unique per document
         # logger.info("Successfully created/verified index 'idx_result_document_id' on results.document_id")
 
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] Database collections and indexes ensured.")
+        # FORCEFUL LOGGING END
         logger.info("Database collections and indexes ensured.")
 
     except Exception as e:
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] An error occurred during collection or index creation: {e}", exc_info=True)
+        # FORCEFUL LOGGING END
         logger.error(f"An error occurred during collection or index creation: {e}", exc_info=True)
         # Decide if app should proceed if creation fails
 
     # Start background tasks if any (like BatchProcessor)
     try:
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] Attempting to start BatchProcessor.")
+        # FORCEFUL LOGGING END
         # Assuming BatchProcessor is designed to be started and run in the background
         from .tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
         processor = BatchProcessor()
         asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] Batch processor task created.")
+        # FORCEFUL LOGGING END
         logger.info("Batch processor started")
     except Exception as e:
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] Failed to start batch processor: {e}", exc_info=True)
+        # FORCEFUL LOGGING END
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
+    
+    # FORCEFUL LOGGING START
+    logger.critical("############################################################")
+    logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function COMPLETED.")
+    logger.critical("############################################################")
+    # FORCEFUL LOGGING END
 
 @_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
