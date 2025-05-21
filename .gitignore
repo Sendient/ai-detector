@@ -30,3 +30,7 @@ vendor_packages/**/*.pyd
 vendor_packages/**/*.lib
 vendor_packages/**/*.dist-info/
 
+vendor/
+vendor_packages/
+vendor/
+vendor_packages/
