@@ -32,3 +32,5 @@ vendor_packages/**/*.dist-info/
 
 vendor/
 vendor_packages/
+vendor/
+vendor_packages/
