@@ -139,8 +139,7 @@ jobs:
             --template-file "./infra/staticWebApp/staticWebApp.bicep" \
             --parameters "./infra/staticWebApp/params/staticWebApp.bicepparam" \
             --parameters "parEnv=${{ github.event.inputs.environment || inputs.environment }}" \
-            --parameters "parCustomDomainName=${{ steps.set_custom_domain.outputs.custom_domain }}" \
-            # --parameters "parBackendId=${{ steps.set_backend_id.outputs.backend_id }}"
+            --parameters "parCustomDomainName=${{ steps.set_custom_domain.outputs.custom_domain }}" 
 
 
     # 7. Azure Logout (Good practice)

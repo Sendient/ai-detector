@@ -56,8 +56,10 @@ module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
     //   }
     // ]
     sku: parSku
+    customDomains: [
+      parCustomDomainName
+    ]
     stagingEnvironmentPolicy: parStagingEnvironmentPolicy
-    customDomains: empty(parCustomDomainName) ? [] : [ parCustomDomainName ]
     tags: {
       AutoDelete: 'No'
     }
