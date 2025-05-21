@@ -35,23 +35,23 @@ class FileType(str, Enum):
 
 class DocumentStatus(str, Enum):
     """Enumeration for the processing status of a document."""
-    UPLOADED = "UPLOADED"     # File received and stored (Changed to uppercase)
-    QUEUED = "QUEUED"         # Queued for AI analysis (Changed to uppercase)
-    PROCESSING = "PROCESSING" # Actively being analyzed by ML model (Changed to uppercase)
-    COMPLETED = "COMPLETED"   # Analysis finished, result available (Changed to uppercase)
-    ERROR = "ERROR"           # An error occurred during processing (Changed to uppercase)
-    RETRYING = "RETRYING"     # Document processing is being retried
+    UPLOADED = "UPLOADED"     # File received and stored
+    QUEUED = "QUEUED"         # Queued for AI analysis
+    PROCESSING = "PROCESSING" # Actively being analyzed by ML model
+    RETRYING = "RETRYING"     # Retry attempt in progress
+    COMPLETED = "COMPLETED"   # Analysis finished, result available
+    ERROR = "ERROR"           # An error occurred during processing
     FAILED = "FAILED"         # Processing failed after retries
 
 # --- Result Related Enums ---
 
 class ResultStatus(str, Enum):
     """Enumeration for the status of an AI detection result."""
-    PENDING = "PENDING"       # Analysis requested but not yet started/completed (Changed to uppercase)
-    ASSESSING = "ASSESSING"   # Analysis in progress (Changed to uppercase)
-    COMPLETED = "COMPLETED"   # Analysis complete, score available (Changed to uppercase)
-    ERROR = "ERROR"           # Error during analysis, score may be unavailable (Changed to uppercase)
-    RETRYING = "RETRYING"     # Analysis is being retried after a failure
+    PENDING = "PENDING"       # Analysis requested but not yet started/completed
+    ASSESSING = "ASSESSING"   # Analysis in progress
+    COMPLETED = "COMPLETED"   # Analysis complete, score available
+    RETRYING = "RETRYING"     # Retry attempt in progress
+    ERROR = "ERROR"           # Error during analysis, score may be unavailable
     FAILED = "FAILED"         # Analysis failed after retries
 
 class BatchStatus(str, Enum):

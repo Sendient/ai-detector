@@ -1,4 +1,3 @@
-# app/main.py
 import logging
 import psutil # For system metrics in health check
 import time   # For uptime calculation
@@ -15,13 +14,10 @@ import pymongo # Added import
 from pymongo import IndexModel # Added import
 
 # Import config and database lifecycle functions
-# Adjust path '.' based on where main.py is relative to 'core' and 'db'
 from .core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
 from .db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
 
 # Import all endpoint routers
-# Adjust path '.' based on where main.py is relative to 'api'
-# Includes routers for all entities: schools, teachers, class_groups, students, assignments, documents, results
 from .api.v1.endpoints.schools import router as schools_router
 from .api.v1.endpoints.teachers import router as teachers_router
 from .api.v1.endpoints.class_groups import router as class_groups_router
@@ -32,13 +28,13 @@ from .api.v1.endpoints.results import router as results_router
 from .api.v1.endpoints.dashboard import router as dashboard_router
 from .api.v1.endpoints.analytics import router as analytics_router
 
-# Import batch processor
-from .tasks import batch_processor
+# Import batch processor and assessment worker
+# RESOLVED CONFLICT 1
+from .tasks import batch_processor, assessment_worker
 
 # Setup logging
-logger = logging.getLogger(__name__) # Use main module logger or project-specific
-# Ensure logging is configured appropriately elsewhere if not using basicConfig
-# logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO) # Ensure logging is configured appropriately
 
 # Track application start time for uptime calculation
 APP_START_TIME = time.time()
@@ -59,13 +55,11 @@ origins = [o for o in origins if o]
 # Create FastAPI app instance with detailed configuration
 _original_fastapi_app = FastAPI(
     title=f"{PROJECT_NAME} - Sentient AI Detector App",
-    version=VERSION, # Use version from config
+    version=VERSION,
     description="API for detecting AI-generated content in educational settings",
-    # Customize API docs/schema URLs
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json"
-    # Using on_event decorators below for DB lifecycle
 )
 
 # Add CORS middleware
@@ -82,7 +76,8 @@ _original_fastapi_app.add_middleware(
 async def startup_event():
     """
     Event handler for application startup.
-    Connects to the database and ensures necessary indexes are created.
+    Connects to the database, ensures necessary indexes are created,
+    and starts background tasks.
     """
     # --- Configure Logging ---
     # MODIFIED: Default to DEBUG if LOG_LEVEL is not explicitly INFO, WARNING, ERROR, or CRITICAL
@@ -130,27 +125,35 @@ async def startup_event():
         await connect_to_mongo() # Ensure this is awaited
         logger.info("Startup event: Database connection successful.")
     except Exception as e:
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] connect_to_mongo() FAILED: {e}", exc_info=True)
+        # FORCEFUL LOGGING END
         logger.error(f"Startup event: Failed to connect to database: {e}", exc_info=True)
-        # Optionally, re-raise or handle more gracefully depending on desired behavior
-        # For now, if DB connection fails, the app might not be usable, so re-raising is one option.
         raise
 
     logger.info("Ensuring database indexes...")
     db = get_database() # Get database instance
     if db is None:
-        logger.error("Cannot ensure indexes: Database connection not available (db is None).")
+        # FORCEFUL LOGGING START
+        logger.critical("[STARTUP_EVENT_CRITICAL] get_database() returned None. Cannot ensure collections/indexes.")
+        # FORCEFUL LOGGING END
+        logger.error("Cannot ensure collections/indexes: Database connection not available (db is None).")
         return
 
     try:
         # Ensure indexes for Teachers collection
         teachers_collection = db.get_collection("teachers")
-        # Check if running in an event loop for async operations
-        # No, this is already an async function, direct await is fine.
         try:
             await teachers_collection.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
+            # FORCEFUL LOGGING START
+            logger.critical("[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_teacher_kinde_id' on teachers.kinde_id.")
+            # FORCEFUL LOGGING END
             logger.info("Successfully created/verified non-unique index 'idx_teacher_kinde_id' on teachers.kinde_id")
         except OperationFailure as e:
             if e.code == 85: # IndexOptionsConflict
+                # FORCEFUL LOGGING START
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id: {e.details.get('errmsg', str(e))}")
+                # FORCEFUL LOGGING END
                 logger.warning(
                     f"Index conflict for 'idx_teacher_kinde_id' on teachers.kinde_id. "
                     f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
@@ -162,7 +165,7 @@ async def startup_event():
             else:
                 # For other operation failures, log and re-raise
                 logger.error(f"Database OperationFailure while creating index 'idx_teacher_kinde_id': {e.details.get('errmsg', str(e))}", exc_info=True)
-                raise # Re-raise other OperationFailures
+                raise
         except Exception as e:
             # Catch any other unexpected errors during index creation for teachers
             logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
@@ -179,7 +182,7 @@ async def startup_event():
             try:
                 await assessment_tasks_collection.create_indexes([idx_assessment_tasks_dequeue])
                 logger.critical(f"[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}.")
-                logger.info(f"Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}") # Corrected trailing quote
+                logger.info(f"Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}")
             except OperationFailure as e:
                 if e.code == 85: # IndexOptionsConflict
                     logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}")
@@ -254,7 +257,7 @@ async def startup_event():
         logger.error(f"An error occurred during index creation: {e}", exc_info=True)
         # Decide if app should proceed if index creation fails for non-critical indexes
 
-    # Start background tasks if any (like BatchProcessor)
+    # Start BatchProcessor
     try:
         # Assuming BatchProcessor is designed to be started and run in the background
         from .tasks.batch_processor import BatchProcessor # Local import to avoid circular dependency issues
@@ -262,9 +265,18 @@ async def startup_event():
         asyncio.create_task(processor.process_batches()) # Changed from processor.run() to processor.process_batches()
         logger.info("Batch processor started")
     except Exception as e:
+        # FORCEFUL LOGGING START
+        logger.critical(f"[STARTUP_EVENT_CRITICAL] Failed to start batch processor: {e}", exc_info=True)
+        # FORCEFUL LOGGING END
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
 
-    # Start AssessmentWorker
+    # FORCEFUL LOGGING START
+    logger.critical("############################################################")
+    logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function COMPLETED.")
+    logger.critical("############################################################")
+    # FORCEFUL LOGGING END
+
+    # Start AssessmentWorker (Integrated from Codex branch)
     try:
         from .tasks.assessment_worker import AssessmentWorker # Consistent relative import
         worker = AssessmentWorker()
@@ -275,74 +287,79 @@ async def startup_event():
 
 @_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
-    """Stop batch processor and disconnect from MongoDB on application shutdown."""
+    """Stop batch processor, assessment worker, and disconnect from MongoDB on application shutdown."""
     logger.info("Executing shutdown event...")
-    
+
     # Stop batch processor
-    batch_processor.stop()
-    logger.info("Batch processor stopped")
-    
-    # Disconnect from database
+    # Ensure batch_processor module (imported at top) has a stop() method or adjust accordingly
+    if hasattr(batch_processor, 'stop') and callable(batch_processor.stop): # Defensive check
+        batch_processor.stop()
+        logger.info("Batch processor stop requested")
+    else:
+        logger.warning("batch_processor module does not have a callable stop() method as expected.")
+
+
+    # Stop assessment worker
+    # Ensure assessment_worker module (imported at top) has a stop() method or adjust accordingly
+    if hasattr(assessment_worker, 'stop') and callable(assessment_worker.stop): # Defensive check
+        assessment_worker.stop()
+        logger.info("Assessment worker stop requested")
+    else:
+        logger.warning("assessment_worker module does not have a callable stop() method as expected.")
+
     logger.info("Disconnecting from database...")
     await close_mongo_connection()
 
 # --- API Endpoints ---
-@_original_fastapi_app.get("/", tags=["Root"], include_in_schema=False) # Decorate _original_fastapi_app
+@_original_fastapi_app.get("/", tags=["Root"], include_in_schema=False)
 async def read_root():
     """Root endpoint welcome message."""
     return {"message": f"Welcome to {PROJECT_NAME}"}
 
-@_original_fastapi_app.get("/health", status_code=200, tags=["Health Check"]) # Decorate _original_fastapi_app
+@_original_fastapi_app.get("/health", status_code=200, tags=["Health Check"])
 async def health_check() -> Dict[str, Any]:
     """
     Comprehensive health check endpoint that verifies:
     - Application status and metrics (uptime, memory)
     - Database connectivity and collections
     """
-    # Get database health information
     db_health = await check_database_health()
-
-    # Get system metrics using psutil
     process = psutil.Process()
     memory_info = process.memory_info()
-
-    # Calculate uptime
     uptime_seconds = time.time() - APP_START_TIME
     uptime = str(timedelta(seconds=int(uptime_seconds)))
 
-    # Prepare response dictionary
     health_info = {
-        "status": "OK", # Start with OK, potentially downgrade based on checks
+        "status": "OK",
         "application": {
             "name": PROJECT_NAME,
             "version": VERSION,
-            "status": "OK", # Application itself is running if it responds
+            "status": "OK",
             "uptime": uptime,
             "memory_usage": {
-                "rss_bytes": memory_info.rss,  # Resident Set Size (bytes)
-                "vms_bytes": memory_info.vms,  # Virtual Memory Size (bytes)
-                "percent": f"{process.memory_percent():.2f}%" # Memory usage percentage
+                "rss_bytes": memory_info.rss,
+                "vms_bytes": memory_info.vms,
+                "percent": f"{process.memory_percent():.2f}%"
             }
         },
-        "database": db_health, # Include detailed DB health dictionary
-        "timestamp": datetime.now(timezone.utc).isoformat() + "Z" # Use UTC timestamp
+        "database": db_health,
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
-    # Determine overall status based on database health
     if db_health.get("status") == "ERROR":
         health_info["status"] = "ERROR"
-    elif db_health.get("status") == "WARNING": # If check_database_health can return WARNING
+    elif db_health.get("status") == "WARNING":
         health_info["status"] = "WARNING"
 
     return health_info
 
 # --- Liveness and Readiness Probes ---
-@_original_fastapi_app.get("/healthz", tags=["Probes"], status_code=status.HTTP_200_OK) # Decorate _original_fastapi_app
+@_original_fastapi_app.get("/healthz", tags=["Probes"], status_code=status.HTTP_200_OK)
 async def liveness_probe():
     """Liveness probe: Checks if the application process is running and responsive."""
     return {"status": "live"}
 
-@_original_fastapi_app.get("/readyz", tags=["Probes"]) # Decorate _original_fastapi_app
+@_original_fastapi_app.get("/readyz", tags=["Probes"])
 async def readiness_probe(response: Response):
     """Readiness probe: Checks if the application is ready to serve traffic (e.g., DB connected)."""
     db_health = await check_database_health()
@@ -352,35 +369,20 @@ async def readiness_probe(response: Response):
     else:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {"status": "not_ready", "database": db_health}
-# --- End Probes ---
 
 # --- Include API Routers ---
-# Apply the configured prefix (e.g., /api/v1) to all included routers
-_original_fastapi_app.include_router(schools_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
-_original_fastapi_app.include_router(teachers_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
-_original_fastapi_app.include_router(class_groups_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
-_original_fastapi_app.include_router(students_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(schools_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(teachers_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(class_groups_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(students_router, prefix=API_V1_PREFIX)
 # _original_fastapi_app.include_router(assignments_router, prefix=API_V1_PREFIX) # COMMENTED OUT
-_original_fastapi_app.include_router(documents_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
-_original_fastapi_app.include_router(results_router, prefix=API_V1_PREFIX)   # Apply to _original_fastapi_app
-_original_fastapi_app.include_router(dashboard_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
-_original_fastapi_app.include_router(analytics_router, prefix=API_V1_PREFIX) # Apply to _original_fastapi_app
+_original_fastapi_app.include_router(documents_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(results_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(dashboard_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(analytics_router, prefix=API_V1_PREFIX)
 
-# Add a simple health check endpoint directly to the app
-@_original_fastapi_app.get("/api/v1/test-health") # Decorate _original_fastapi_app
-def read_root_test_health(): # Renamed function to avoid conflict if 'read_root' is used elsewhere
+@_original_fastapi_app.get("/api/v1/test-health")
+def read_root_test_health():
     return {"Status": "OK"}
 
-# This 'app' will be used by the ASGI server (e.g., uvicorn).
-# If state_middleware.app_with_state exists and is used, it would wrap _original_fastapi_app here.
-# For now, assuming direct usage or middleware is added via .add_middleware.
-app = _original_fastapi_app # The app served by uvicorn is the original, unless wrapped.
-
-# Example if you had an app_with_state wrapper:
-# from backend.app.utils.state_middleware import app_with_state # Hypothetical import
-# app = app_with_state(_original_fastapi_app)
-# Tests would import _original_fastapi_app, uvicorn would run 'app'.
-
-# --- TODOs & Future Enhancements ---
-# TODO: Add middleware, CORS configuration, and global exception handlers
-
+app = _original_fastapi_app
