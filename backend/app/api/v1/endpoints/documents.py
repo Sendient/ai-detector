@@ -211,7 +211,7 @@ async def trigger_assessment(
     logger.warning(f"Authorization check needed for user {user_kinde_id} triggering assessment for document {document_id}")
 
     # Check if assessment can be triggered (e.g., only if UPLOADED or maybe ERROR)
-    if document.status not in [DocumentStatus.UPLOADED, DocumentStatus.ERROR]:
+    if document.status not in [DocumentStatus.UPLOADED, DocumentStatus.ERROR, DocumentStatus.FAILED]:
         logger.warning(f"Document {document_id} status is '{document.status}'. Assessment cannot be triggered.")
         # Return the existing result instead of erroring if it's already completed/processing
         existing_result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=auth_teacher_id) # Pass teacher_id here too
