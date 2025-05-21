@@ -9,6 +9,8 @@ import asyncio
 from fastapi import status
 from pymongo.errors import OperationFailure
 import os
+import pymongo # Added import
+from pymongo import IndexModel # Added import
 
 # Import config and database lifecycle functions
 from .core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
@@ -134,6 +136,45 @@ async def startup_event():
             logger.error(f"Unexpected error creating index 'idx_teacher_kinde_id' on teachers: {e}", exc_info=True)
             # Depending on policy, you might want to raise this too
 
+        # --- Ensure indexes for Assessment Tasks collection ---
+        ASSESSMENT_TASKS_COLLECTION_NAME = "assessment_tasks"
+        assessment_tasks_collection = db.get_collection(ASSESSMENT_TASKS_COLLECTION_NAME)
+        if assessment_tasks_collection is not None:
+            idx_assessment_tasks_dequeue = IndexModel(
+                [("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)],
+                name="idx_assessment_tasks_dequeue_order"
+            )
+            try:
+                await assessment_tasks_collection.create_indexes([idx_assessment_tasks_dequeue])
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}.")
+                logger.info(f"Successfully created/verified index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}")
+            except OperationFailure as e:
+                if e.code == 85: # IndexOptionsConflict
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}")
+                    logger.warning(
+                        f"Index conflict for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}. "
+                        f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
+                        f"This means an index with the same name exists but has different options. "
+                        f"The application will continue, but please resolve this manually in Azure Portal/Cosmos DB "
+                        f"by deleting the existing index and allowing the application to recreate it, "
+                        f"or by updating the application's index definition to match."
+                    )
+                elif "The order by query does not have a corresponding composite index that it can be served from." in e.details.get('errmsg', ''):
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Cosmos DB specific error for 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}. This indicates the composite index is still missing or not usable by Cosmos DB despite creation attempt.")
+                    logger.error(f"Cosmos DB indexing issue for 'idx_assessment_tasks_dequeue_order': {e.details.get('errmsg', str(e))}", exc_info=True)
+                    # Potentially raise here if this index is absolutely critical for startup
+                else:
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Database OperationFailure while creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}")
+                    logger.error(f"Database OperationFailure while creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}", exc_info=True)
+                    raise
+            except Exception as e:
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Unexpected error creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e}")
+                logger.error(f"Unexpected error creating index 'idx_assessment_tasks_dequeue_order' on {ASSESSMENT_TASKS_COLLECTION_NAME}: {e}", exc_info=True)
+                # Potentially raise here
+        else:
+            logger.critical(f"[STARTUP_EVENT_CRITICAL] Could not get collection '{ASSESSMENT_TASKS_COLLECTION_NAME}' to create indexes.")
+            logger.error(f"Could not get collection '{ASSESSMENT_TASKS_COLLECTION_NAME}' to create indexes.")
+
         # Ensure indexes for Documents collection (example, adjust as needed)
         # documents_collection = db[DOCUMENT_COLLECTION]
         # await documents_collection.create_index([("teacher_id", 1), ("upload_timestamp", -1)], name="idx_doc_teacher_upload")
@@ -157,7 +198,7 @@ async def startup_event():
         logger.critical(f"[STARTUP_EVENT_CRITICAL] Failed to start batch processor: {e}", exc_info=True)
         # FORCEFUL LOGGING END
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
-    
+
     # FORCEFUL LOGGING START
     logger.critical("############################################################")
     logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function COMPLETED.")
@@ -173,16 +214,15 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to start assessment worker: {e}", exc_info=True)
 
-# RESOLVED CONFLICT 2 - Using _original_fastapi_app decorator
 @_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
     """Stop batch processor, assessment worker, and disconnect from MongoDB on application shutdown."""
     logger.info("Executing shutdown event...")
-    
+
     # Stop batch processor
     # Ensure batch_processor module (imported at top) has a stop() method or adjust accordingly
     if hasattr(batch_processor, 'stop') and callable(batch_processor.stop): # Defensive check
-        batch_processor.stop() 
+        batch_processor.stop()
         logger.info("Batch processor stop requested")
     else:
         logger.warning("batch_processor module does not have a callable stop() method as expected.")
@@ -195,7 +235,7 @@ async def shutdown_event():
         logger.info("Assessment worker stop requested")
     else:
         logger.warning("assessment_worker module does not have a callable stop() method as expected.")
-        
+
     logger.info("Disconnecting from database...")
     await close_mongo_connection()
 
