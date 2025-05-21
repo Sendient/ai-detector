@@ -7,7 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 
-from app.db.database import get_database
+from ..db.database import get_database
 
 # Default configuration values
 DEFAULT_VISIBILITY_TIMEOUT = 60  # seconds

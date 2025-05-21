@@ -1,173 +1,196 @@
-"""Background worker to process assessment tasks."""
-
+# backend/app/tasks/assessment_worker.py
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+import time # For a simple delay in the loop
+import random # For dummy score
+from typing import Optional
 
-import httpx
-
-from app.queue import dequeue_assessment_task, AssessmentTask
-from app.services.blob_storage import download_blob_as_bytes
-from app.services.text_extraction import extract_text_from_bytes
-from app.db import crud
-from app.db.database import get_database
-from app.models.enums import DocumentStatus, ResultStatus, FileType
-
-# Temporary: same ML API URL used in documents endpoint
-ML_API_URL = "https://fa-sdt-uks-aitextdet-prod.azurewebsites.net/api/ai-text-detection?code=PZrMzMk1VBBCyCminwvgUfzv_YGhVU-5E1JIs2if7zqiAzFuMhUC-g%3D%3D"
+# Import database functions and models
+from ..db import crud
+from ..db.database import get_database # Added to allow worker to get DB instance
+from ..models.enums import DocumentStatus, ResultStatus
+from ..models.result import Result # To type hint the task
+from ..models.document import Document # For type hinting
 
 logger = logging.getLogger(__name__)
 
-
 class AssessmentWorker:
-    """Worker that continuously polls the assessment queue and processes documents."""
+    def __init__(self, poll_interval: int = 10):
+        """
+        Initializes the AssessmentWorker.
+        Args:
+            poll_interval: Time in seconds to wait between polling for new tasks.
+        """
+        self.poll_interval = poll_interval
+        self._running = False
+        logger.info(f"AssessmentWorker initialized with poll_interval: {self.poll_interval}s")
 
-    def __init__(self) -> None:
-        self.is_running = False
+    async def _claim_next_task(self) -> Optional[Result]:
+        """
+        Claims the next available task (Result with status ASSESSING).
+        Sorts by 'updated_at' to pick older tasks first.
+        Returns:
+            A Result object if one was successfully claimed and updated, None otherwise.
+        """
+        db = get_database()
+        if db is None:
+            logger.error("[AssessmentWorker] Database not available, cannot claim task.")
+            return None
 
-    async def run(self) -> None:
-        self.is_running = True
-        while self.is_running:
-            try:
-                task = await dequeue_assessment_task()
-                if not task:
-                    await asyncio.sleep(5)
-                    continue
-
-                await self._process_task(task)
-            except Exception as e:
-                logger.error(f"Assessment worker encountered error: {e}", exc_info=True)
-                await asyncio.sleep(5)
-
-    def stop(self) -> None:
-        self.is_running = False
-
-    async def _process_task(self, task: AssessmentTask) -> None:
-        logger.info(f"Processing assessment task {task.id} attempt {task.attempts}")
-
-        document = await crud.get_document_by_id(task.document_id, task.user_id)
-        if not document:
-            logger.error(f"Document {task.document_id} not found for task {task.id}")
-            await self._dead_letter(task, reason="Document not found")
-            return
-
-        # Update processing attempts on the document
-        await self._update_document_attempts(task.document_id, task.user_id, task.attempts)
+        results_collection = db.get_collection(crud.RESULT_COLLECTION)
+        logger.debug("[AssessmentWorker] Attempting to find next task (Result with status ASSESSING)...")
 
         try:
-            await crud.update_document_status(
-                document_id=document.id,
-                teacher_id=document.teacher_id,
-                status=DocumentStatus.PROCESSING,
+            # Find one task with status ASSESSING, oldest first
+            # In a multi-worker scenario, we'd need an atomic update here to "claim" it.
+            # For a single worker, simply fetching and then processing is okay for now.
+            # However, a more robust approach is find_one_and_update.
+            # For simplicity in this step, we'll find, then update status in _process_task.
+            # This is NOT robust for multiple workers.
+            # TODO: Implement atomic claim if multiple workers are anticipated.
+
+            assessing_task_doc = await results_collection.find_one(
+                {"status": ResultStatus.ASSESSING.value},
+                sort=[("updated_at", 1)] # Get the oldest updated task
             )
 
-            file_bytes = await download_blob_as_bytes(document.storage_blob_path)
-            if not file_bytes:
-                raise RuntimeError("Failed to download blob")
+            if assessing_task_doc:
+                logger.info(f"[AssessmentWorker] Found task: {assessing_task_doc['_id']} for document: {assessing_task_doc['document_id']}")
+                return Result(**assessing_task_doc) # Convert to Pydantic model
+            else:
+                logger.debug("[AssessmentWorker] No ASSESSING tasks found.")
+                return None
+        except Exception as e:
+            logger.error(f"[AssessmentWorker] Error claiming next task: {e}", exc_info=True)
+            return None
 
-            # ensure FileType enum
-            file_type = document.file_type
-            if isinstance(file_type, str):
-                try:
-                    file_type = FileType(file_type)
-                except ValueError:
-                    raise RuntimeError(f"Unsupported file type: {document.file_type}")
+    async def _process_task(self, result_doc: Result):
+        """
+        Processes a claimed task (Result object).
+        Simulates ML processing and updates Document and Result statuses.
+        Args:
+            result_doc: The Result object to process.
+        """
+        document_id = result_doc.document_id
+        teacher_id = result_doc.teacher_id # teacher_id is on the Result model
+        logger.info(f"[AssessmentWorker] Starting processing for result {result_doc.id} (document_id: {document_id})")
 
-            text_content = await asyncio.to_thread(extract_text_from_bytes, file_bytes, file_type)
-            if text_content is None:
-                raise RuntimeError("Text extraction returned None")
+        try:
+            # --- Simulate work ---
+            await asyncio.sleep(random.randint(3, 7)) # Simulate variable processing time
+            simulated_score = round(random.uniform(0.1, 0.95), 2) # Simulate an ML score
+            logger.info(f"[AssessmentWorker] Simulated ML processing complete for doc {document_id}. Score: {simulated_score}")
 
-            character_count = len(text_content)
-            word_count = len([w for w in text_content.split() if w])
-
-            ai_score, label, ai_generated, human_generated, paragraph_results = await self._call_ai(text_content)
-
-            result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=document.teacher_id)
-            if result:
-                update_payload: Dict[str, Any] = {
-                    "status": ResultStatus.COMPLETED.value,
-                    "result_timestamp": datetime.now(timezone.utc),
-                }
-                if ai_score is not None:
-                    update_payload["score"] = ai_score
-                if label is not None:
-                    update_payload["label"] = label
-                if ai_generated is not None:
-                    update_payload["ai_generated"] = ai_generated
-                if human_generated is not None:
-                    update_payload["human_generated"] = human_generated
-                if paragraph_results is not None:
-                    update_payload["paragraph_results"] = paragraph_results
-
-                await crud.update_result(result_id=result.id, update_data=update_payload, teacher_id=document.teacher_id)
-
-            await crud.update_document_status(
-                document_id=document.id,
-                teacher_id=document.teacher_id,
-                status=DocumentStatus.COMPLETED,
-                character_count=character_count,
-                word_count=word_count,
+            # Update Result record to COMPLETED
+            update_data_result = {
+                "status": ResultStatus.COMPLETED,
+                "score": simulated_score,
+                # Potentially add other fields like 'label', 'ai_generated' etc.
+            }
+            updated_result = await crud.update_result(
+                result_id=result_doc.id, 
+                update_data=update_data_result,
+                teacher_id=teacher_id # Pass teacher_id for auth if crud.update_result uses it
             )
+            if not updated_result:
+                logger.error(f"[AssessmentWorker] Failed to update result {result_doc.id} to COMPLETED for doc {document_id}")
+                # If result update fails, set document to ERROR to avoid perpetual processing
+                await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+                return
+            
+            logger.info(f"[AssessmentWorker] Successfully updated result {result_doc.id} for doc {document_id} to COMPLETED.")
 
-            await self._complete_task(task)
+            # Update Document record to COMPLETED
+            # Assuming character/word counts are set during the initial /assess call or text extraction step.
+            # If worker is responsible for these, it needs to calculate/fetch them.
+            updated_document = await crud.update_document_status(
+                document_id=document_id, 
+                teacher_id=teacher_id, # crud.update_document_status requires teacher_id
+                status=DocumentStatus.COMPLETED
+                # character_count and word_count could be passed if available/calculated by worker
+            )
+            if not updated_document:
+                logger.error(f"[AssessmentWorker] Failed to update document {document_id} to COMPLETED. Setting result back to ERROR for retry.")
+                # Revert result status to allow for retry or manual intervention if doc update fails
+                await crud.update_result(result_id=result_doc.id, update_data={"status": ResultStatus.ERROR}, teacher_id=teacher_id)
+                return
+
+            logger.info(f"[AssessmentWorker] Successfully updated document {document_id} to COMPLETED.")
+            logger.info(f"[AssessmentWorker] Finished processing for result {result_doc.id} (document_id: {document_id})")
 
         except Exception as e:
-            logger.error(f"Error processing assessment task {task.id}: {e}", exc_info=True)
-            await crud.update_document_status(
-                document_id=document.id,
-                teacher_id=document.teacher_id,
-                status=DocumentStatus.ERROR,
-            )
-            if task.attempts >= 5:
-                await self._dead_letter(task, reason=str(e))
-            # Otherwise task will reappear after visibility timeout
+            logger.error(f"[AssessmentWorker] Error processing result {result_doc.id} (doc: {document_id}): {e}", exc_info=True)
+            # Set document and result to ERROR status if processing fails
+            try:
+                await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+                await crud.update_result(result_id=result_doc.id, update_data={"status": ResultStatus.ERROR}, teacher_id=teacher_id)
+                logger.info(f"[AssessmentWorker] Set document {document_id} and result {result_doc.id} to ERROR due to processing exception.")
+            except Exception as update_err:
+                logger.error(f"[AssessmentWorker] Further error setting statuses to ERROR for doc {document_id}: {update_err}", exc_info=True)
 
-    async def _update_document_attempts(self, document_id, teacher_id, attempts: int) -> None:
-        db = get_database()
-        if not db:
-            return
-        await db.documents.update_one(
-            {"_id": document_id, "teacher_id": teacher_id},
-            {"$set": {"processing_attempts": attempts, "updated_at": datetime.now(timezone.utc)}},
-        )
+    async def run(self):
+        """
+        Main loop for the assessment worker.
+        Periodically polls for tasks and processes them.
+        """
+        logger.info("AssessmentWorker run loop started.")
+        self._running = True
+        while self._running:
+            processed_task_in_iteration = False
+            try:
+                logger.debug("[AssessmentWorker] Checking for new assessment tasks...")
+                task_to_process = await self._claim_next_task()
+                
+                if task_to_process:
+                    logger.info(f"[AssessmentWorker] Claimed task: Result ID {task_to_process.id} for document: {task_to_process.document_id}")
+                    await self._process_task(task_to_process)
+                    processed_task_in_iteration = True # A task was processed
+                else:
+                    logger.debug("[AssessmentWorker] No pending tasks found this cycle.")
+                
+            except asyncio.CancelledError:
+                logger.info("AssessmentWorker run loop cancelled.")
+                self._running = False
+                break # Exit loop immediately on cancellation
+            except Exception as e:
+                logger.error(f"[AssessmentWorker] Unhandled error in run loop's main try block: {e}", exc_info=True)
+            
+            # Sleep only if no task was processed, otherwise try to pick another one quickly
+            if self._running and not processed_task_in_iteration:
+                await asyncio.sleep(self.poll_interval)
+            elif self._running and processed_task_in_iteration:
+                await asyncio.sleep(1) # Short sleep if a task was just processed, to check again soon
 
-    async def _complete_task(self, task: AssessmentTask) -> None:
-        db = get_database()
-        if not db:
-            return
-        await db.assessment_tasks.delete_one({"_id": task.id})
+        logger.info("AssessmentWorker run loop finished.")
 
-    async def _dead_letter(self, task: AssessmentTask, reason: str) -> None:
-        logger.warning(f"Moving task {task.id} to dead letter queue: {reason}")
-        db = get_database()
-        if not db:
-            return
-        await db.assessment_tasks.delete_one({"_id": task.id})
-        task_dict = task.model_dump(by_alias=True)
-        task_dict["status"] = "FAILED"
-        task_dict["error"] = reason
-        await db.assessment_deadletter.insert_one(task_dict)
+    def stop(self):
+        """
+        Signals the worker to stop processing.
+        """
+        logger.info("AssessmentWorker stop requested.")
+        self._running = False
 
-    async def _call_ai(self, text: str) -> tuple[Optional[float], Optional[str], Optional[bool], Optional[bool], Optional[list]]:
-        headers = {"Content-Type": "application/json"}
-        payload = {"text": text}
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(ML_API_URL, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+if __name__ == '__main__':
+    # Example of how to run the worker directly for testing (optional)
+    async def main_test(): # Renamed to avoid conflict with main module's main
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        # Ensure DB is connected for this test to work if crud operations are called
+        # from backend.app.db.database import connect_to_mongo, close_mongo_connection
+        # await connect_to_mongo()
+        
+        worker = AssessmentWorker(poll_interval=5)
+        try:
+            await worker.run()
+        except KeyboardInterrupt:
+            logger.info("KeyboardInterrupt received, stopping worker...")
+        finally:
+            worker.stop()
+            # Allow time for the loop to finish if it's in an await
+            await asyncio.sleep(worker.poll_interval + 1) 
+            logger.info("AssessmentWorker stopped by KeyboardInterrupt in test.")
+            # await close_mongo_connection()
 
-        ai_generated = data.get("ai_generated") if isinstance(data.get("ai_generated"), bool) else None
-        human_generated = data.get("human_generated") if isinstance(data.get("human_generated"), bool) else None
-        label = None
-        score = None
-        paragraph_results = None
-        if isinstance(data, dict):
-            if isinstance(data.get("results"), list) and data["results"]:
-                paragraph_results = data["results"] if all(isinstance(i, dict) for i in data["results"]) else None
-                first = data["results"][0]
-                label = first.get("label") if isinstance(first.get("label"), str) else None
-                prob = first.get("probability")
-                if isinstance(prob, (int, float)):
-                    score = max(0.0, min(1.0, float(prob)))
-        return score, label, ai_generated, human_generated, paragraph_results
+    # To run this test worker: 
+    # Ensure your .env file is loaded or MONGODB_URL is available if it hits DB
+    # Then uncomment the line below:
+    # asyncio.run(main_test()) 

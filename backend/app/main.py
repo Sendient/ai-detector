@@ -1,6 +1,7 @@
 import logging
 import psutil # For system metrics in health check
-import time    # For uptime calculation
+import time   # For uptime calculation
+import sys    # For sys.stdout in logging configuration
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
@@ -78,14 +79,48 @@ async def startup_event():
     Connects to the database, ensures necessary indexes are created,
     and starts background tasks.
     """
-    # FORCEFUL LOGGING START
-    print("[STARTUP_EVENT_DEBUG] >>> startup_event function ENTERED")
-    logger.critical("############################################################")
-    logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function ENTERED.")
-    logger.critical("############################################################")
-    # FORCEFUL LOGGING END
+    # --- Configure Logging ---
+    # MODIFIED: Default to DEBUG if LOG_LEVEL is not explicitly INFO, WARNING, ERROR, or CRITICAL
+    log_level_name = os.getenv("LOG_LEVEL", "DEBUG").upper() # Default to DEBUG
+    if log_level_name not in ["INFO", "WARNING", "ERROR", "CRITICAL"]:
+        log_level_name = "DEBUG" # Force DEBUG if invalid or other value like "DEBUG"
+    numeric_log_level = getattr(logging, log_level_name, logging.DEBUG)
 
-    logger.info("Executing startup event: Connecting to database...")
+    # Get the root logger
+    root_logger = logging.getLogger()
+    # Set its level. Uvicorn might also set this, but we re-affirm.
+    root_logger.setLevel(numeric_log_level)
+
+    # Check if a handler with our specific formatter already exists to avoid duplicates if reloaded
+    # This is a simple check; more robust would be to name the handler or check its type/formatter more precisely.
+    handler_exists = False
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and isinstance(handler.formatter, logging.Formatter):
+            if handler.formatter._fmt == "%(asctime)s - %(name)s - %(levelname)s - %(message)s":
+                handler_exists = True
+                # Optionally, ensure its level is also consistent if needed
+                # handler.setLevel(numeric_log_level) 
+                break
+    
+    if not handler_exists:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        stream_handler.setFormatter(formatter)
+        # Set level on the handler itself too, though root_logger.setLevel is primary
+        stream_handler.setLevel(numeric_log_level) 
+        root_logger.addHandler(stream_handler)
+        logger_to_use = logging.getLogger("startup_config_adder")
+        logger_to_use.info(f"Added new StreamHandler to root logger. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
+    else:
+        logger_to_use = logging.getLogger("startup_config_existing")
+        logger_to_use.info(f"StreamHandler with correct formatter already exists. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
+    # --- End Logging Configuration ---
+
+    # Test log message from the main app logger
+    logger.info(f"Executing startup event: Connecting to database... Root logger effective level: {logging.getLevelName(logger.getEffectiveLevel())}")
     try:
         await connect_to_mongo() # Ensure this is awaited
         logger.info("Startup event: Database connection successful.")
@@ -174,6 +209,42 @@ async def startup_event():
         else:
             logger.critical(f"[STARTUP_EVENT_CRITICAL] Could not get collection '{ASSESSMENT_TASKS_COLLECTION_NAME}' to create indexes.")
             logger.error(f"Could not get collection '{ASSESSMENT_TASKS_COLLECTION_NAME}' to create indexes.")
+
+        # --- Ensure index for Results collection on updated_at ---    
+        RESULTS_COLLECTION_NAME = "results" # As per crud.py
+        results_collection = db.get_collection(RESULTS_COLLECTION_NAME)
+        if results_collection is not None:
+            idx_results_updated_at = IndexModel(
+                [("updated_at", pymongo.ASCENDING)],
+                name="idx_results_updated_at_asc"
+            )
+            try:
+                await results_collection.create_indexes([idx_results_updated_at])
+                logger.info(f"Successfully created/verified index 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}")
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Successfully created/verified index 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}.")
+            except OperationFailure as e:
+                if e.code == 85: # IndexOptionsConflict
+                    logger.warning(
+                        f"Index conflict for 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}. "
+                        f"Code: {e.code}, Error: {e.details.get('errmsg', str(e))}. "
+                        f"The application will continue, but please resolve this manually."
+                    )
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Index conflict for 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: Code {e.code}, Error: {e.details.get('errmsg', str(e))}")
+                elif ("The index path corresponding to the specified order-by item is excluded" in e.details.get('errmsg', '') or \
+                     "The order by query does not have a corresponding composite index" in e.details.get('errmsg', '')):
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Cosmos DB specific indexing error for 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}. This indicates the index is still missing or not usable by Cosmos DB despite creation attempt.")
+                    logger.error(f"Cosmos DB indexing issue for 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}", exc_info=True)
+                else:
+                    logger.critical(f"[STARTUP_EVENT_CRITICAL] Database OperationFailure while creating index 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}")
+                    logger.error(f"Database OperationFailure while creating index 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: {e.details.get('errmsg', str(e))}", exc_info=True)
+                    # Not raising here to allow app to start, but this is critical for worker
+            except Exception as e:
+                logger.critical(f"[STARTUP_EVENT_CRITICAL] Unexpected error creating index 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: {e}")
+                logger.error(f"Unexpected error creating index 'idx_results_updated_at_asc' on {RESULTS_COLLECTION_NAME}: {e}", exc_info=True)
+        else:
+            logger.critical(f"[STARTUP_EVENT_CRITICAL] Could not get collection '{RESULTS_COLLECTION_NAME}' to create 'idx_results_updated_at_asc'.")
+            logger.error(f"Could not get collection '{RESULTS_COLLECTION_NAME}' to create 'idx_results_updated_at_asc'.")
+        # --- End Results index ---
 
         # Ensure indexes for Documents collection (example, adjust as needed)
         # documents_collection = db[DOCUMENT_COLLECTION]
