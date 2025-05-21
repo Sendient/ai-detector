@@ -14,6 +14,9 @@ param parLocation string
 
 param parSkuName string
 
+param parBlobContainers array
+
+param parPublicNetworkAccess string
 
 module storageAccount 'br/public:avm/res/storage/storage-account:0.19.0' = {
   scope: resourceGroup(parSubId, parRgName)
@@ -25,7 +28,10 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.19.0' = {
     kind: parSaKind
     location: parLocation
     skuName: parSkuName
+    blobServices: {
+      containers: parBlobContainers
+    }
+    publicNetworkAccess: parPublicNetworkAccess
   }
 }
-
 

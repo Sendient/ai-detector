@@ -13,3 +13,11 @@ param parLocation =  'uksouth'
 param parSaName =  'sasdtuksaid${parEnv}'
 
 param parSaKind =  'StorageV2'
+
+param parBlobContainers = [
+  {
+    name: 'uploaded-documents'
+  }
+]
+
+param parPublicNetworkAccess = 'Enabled'

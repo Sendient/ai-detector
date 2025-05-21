@@ -9,6 +9,7 @@ async def init_db_indexes():
     """
     db = get_database()
     if not db:
+        logger.error("Database connection is not available. Cannot create indexes.")
         return False
 
     try:

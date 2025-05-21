@@ -7,7 +7,7 @@ import logging
 from typing import Optional # For type hinting return value
 
 # Assuming your enums are here, adjust the import path if needed
-from app.models.enums import FileType
+from ..models.enums import FileType
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

@@ -20,6 +20,7 @@ import NotFoundPage from './pages/NotFoundPage';
 import AIDetectionReportPage from './components/AIDetectionReportPage';
 import QuickStartPage from './pages/QuickStartPage';
 import IntegrationsPage from './pages/IntegrationsPage';
+import BulkUploadPage from './pages/BulkUploadPage';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
@@ -48,6 +49,7 @@ function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/quickstart" element={<QuickStartPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/bulk-upload" element={<BulkUploadPage />} />
         <Route path="/documents/:documentId/text-view" element={<ExtractedTextPage />} />
         <Route path="/documents/:documentId/report" element={<AIDetectionReportPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />

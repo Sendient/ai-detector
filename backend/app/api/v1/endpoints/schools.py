@@ -6,11 +6,11 @@ from typing import List, Dict, Any # Add Dict, Any
 from fastapi import APIRouter, HTTPException, status, Query, Depends # Add Depends
 
 # Import Pydantic models for request/response validation
-from app.models.school import School, SchoolCreate, SchoolUpdate
+from ....models.school import School, SchoolCreate, SchoolUpdate
 # Import CRUD functions for database interaction
-from app.db import crud # Assuming crud functions are in app/db/crud.py
+from ....db import crud # Assuming crud functions are in app/db/crud.py
 # Import the authentication dependency
-from app.core.security import get_current_user_payload # Adjust path
+from ....core.security import get_current_user_payload # Adjust path
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

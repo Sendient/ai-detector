@@ -8,13 +8,13 @@ from pydantic import BaseModel
 import uuid # Added for potential future use
 
 # Import authentication dependency
-from app.core.security import get_current_user_payload
+from ....core.security import get_current_user_payload
 
 # Import CRUD functions
-from app.db import crud
+from ....db import crud
 # Import Document model for response type
-from app.models.document import Document
-from app.models.teacher import Teacher  # Import Teacher model
+from ....models.document import Document
+from ....models.teacher import Teacher  # Import Teacher model
 
 # Setup logger
 logger = logging.getLogger(__name__)
