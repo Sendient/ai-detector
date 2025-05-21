@@ -32,6 +32,7 @@ from app.services.blob_storage import upload_file_to_blob, download_blob_as_byte
 
 # Import Text Extraction Service
 from app.services.text_extraction import extract_text_from_bytes
+from app.queue import enqueue_assessment_task
 
 # Import external API URL from config (assuming you add it there)
 # from ....core.config import ML_API_URL, ML_RECAPTCHA_SECRET # Placeholder - add these to config.py
@@ -143,9 +144,29 @@ async def upload_document(
         logger.error(f"Failed to create initial pending result record for document {created_document.id}")
         # Decide if this should cause the whole upload request to fail - maybe not?
 
-    # 4. TODO: Trigger background task for analysis here (using created_document.id)
-    # For now, assessment is triggered manually via the /assess endpoint
-    logger.info(f"Document {created_document.id} uploaded. Ready for assessment.")
+    # 4. Enqueue document for assessment
+    enqueue_success = await enqueue_assessment_task(
+        document_id=created_document.id,
+        user_id=user_kinde_id,
+        priority_level=created_document.processing_priority or 0,
+    )
+
+    if enqueue_success:
+        updated_doc = await crud.update_document_status(
+            document_id=created_document.id,
+            teacher_id=user_kinde_id,
+            status=DocumentStatus.QUEUED,
+        )
+        if updated_doc:
+            created_document = updated_doc
+    else:
+        logger.error(
+            f"Failed to enqueue assessment task for document {created_document.id}"
+        )
+
+    logger.info(
+        f"Document {created_document.id} uploaded and queued for assessment."
+    )
 
     return created_document
 
@@ -850,7 +871,26 @@ async def upload_batch(
             else:
                 logger.error(f"!!! Failed to create initial Result record for Document {document.id}. crud.create_result returned None.")
             # --- END ADDED ---
-            
+
+            # Enqueue document for assessment and update status if successful
+            enqueue_success = await enqueue_assessment_task(
+                document_id=document.id,
+                user_id=user_kinde_id,
+                priority_level=priority_value,
+            )
+            if enqueue_success:
+                updated_doc = await crud.update_document_status(
+                    document_id=document.id,
+                    teacher_id=user_kinde_id,
+                    status=DocumentStatus.QUEUED,
+                )
+                if updated_doc:
+                    document = updated_doc
+            else:
+                logger.error(
+                    f"Failed to enqueue assessment task for document {document.id}"
+                )
+
             documents.append(document)
 
         except Exception as e:
