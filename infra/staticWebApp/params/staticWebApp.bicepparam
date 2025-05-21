@@ -23,5 +23,4 @@ param parStagingEnvironmentPolicy =  'Enabled'
 
 param parLocation =  'westeurope'
 
-
 param parCustomDomainName =  'dev-app.smartdetector.ai'

@@ -58,11 +58,10 @@ module staticSite 'br/public:avm/res/web/static-site:0.9.0' = {
     sku: parSku
     stagingEnvironmentPolicy: parStagingEnvironmentPolicy
     customDomains: [
-    {
-    name: parCustomDomainName
-    validationMethod: 'CNAME'
-    }
-  ]
+      {
+        name: parCustomDomainName
+      }
+    ]
     tags: {
       AutoDelete: 'No'
     }

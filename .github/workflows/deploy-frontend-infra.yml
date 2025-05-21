@@ -124,8 +124,6 @@ jobs:
         elif [ "$ENVIRONMENT" == "staging" ]; then
           CUSTOM_DOMAIN="staging-app.smartdetector.ai"
         elif [ "$ENVIRONMENT" == "dev1" ]; then
-          CUSTOM_DOMAIN="dev-smartdetector.ai" # As per your request
-        elif [ "$ENVIRONMENT" == "dev" ]; then
           CUSTOM_DOMAIN="dev-app.smartdetector.ai" # Assuming a pattern for 'dev'
         fi
         echo "custom_domain=$CUSTOM_DOMAIN" >> $GITHUB_OUTPUT
