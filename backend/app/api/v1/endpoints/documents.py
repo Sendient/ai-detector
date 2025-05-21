@@ -218,30 +218,43 @@ async def trigger_assessment(
             )
 
     # --- Update Status to PROCESSING ---
+    logger.debug(f"Attempting to set document {document_id} to PROCESSING.")
     await crud.update_document_status(document_id=document_id, teacher_id=auth_teacher_id, status=DocumentStatus.PROCESSING)
+    logger.debug(f"Document {document_id} status updated to PROCESSING. Fetching result.")
+
     result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=auth_teacher_id) # Pass teacher_id
+    logger.debug(f"Result for doc {document_id} after fetching: {result}")
+
     if result:
         # --- Pass dictionary directly to crud.update_result ---
-        await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ASSESSING}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
-        logger.info(f"Existing result record found for doc {document_id}, updated status to ASSESSING.")
+        logger.debug(f"Attempting to update existing result {result.id} for doc {document_id} to ASSESSING.")
+        update_success = await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ASSESSING}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
+        if update_success:
+            logger.info(f"Existing result record {result.id} for doc {document_id} updated to status ASSESSING successfully.")
+            logger.debug(f"Updated result object: {update_success}") # Log the returned object
+        else:
+            logger.error(f"Failed to update existing result record {result.id} for doc {document_id} to status ASSESSING.")
     else:
         # Handle case where result record didn't exist (should have been created on upload)
-        logger.warning(f"Result record missing for document {document_id} during assessment trigger. Creating one now.")
+        logger.warning(f"Result record missing for document {document_id} during assessment trigger. Creating one now with ASSESSING status.")
         result_data = ResultCreate(
             score=None, 
             status=ResultStatus.ASSESSING, # Start with ASSESSING status
-            result_timestamp=datetime.now(timezone.utc), 
+            # result_timestamp is not part of ResultCreate, it's set by DB model or CRUD
             document_id=document_id, 
             teacher_id=auth_teacher_id # Use the authenticated user's ID
         )
+        logger.debug(f"Attempting to create new result for doc {document_id} with data: {result_data.model_dump_json()}")
         created_result = await crud.create_result(result_in=result_data)
         if not created_result:
             logger.error(f"Failed to create missing result record for document {document_id}. Assessment cannot proceed.")
             # If creation fails even here, revert doc status and raise error
+            logger.debug(f"Reverting document {document_id} status to ERROR due to failed result creation.")
             await crud.update_document_status(document_id=document_id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
             raise HTTPException(status_code=500, detail="Internal error: Failed to create necessary result record.")
         else:
             logger.info(f"Successfully created missing result record {created_result.id} for doc {document_id} with status ASSESSING.")
+            logger.debug(f"Newly created result object: {created_result}")
             result = created_result # Use the newly created result for subsequent steps
 
     # --- Text Extraction ---
@@ -317,7 +330,7 @@ async def trigger_assessment(
             teacher_id=auth_teacher_id, 
             status=DocumentStatus.ERROR
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
+        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id) # Added teacher_id
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to extract text from document.")
 
     if extracted_text is None: # Should be caught by specific exceptions above, but as a safeguard
