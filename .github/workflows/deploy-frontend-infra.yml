@@ -135,7 +135,7 @@ jobs:
       uses: azure/cli@v1
       with:
         inlineScript: |
-          az deployment sub create 
+          az deployment sub create \
             --name "StaticWebAppDeploy" \
             --location "uksouth" \
             --template-file "./infra/staticWebApp/staticWebApp.bicep" \
