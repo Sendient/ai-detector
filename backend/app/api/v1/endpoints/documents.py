@@ -30,7 +30,7 @@ from ....services.blob_storage import upload_file_to_blob, download_blob_as_byte
 
 # Import Text Extraction Service
 from ....services.text_extraction import extract_text_from_bytes
-from ....queue import enqueue_assessment_task # RESOLVED CONFLICT 1
+from ....queue import enqueue_assessment_task, AssessmentTask # Added AssessmentTask if needed for other parts, ensure enqueue is there
 
 # Import external API URL from config (assuming you add it there)
 # from ....core.config import ML_API_URL, ML_RECAPTCHA_SECRET # Placeholder - add these to config.py
@@ -171,336 +171,93 @@ async def upload_document(
 
 @router.post(
     "/{document_id}/assess",
-    response_model=Result, # Return the final Result object
-    status_code=status.HTTP_200_OK, # Return 200 OK on successful assessment
-    summary="Trigger AI Assessment and get Result (Protected)",
-    description="Fetches document text, calls the external ML API for AI detection, "
-                "updates the result/document status, and returns the final result. "
-                "Requires authentication."
+    response_model=Result,
+    status_code=status.HTTP_200_OK,
+    summary="Trigger or Check AI Assessment Status (Protected)",
+    description="Checks the status of an assessment. If PENDING or ERROR, it attempts to re-queue it. "
+                "If already COMPLETED, ASSESSING, or RETRYING, it returns the current result."
 )
 async def trigger_assessment(
     document_id: uuid.UUID,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    """
-    Protected endpoint to trigger the AI assessment for a document.
-    Fetches text, calls external API, updates DB, returns result.
-    """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to trigger assessment for document ID: {document_id}")
+    logger.critical(f"--- TRIGGER_ASSESSMENT ENDPOINT CALLED for doc_id: {document_id} by user {user_kinde_id} ---")
 
-    # --- Get Document & Authorization Check ---
-    document = await crud.get_document_by_id(
-        document_id=document_id,
-        teacher_id=user_kinde_id # <<< This ensures the document belongs to the user
-    )
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document with ID {document_id} not found or not accessible by user.")
+    document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id)
+    if not document:
+        logger.warning(f"User {user_kinde_id} failed to trigger assessment: Document {document_id} not found or not accessible.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found or not accessible.")
 
-    # Ensure document.teacher_id is available, otherwise use user_kinde_id as a fallback.
-    # Given the above fetch, document.teacher_id should match user_kinde_id.
-    auth_teacher_id = document.teacher_id if document.teacher_id else user_kinde_id
-    if not auth_teacher_id:
-        logger.error(f"Critical: teacher_id is missing for document {document_id} during assessment trigger by user {user_kinde_id}.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error: Missing teacher identifier.")
+    auth_teacher_id = document.teacher_id # Should be same as user_kinde_id due to above check
 
+    logger.info(f"User {user_kinde_id} checking/triggering assessment for document {document.id} (current doc status: {document.status.value})")
 
-    # TODO: Implement proper authorization check: Can user trigger assessment for this document?
-    logger.warning(f"Authorization check needed for user {user_kinde_id} triggering assessment for document {document_id}")
+    # Get the current result associated with the document
+    current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
 
-    # Check if assessment can be triggered (e.g., only if UPLOADED or maybe ERROR)
-    # RESOLVED CONFLICT 2 - Using multi-line style from 'main'
-    if document.status not in [
-        DocumentStatus.UPLOADED,
-        DocumentStatus.ERROR,
-        DocumentStatus.FAILED,
-    ]:
-        logger.warning(f"Document {document_id} status is '{document.status}'. Assessment cannot be triggered.")
-        # Return the existing result instead of erroring if it's already completed/processing
-        existing_result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=auth_teacher_id) # Pass teacher_id here too
-        if existing_result:
-            # Return 200 OK with the existing result if already completed or processing
-            if existing_result.status in [
-                ResultStatus.COMPLETED,
-                ResultStatus.ASSESSING,
-                ResultStatus.RETRYING,
-            ]:
-                logger.info(f"Assessment already completed or in progress for doc {document_id}. Returning existing result.")
-                return existing_result
-            else:
-                # If status is PENDING or ERROR, allow re-triggering below
-                pass
-        else:
-            # This case is odd (doc status implies assessment happened, but no result found)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Assessment cannot be triggered. Document status is {document.status}, but no result found."
-            )
-
-    # --- Update Status to PROCESSING ---
-    await crud.update_document_status(document_id=document_id, teacher_id=auth_teacher_id, status=DocumentStatus.PROCESSING)
-    result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=auth_teacher_id) # Pass teacher_id
-    if result:
-        # --- Pass dictionary directly to crud.update_result ---
-        await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ASSESSING}, teacher_id=auth_teacher_id) # Added teacher_id if update_result supports it
-        logger.info(f"Existing result record found for doc {document_id}, updated status to ASSESSING.")
-    else:
-        # Handle case where result record didn't exist (should have been created on upload)
-        logger.warning(f"Result record missing for document {document_id} during assessment trigger. Creating one now.")
-        result_data = ResultCreate(
-            score=None, 
-            status=ResultStatus.ASSESSING, # Start with ASSESSING status
-            result_timestamp=datetime.now(timezone.utc), 
-            document_id=document_id, 
-            teacher_id=auth_teacher_id # Use the authenticated user's ID
-        )
-        created_result = await crud.create_result(result_in=result_data)
-        if not created_result:
-            logger.error(f"Failed to create missing result record for document {document_id}. Assessment cannot proceed.")
-            # If creation fails even here, revert doc status and raise error
-            await crud.update_document_status(document_id=document_id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
-            raise HTTPException(status_code=500, detail="Internal error: Failed to create necessary result record.")
-        else:
-            logger.info(f"Successfully created missing result record {created_result.id} for doc {document_id} with status ASSESSING.")
-            result = created_result # Use the newly created result for subsequent steps
-
-    # --- Text Extraction ---
-    extracted_text: Optional[str] = None
-    character_count: Optional[int] = None # Initialize
-    word_count: Optional[int] = None      # Initialize
-    try:
-        # Convert file_type string back to Enum member if needed
-        file_type_enum_member: Optional[FileType] = None
-        if isinstance(document.file_type, str):
-            for member in FileType:
-                if member.value.lower() == document.file_type.lower():
-                    file_type_enum_member = member
-                    break
-        elif isinstance(document.file_type, FileType):
-            file_type_enum_member = document.file_type
-
-        if not file_type_enum_member:
-            logger.error(f"Could not map document.file_type '{document.file_type}' to FileType enum for doc {document_id}")
-            raise HTTPException(status_code=500, detail="Internal error: Could not determine file type for text extraction.")
-
-        # Download blob as bytes
-        file_bytes = await download_blob_as_bytes(document.storage_blob_path)
-        if file_bytes is None:
-            logger.error(f"Failed to download blob {document.storage_blob_path} for document {document_id}")
-            # Update status to error and raise
-            await crud.update_document_status(document_id=document_id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
-            if result: # Check if result exists before trying to update it
-                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to retrieve document content from storage for assessment.")
-
-        # Call the synchronous extract_text_from_bytes in a separate thread
-        logger.info(f"Offloading text extraction for document {document_id} to a separate thread.")
-        extracted_text = await asyncio.to_thread(extract_text_from_bytes, file_bytes, file_type_enum_member)
-        logger.info(f"Text extraction completed for document {document_id}. Chars: {len(extracted_text) if extracted_text else 0}")
-
-        if extracted_text is None:
-            # This implies an error during extraction or unsupported type by the extraction func itself
-            logger.warning(f"Text extraction returned None for document {document.id} ({document.file_type}).")
-            # Return empty string if extraction fails, or raise specific error if preferred
-            extracted_text = "" # Ensure it's a string for later use
+    if current_result:
+        logger.debug(f"Found existing result {current_result.id} with status {current_result.status.value} for doc {document.id}")
+        if current_result.status in [ResultStatus.COMPLETED, ResultStatus.ASSESSING, ResultStatus.RETRYING]:
+            logger.info(f"Assessment for doc {document.id} is already {current_result.status.value}. Returning current result.")
+            return current_result
         
-        # Calculate character count
-        character_count = len(extracted_text)
-        # Calculate word count (split by whitespace, filter empty)
-        words = re.split(r'\s+', extracted_text.strip()) # Use regex for robust splitting
-        word_count = len([word for word in words if word]) # Count non-empty strings
-        logger.info(f"Calculated counts for document {document_id}: Chars={character_count}, Words={word_count}")
-
-    except FileNotFoundError:
-        logger.error(f"File not found in blob storage for document {document_id} at path {document.storage_blob_path}", exc_info=True)
-        await crud.update_document_status(
-            document_id=document.id, 
-            teacher_id=auth_teacher_id, 
-            status=DocumentStatus.ERROR,
-        )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error accessing document file for text extraction.")
-    except ValueError as e: # Catch specific error from text_extraction if it raises one for unsupported types
-        logger.error(f"Text extraction error for document {document.id}: {e}", exc_info=True)
-        await crud.update_document_status(
-            document_id=document.id, 
-            teacher_id=auth_teacher_id, 
-            status=DocumentStatus.ERROR
-        )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected error during text extraction for document {document_id}: {e}", exc_info=True)
-        await crud.update_document_status(
-            document_id=document.id, 
-            teacher_id=auth_teacher_id, 
-            status=DocumentStatus.ERROR
-        )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to extract text from document.")
-
-    # This check should be redundant if extracted_text = "" is used above when None.
-    # if extracted_text is None: 
-    #     logger.error(f"Text extraction resulted in None for document {document_id}")
-    #     await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
-    #     if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-    #     raise HTTPException(status_code=500, detail="Text content could not be extracted.")
-        
-    # --- ML API Call ---
-    ai_score: Optional[float] = None
-    ml_label: Optional[str] = None
-    ml_ai_generated: Optional[bool] = None
-    ml_human_generated: Optional[bool] = None
-    ml_paragraph_results_raw: Optional[List[Dict[str, Any]]] = None
-
-    try:
-        ml_payload = {"text": extracted_text} # No need for `if extracted_text else ""` due to earlier assignment
-        headers = {'Content-Type': 'application/json'}
-
-        logger.info(f"Calling ML API for document {document_id} at {ML_API_URL}")
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(ML_API_URL, json=ml_payload, headers=headers)
-            response.raise_for_status()
-
-            ml_response_data = response.json()
-            logger.info(f"ML API response for document {document_id}: {ml_response_data}")
-
-            if isinstance(ml_response_data, dict):
-                ml_ai_generated = ml_response_data.get("ai_generated")
-                ml_human_generated = ml_response_data.get("human_generated")
-                if not isinstance(ml_ai_generated, bool): ml_ai_generated = None
-                if not isinstance(ml_human_generated, bool): ml_human_generated = None
-
-                if ("results" in ml_response_data and isinstance(ml_response_data["results"], list)):
-                    ml_paragraph_results_raw = ml_response_data["results"]
-                    logger.info(f"Extracted {len(ml_paragraph_results_raw)} raw paragraph results.")
-                    
-                    if len(ml_paragraph_results_raw) > 0 and isinstance(ml_paragraph_results_raw[0], dict):
-                        first_paragraph_result = ml_paragraph_results_raw[0] # Renamed for clarity
-                        ml_label = first_paragraph_result.get("label")
-                        if not isinstance(ml_label, str): ml_label = None
-
-                        score_value = first_paragraph_result.get("probability")
-                        if isinstance(score_value, (int, float)):
-                            ai_score = float(score_value)
-                            ai_score = max(0.0, min(1.0, ai_score))
-                            logger.info(f"Extracted overall AI probability score from first paragraph: {ai_score}")
-                        else:
-                            logger.warning(f"ML API returned non-numeric probability in first result: {score_value}")
-                            ai_score = None
-                    else: logger.warning("ML API 'results' list is empty or first item is not a dict.")
-                else: logger.warning("ML API response missing 'results' list.")
-            else: raise ValueError("ML API response format unexpected (not a dict).")
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error calling ML API for document {document_id}: {e.response.status_code} - {e.response.text}", exc_info=False)
-        await crud.update_document_status(
-            document_id=document_id,
-            teacher_id=auth_teacher_id,
-            status=DocumentStatus.ERROR,
-            character_count=character_count,
-            word_count=word_count
-        )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Error communicating with AI detection service: {e.response.status_code}")
-    except ValueError as e:
-        logger.error(f"Error processing ML API response for document {document_id}: {e}", exc_info=True)
-        await crud.update_document_status(
-            document_id=document_id,
-            teacher_id=auth_teacher_id,
-            status=DocumentStatus.ERROR,
-            character_count=character_count,
-            word_count=word_count
-        )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process AI detection result: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error during ML API call or processing for document {document_id}: {e}", exc_info=True)
-        await crud.update_document_status(
-            document_id=document_id,
-            teacher_id=auth_teacher_id,
-            status=DocumentStatus.ERROR,
-            character_count=character_count,
-            word_count=word_count
-        )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get AI detection result: {e}")
-
-
-    # --- Update DB with Result ---
-    final_result_obj: Optional[Result] = None # Renamed to avoid clash
-    try:
-        if result: # Result object should exist
-            update_payload_dict = {
-                "status": ResultStatus.COMPLETED.value, 
-                "result_timestamp": datetime.now(timezone.utc)
-            }
-            if ai_score is not None: update_payload_dict["score"] = ai_score
-            if ml_label is not None: update_payload_dict["label"] = ml_label
-            if ml_ai_generated is not None: update_payload_dict["ai_generated"] = ml_ai_generated
-            if ml_human_generated is not None: update_payload_dict["human_generated"] = ml_human_generated
-            
-            if ml_paragraph_results_raw is not None:
-                if isinstance(ml_paragraph_results_raw, list) and all(isinstance(item, dict) for item in ml_paragraph_results_raw):
-                    update_payload_dict["paragraph_results"] = ml_paragraph_results_raw
+        # If PENDING or ERROR, we can attempt to re-queue via the AssessmentTask mechanism
+        if current_result.status in [ResultStatus.PENDING, ResultStatus.ERROR]:
+            logger.info(f"Result for doc {document.id} is {current_result.status.value}. Attempting to re-queue for assessment.")
+            # Ensure document status is also appropriate for re-queue (e.g., not already COMPLETED)
+            if document.status not in [DocumentStatus.COMPLETED, DocumentStatus.PROCESSING]: # PROCESSING implies worker has it
+                enqueue_success = await enqueue_assessment_task(
+                    document_id=document.id,
+                    user_id=auth_teacher_id,
+                    priority_level=document.processing_priority or 0
+                )
+                if enqueue_success:
+                    updated_doc = await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.QUEUED)
+                    logger.info(f"Successfully re-queued doc {document.id}. Document status set to QUEUED. Worker will pick it up.")
+                    # Update result status to PENDING to reflect it's waiting for worker again
+                    await crud.update_result(result_id=current_result.id, update_data={"status": ResultStatus.PENDING}, teacher_id=auth_teacher_id)
+                    # Return the result as it is now (PENDING, and doc QUEUED)
+                    # The worker will eventually change this result's status.
+                    # Fetch it again to get the PENDING status if update_result doesn't return it directly with that change.
+                    current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
+                    return current_result # Should now be PENDING
                 else:
-                    logger.error(f"ml_paragraph_results_raw is not a list of dicts for doc {document_id}. Skipping save.")
-
-            logger.debug(f"Attempting to update Result {result.id} with payload: {update_payload_dict}")
-            final_result_obj = await crud.update_result(result_id=result.id, update_data=update_payload_dict, teacher_id=auth_teacher_id)
-
-            if final_result_obj:
-                logger.info(f"Successfully updated result for document {document_id}")
-                logger.debug(
-                    f"Calling update_document_status for COMPLETED. Doc ID: {document_id}, "
-                    f"Char Count: {character_count}, Word Count: {word_count}"
-                )
-                await crud.update_document_status(
-                    document_id=document_id,
-                    teacher_id=auth_teacher_id,
-                    status=DocumentStatus.COMPLETED,
-                    character_count=character_count, 
-                    word_count=word_count
-                )
-            else: # crud.update_result returned None
-                logger.error(f"Failed to update result record for document {document_id} after ML processing.")
-                await crud.update_document_status(
-                    document_id=document_id,
-                    teacher_id=auth_teacher_id,
-                    status=DocumentStatus.ERROR,
-                    character_count=character_count, 
-                    word_count=word_count
-                )
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save analysis results.")
-        else: # This case should ideally not be reached
-            logger.error(f"Result record not found during final update stage for document {document_id}")
-            await crud.update_document_status(
-                document_id=document_id,
-                teacher_id=auth_teacher_id,
-                status=DocumentStatus.ERROR,
-                character_count=character_count, 
-                word_count=word_count
-            )
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error: Result record missing during final update.")
-
-    except Exception as e:
-        logger.error(f"Failed to update database after successful ML API call for document {document_id}: {e}", exc_info=True)
-        await crud.update_document_status(
-            document_id=document_id,
-            teacher_id=auth_teacher_id,
-            status=DocumentStatus.ERROR,
-            character_count=character_count, 
-            word_count=word_count
+                    logger.error(f"Failed to re-enqueue doc {document.id}. Current result status: {current_result.status.value}")
+                    # Fall through to raise an error or return current (error) state
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to re-queue document for assessment.")
+            else:
+                logger.info(f"Document {document.id} is already {document.status.value}. Not re-queueing. Returning current result {current_result.id} ({current_result.status.value}).")
+                return current_result
+    else:
+        # No result record exists. This is unusual if upload creates one.
+        # Try to create a PENDING result and enqueue.
+        logger.warning(f"No result record found for doc {document.id}. Attempting to create one and enqueue.")
+        new_result_data = ResultCreate(document_id=document.id, teacher_id=auth_teacher_id, status=ResultStatus.PENDING)
+        created_result = await crud.create_result(result_in=new_result_data)
+        if not created_result:
+            logger.error(f"Failed to create a new PENDING result for doc {document.id} for re-queue attempt.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to initialize result for assessment.")
+        
+        enqueue_success = await enqueue_assessment_task(
+            document_id=document.id,
+            user_id=auth_teacher_id,
+            priority_level=document.processing_priority or 0
         )
-        if result: await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=auth_teacher_id)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save assessment result.")
+        if enqueue_success:
+            await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.QUEUED)
+            logger.info(f"Created new result {created_result.id} and enqueued doc {document.id}. Worker will pick it up.")
+            return created_result # Return the newly created PENDING result
+        else:
+            logger.error(f"Created new result {created_result.id} but failed to enqueue doc {document.id}.")
+            # Result is PENDING but doc not QUEUED. This is an inconsistent state.
+            # Might set doc to ERROR here.
+            await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.ERROR)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to queue document after creating result.")
 
-
-    if not final_result_obj: # Renamed variable
-       logger.error(f"Final result object is None after attempting DB update for doc {document_id}.")
-       raise HTTPException(status_code=500, detail="Failed to retrieve final result after update.")
-
-    return final_result_obj
+    # Fallback if no specific condition above was met to return/raise (should be rare)
+    logger.error(f"Reached end of trigger_assessment for doc {document.id} without explicit return. Result status: {current_result.status.value if current_result else 'None'}")
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not determine appropriate action for assessment trigger.")
 
 
 @router.get(

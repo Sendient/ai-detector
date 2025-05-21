@@ -1,6 +1,7 @@
 import logging
 import psutil # For system metrics in health check
-import time    # For uptime calculation
+import time   # For uptime calculation
+import sys    # For sys.stdout in logging configuration
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
@@ -78,14 +79,48 @@ async def startup_event():
     Connects to the database, ensures necessary indexes are created,
     and starts background tasks.
     """
-    # FORCEFUL LOGGING START
-    print("[STARTUP_EVENT_DEBUG] >>> startup_event function ENTERED")
-    logger.critical("############################################################")
-    logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function ENTERED.")
-    logger.critical("############################################################")
-    # FORCEFUL LOGGING END
+    # --- Configure Logging ---
+    # MODIFIED: Default to DEBUG if LOG_LEVEL is not explicitly INFO, WARNING, ERROR, or CRITICAL
+    log_level_name = os.getenv("LOG_LEVEL", "DEBUG").upper() # Default to DEBUG
+    if log_level_name not in ["INFO", "WARNING", "ERROR", "CRITICAL"]:
+        log_level_name = "DEBUG" # Force DEBUG if invalid or other value like "DEBUG"
+    numeric_log_level = getattr(logging, log_level_name, logging.DEBUG)
 
-    logger.info("Executing startup event: Connecting to database...")
+    # Get the root logger
+    root_logger = logging.getLogger()
+    # Set its level. Uvicorn might also set this, but we re-affirm.
+    root_logger.setLevel(numeric_log_level)
+
+    # Check if a handler with our specific formatter already exists to avoid duplicates if reloaded
+    # This is a simple check; more robust would be to name the handler or check its type/formatter more precisely.
+    handler_exists = False
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and isinstance(handler.formatter, logging.Formatter):
+            if handler.formatter._fmt == "%(asctime)s - %(name)s - %(levelname)s - %(message)s":
+                handler_exists = True
+                # Optionally, ensure its level is also consistent if needed
+                # handler.setLevel(numeric_log_level) 
+                break
+    
+    if not handler_exists:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        stream_handler.setFormatter(formatter)
+        # Set level on the handler itself too, though root_logger.setLevel is primary
+        stream_handler.setLevel(numeric_log_level) 
+        root_logger.addHandler(stream_handler)
+        logger_to_use = logging.getLogger("startup_config_adder")
+        logger_to_use.info(f"Added new StreamHandler to root logger. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
+    else:
+        logger_to_use = logging.getLogger("startup_config_existing")
+        logger_to_use.info(f"StreamHandler with correct formatter already exists. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
+    # --- End Logging Configuration ---
+
+    # Test log message from the main app logger
+    logger.info(f"Executing startup event: Connecting to database... Root logger effective level: {logging.getLevelName(logger.getEffectiveLevel())}")
     try:
         await connect_to_mongo() # Ensure this is awaited
         logger.info("Startup event: Database connection successful.")
@@ -198,7 +233,7 @@ async def startup_event():
         logger.critical(f"[STARTUP_EVENT_CRITICAL] Failed to start batch processor: {e}", exc_info=True)
         # FORCEFUL LOGGING END
         logger.error(f"Failed to start batch processor: {e}", exc_info=True)
-    
+
     # FORCEFUL LOGGING START
     logger.critical("############################################################")
     logger.critical("[STARTUP_EVENT_CRITICAL] >>> FastAPI startup_event function COMPLETED.")
@@ -214,16 +249,15 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to start assessment worker: {e}", exc_info=True)
 
-# RESOLVED CONFLICT 2 - Using _original_fastapi_app decorator
 @_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
     """Stop batch processor, assessment worker, and disconnect from MongoDB on application shutdown."""
     logger.info("Executing shutdown event...")
-    
+
     # Stop batch processor
     # Ensure batch_processor module (imported at top) has a stop() method or adjust accordingly
     if hasattr(batch_processor, 'stop') and callable(batch_processor.stop): # Defensive check
-        batch_processor.stop() 
+        batch_processor.stop()
         logger.info("Batch processor stop requested")
     else:
         logger.warning("batch_processor module does not have a callable stop() method as expected.")
@@ -236,7 +270,7 @@ async def shutdown_event():
         logger.info("Assessment worker stop requested")
     else:
         logger.warning("assessment_worker module does not have a callable stop() method as expected.")
-        
+
     logger.info("Disconnecting from database...")
     await close_mongo_connection()
 

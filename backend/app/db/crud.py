@@ -1070,7 +1070,7 @@ async def get_result_by_document_id(document_id: uuid.UUID, teacher_id: Optional
         return None
 
 # --- Result Create, Update, Delete ---
-@with_transaction
+# @with_transaction # MODIFIED: Removed decorator
 async def create_result(result_in: ResultCreate, session=None) -> Optional[Result]:
     """
     Creates a new result record in the database, typically with a PENDING status.
