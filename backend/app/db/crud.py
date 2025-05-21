@@ -1269,7 +1269,11 @@ async def get_dashboard_stats(current_user_payload: Dict[str, Any]) -> Dict[str,
         logger.debug(f"[Stats] Flagged recent query result: {flagged_recent}")
 
         # Pending/Processing Documents (based on Document status)
-        pending_statuses = [DocumentStatus.QUEUED.value, DocumentStatus.PROCESSING.value]
+        pending_statuses = [
+            DocumentStatus.QUEUED.value,
+            DocumentStatus.PROCESSING.value,
+            DocumentStatus.RETRYING.value,
+        ]
         pending = await docs_collection.count_documents({"teacher_id": teacher_kinde_id, "status": {"$in": pending_statuses}})
         logger.debug(f"[Stats] Pending query result: {pending}")
 
