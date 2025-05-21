@@ -6,7 +6,7 @@ from datetime import datetime, timezone # Added timezone import
 
 # Import configuration from your core config module
 # Adjust path if needed
-from ..core.config import MONGODB_URL, DB_NAME, PROJECT_NAME
+from ..core.config import MONGODB_URL, DB_NAME, PROJECT_NAME, settings
 
 # Setup logging using your project name
 # Ensure logging is configured elsewhere (e.g., main.py)

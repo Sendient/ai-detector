@@ -4,7 +4,9 @@ import logging
 from typing import Dict, List
 from pymongo import MongoClient
 from pymongo.database import Database
-from app.core.config import settings
+from ..core.config import settings
+import asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -115,6 +117,10 @@ def run_rbac_migration():
         raise
     finally:
         client.close()
+
+async def main():
+    # ... existing code ...
+    pass
 
 if __name__ == "__main__":
     run_rbac_migration() 

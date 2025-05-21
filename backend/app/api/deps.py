@@ -1,11 +1,12 @@
 from typing import Optional, Annotated
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.core.config import settings
-from app.services.auth_service import AuthService
-from app.models.teacher import TeacherInDBBase
+from ..core.config import settings
+from ..services.auth_service import AuthService
+from ..models.teacher import TeacherInDBBase
 import uuid
+from ..db.database import get_database
 
 security = HTTPBearer()
 

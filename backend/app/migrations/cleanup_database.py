@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 import logging
 from pymongo import MongoClient
-from app.core.config import settings
+from ..core.config import settings
+import asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -14,7 +16,7 @@ def get_mongo_client() -> MongoClient:
         uuidRepresentation='standard'  # This enables proper UUID handling
     )
 
-def cleanup_database():
+async def cleanup_database():
     """Clean up all collections in the database."""
     logger.info("Starting database cleanup")
     client = get_mongo_client()
@@ -46,4 +48,4 @@ def cleanup_database():
         client.close()
 
 if __name__ == "__main__":
-    cleanup_database() 
+    asyncio.run(cleanup_database()) 

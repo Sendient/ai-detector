@@ -7,12 +7,12 @@ from typing import Optional, Dict, Any
 
 import httpx
 
-from app.queue import dequeue_assessment_task, AssessmentTask
-from app.services.blob_storage import download_blob_as_bytes
-from app.services.text_extraction import extract_text_from_bytes
-from app.db import crud
-from app.db.database import get_database
-from app.models.enums import DocumentStatus, ResultStatus, FileType
+from ..queue import dequeue_assessment_task, AssessmentTask
+from ..services.blob_storage import download_blob_as_bytes
+from ..services.text_extraction import extract_text_from_bytes
+from ..db import crud
+from ..db.database import get_database
+from ..models.enums import DocumentStatus, ResultStatus, FileType
 
 # Temporary: same ML API URL used in documents endpoint
 ML_API_URL = "https://fa-sdt-uks-aitextdet-prod.azurewebsites.net/api/ai-text-detection?code=PZrMzMk1VBBCyCminwvgUfzv_YGhVU-5E1JIs2if7zqiAzFuMhUC-g%3D%3D"
