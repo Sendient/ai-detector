@@ -66,6 +66,12 @@ jobs:
         BACKEND_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/rg-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}/providers/Microsoft.App/containerApps/ca-sdt-uks-aid-${{ github.event.inputs.environment || inputs.environment }}"
         echo "backend_id=$BACKEND_ID" >> $GITHUB_OUTPUT
 
+    - name: Set to DNS Subscription
+      run: |
+        SUBSCRIPTION_ID="${{ vars.DNS_SUBSCRIPTION_ID }}"
+        az account set --subscription "$SUBSCRIPTION_ID"
+        echo "Set Azure CLI to use subscription ID: $SUBSCRIPTION_ID"
+
     # NEW STEP: Determine DNS CNAME records and apply them
     - name: Add DNS CNAME Records
       uses: azure/cli@v1
@@ -83,15 +89,10 @@ jobs:
           elif [ "$ENVIRONMENT" == "staging" ]; then
             CNAME_NAME="staging-app"
             CNAME_TARGET="agreeable-grass-0e5b07903.6.azurestaticapps.net"
-          elif [ "$ENVIRONMENT" == "dev" ]; then
+          elif [ "$ENVIRONMENT" == "dev1" ]; then
             # Assuming 'dev-app' for consistency with custom domain pattern
             CNAME_NAME="dev-app"
             CNAME_TARGET="gray-mud-0fe5b3703.6.azurestaticapps.net"
-          elif [ "$ENVIRONMENT" == "dev1" ]; then
-            # Assuming 'dev1-app' for consistency, adjust if 'dev' is intended for dev1
-            CNAME_NAME="dev1-app" # Or 'dev' if dev1 uses the 'dev' prefix
-            CNAME_TARGET="dev1-static-web-app-url.azurestaticapps.net" # REPLACE WITH ACTUAL DEV1 URL
-            echo "::warning::Please replace 'dev1-static-web-app-url.azurestaticapps.net' with the actual Azure Static Web App URL for dev1 environment."
           fi
 
           if [ -n "$CNAME_NAME" ] && [ -n "$CNAME_TARGET" ]; then
@@ -104,6 +105,13 @@ jobs:
           else
             echo "No CNAME record defined for environment: $ENVIRONMENT. Skipping DNS update."
           fi
+
+    # 5. Set to the main subscription for deployment
+    - name: Set to Main Subscription
+      run: |
+        SUBSCRIPTION_ID="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+        az account set --subscription "$SUBSCRIPTION_ID"
+        echo "Set Azure CLI to use subscription ID: $SUBSCRIPTION_ID"
 
     # Determine Custom Domain based on environment
     - name: Determine Custom Domain
