@@ -62,7 +62,7 @@ Create a `.env` file in the backend directory with the following variables:
 ```env
 # Database
 MONGODB_URL=your_mongodb_connection_string
-DB_NAME=aidetector_dev
+DB_NAME=aidetector_dev1
 
 # Authentication
 KINDE_DOMAIN=your_kinde_domain

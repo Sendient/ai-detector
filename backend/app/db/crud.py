@@ -414,6 +414,66 @@ async def delete_teacher(kinde_id: str, hard_delete: bool = False, session=None)
     else:
         logger.warning(f"Teacher with Kinde ID {kinde_id} not found or already deleted."); return False
 
+# Add this function within your app/db/crud.py, under "Teacher CRUD Functions"
+
+async def update_teacher_by_stripe_customer_id(
+    db: AsyncIOMotorDatabase, # Not strictly needed as _get_collection uses get_database internally
+    stripe_customer_id: str,
+    data_to_update: TeacherUpdate # Assuming TeacherUpdate is your app.models.teacher.TeacherUpdate
+) -> Optional[Teacher]: # Changed TeacherModel to Teacher based on existing code
+    """
+    Updates a teacher's record identified by their Stripe Customer ID.
+    """
+    collection = _get_collection(TEACHER_COLLECTION)
+    if collection is None:
+        logger.error(f"Teacher collection not found for update by stripe_customer_id: {stripe_customer_id}")
+        return None
+
+    # Prepare the update document from the Pydantic model
+    # exclude_unset=True ensures only provided fields are updated
+    update_data_dict = data_to_update.model_dump(exclude_unset=True)
+
+    # Ensure critical identifiers are not part of the $set payload if they shouldn't be changed
+    update_data_dict.pop("_id", None)
+    update_data_dict.pop("id", None)
+    update_data_dict.pop("kinde_id", None) # Kinde ID should not be changed by Stripe webhooks
+    update_data_dict.pop("stripe_customer_id", None) # This is the query key, not part of $set
+    # Ensure 'role' is handled if present, converting Enum to value
+    if 'role' in update_data_dict and isinstance(update_data_dict.get('role'), TeacherRole):
+        update_data_dict['role'] = update_data_dict['role'].value
+
+
+    if not update_data_dict:
+        logger.warning(f"No valid update data provided for teacher with stripe_customer_id {stripe_customer_id}")
+        # Optionally, fetch and return the current teacher document if no updates are to be made
+        current_teacher_doc = await collection.find_one({"stripe_customer_id": stripe_customer_id, "is_deleted": {"$ne": True}})
+        if current_teacher_doc:
+            return Teacher(**current_teacher_doc) # Use Teacher model
+        return None
+
+    # Always set/update the 'updated_at' timestamp
+    update_data_dict["updated_at"] = datetime.now(timezone.utc)
+
+    logger.info(f"Attempting to update teacher with stripe_customer_id {stripe_customer_id} with data: {update_data_dict}")
+
+    query_filter = {"stripe_customer_id": stripe_customer_id, "is_deleted": {"$ne": True}}
+
+    try:
+        updated_doc = await collection.find_one_and_update(
+            query_filter,
+            {"$set": update_data_dict},
+            return_document=ReturnDocument.AFTER # Return the document after update
+        )
+
+        if updated_doc:
+            logger.info(f"Successfully updated teacher (Kinde ID: {updated_doc.get('kinde_id')}) via stripe_customer_id {stripe_customer_id}")
+            return Teacher(**updated_doc) # Use Teacher model
+        else:
+            logger.warning(f"Teacher with stripe_customer_id {stripe_customer_id} not found or already deleted during update attempt.")
+            return None
+    except Exception as e:
+        logger.error(f"Error during teacher update by stripe_customer_id {stripe_customer_id}: {e}", exc_info=True)
+        return None
 
 # --- ClassGroup CRUD Functions ---
 # --- REMOVED @with_transaction from create_class_group ---

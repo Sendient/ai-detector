@@ -1,73 +1,41 @@
 # app/models/enums.py
-
 from enum import Enum
 
-# --- User/Teacher Related Enums ---
-
 class TeacherRole(str, Enum):
-    """Enumeration for different roles a teacher/user might have."""
     TEACHER = "teacher"
-    TUTOR = "tutor"
-    LECTURER = "lecturer"
-    ADMIN = "admin"
-    OTHER = "other"
+    SCHOOL_ADMIN = "school_admin"  # Assuming you might have roles like this
+    # Add any other roles your system uses or might use
+    # Example: IT_COORDINATOR = "it_coordinator"
+    # Example: DISTRICT_ADMIN = "district_admin"
 
 class MarketingSource(str, Enum):
-    """Enumeration for how a user heard about the service."""
     GOOGLE = "Google"
     FACEBOOK = "Facebook"
-    LINKEDIN = "Linkedin"
+    LINKEDIN = "LinkedIn"
+    WORD_OF_MOUTH = "Word of Mouth"
     CONFERENCE = "Conference"
-    REFERRAL = "Referral"
+    EMAIL_MARKETING = "Email Marketing" # Example addition
+    EDUCATIONAL_FORUM = "Educational Forum" # Example addition
     OTHER = "Other"
+    # Add other sources as relevant to your marketing efforts
 
-# --- Document/File Related Enums ---
+# --- NEW ENUMS FOR STRIPE INTEGRATION ---
+class SubscriptionPlan(str, Enum):
+    FREE = "Free"
+    PRO = "Pro"
+    # If you had a 'Schools' plan that was NOT going through Stripe checkout
+    # but you still wanted to represent its status internally, you might add it here:
+    # SCHOOLS_CONTACT_US = "Schools (Contact Us)"
+    # For now, focusing on plans that interact with Stripe or define access levels.
 
-class FileType(str, Enum):
-    """Enumeration for supported document/file types."""
-    PDF = "pdf"
-    DOCX = "docx"
-    PNG = "png"
-    JPG = "jpg"
-    JPEG = "jpeg" # Added common alias
-    TXT = "txt"
-    TEXT = "text" # Added for potential copy-paste input type
-
-class DocumentStatus(str, Enum):
-    """Enumeration for the processing status of a document."""
-    UPLOADED = "UPLOADED"     # File received and stored
-    QUEUED = "QUEUED"         # Queued for AI analysis
-    PROCESSING = "PROCESSING" # Actively being analyzed by ML model
-    RETRYING = "RETRYING"     # Retry attempt in progress
-    COMPLETED = "COMPLETED"   # Analysis finished, result available
-    ERROR = "ERROR"           # An error occurred during processing
-    FAILED = "FAILED"         # Processing failed after retries
-
-# --- Result Related Enums ---
-
-class ResultStatus(str, Enum):
-    """Enumeration for the status of an AI detection result."""
-    PENDING = "PENDING"       # Analysis requested but not yet started/completed
-    ASSESSING = "ASSESSING"   # Analysis in progress
-    COMPLETED = "COMPLETED"   # Analysis complete, score available
-    RETRYING = "RETRYING"     # Retry attempt in progress
-    ERROR = "ERROR"           # Error during analysis, score may be unavailable
-    FAILED = "FAILED"         # Analysis failed after retries
-
-class BatchStatus(str, Enum):
-    """Enumeration for the status of a document batch upload."""
-    CREATED = "CREATED"       # Batch created, files not yet uploaded
-    QUEUED = "QUEUED"         # Batch queued for processing
-    UPLOADING = "UPLOADING"   # Files are being uploaded
-    VALIDATING = "VALIDATING" # Validating uploaded files
-    PROCESSING = "PROCESSING" # Processing individual documents
-    COMPLETED = "COMPLETED"   # All documents in batch processed
-    PARTIAL = "PARTIAL"       # Some documents processed, some failed
-    ERROR = "ERROR"           # Batch processing failed
-
-class BatchPriority(str, Enum):
-    """Enumeration for batch processing priority."""
-    LOW = "LOW"
-    NORMAL = "NORMAL"
-    HIGH = "HIGH"
-    URGENT = "URGENT"
+class StripeSubscriptionStatus(str, Enum):
+    ACTIVE = "active"  # Subscription is active and payments are up to date.
+    CANCELED = "canceled"  # Subscription has been canceled by the user or admin, will end at period end.
+    INCOMPLETE = "incomplete"  # Initial payment attempt failed, needs action from the customer.
+    INCOMPLETE_EXPIRED = "incomplete_expired"  # Incomplete payment not resolved, subscription expired.
+    PAST_DUE = "past_due"  # Payment failed, Stripe is retrying (dunning). Access might be restricted.
+    TRIALING = "trialing"  # User is in a trial period.
+    UNPAID = "unpaid" # All payment attempts have failed, subscription is effectively void.
+    # These are common Stripe statuses. You can expand or refine based on Stripe's documentation
+    # and how you want to handle each case in your application.
+# --- END NEW ENUMS ---

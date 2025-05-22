@@ -1,18 +1,16 @@
 # app/models/teacher.py
-from pydantic import BaseModel, EmailStr, Field, ConfigDict # Added ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime, timezone
-import uuid # Keep for potential use, but ID is Kinde ID
+import uuid
 # Assuming enums.py is in the same directory or accessible via path
-from .enums import TeacherRole, MarketingSource
+from .enums import TeacherRole, MarketingSource, SubscriptionPlan, StripeSubscriptionStatus # IMPORT NEW ENUMS
 
 # Shared base properties
 class TeacherBase(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=100, description="Teacher's first name")
     last_name: str = Field(..., min_length=1, max_length=100, description="Teacher's last name")
-    # Use EmailStr for validation
     email: EmailStr = Field(..., description="Teacher's email address")
-    # Using simple string for school name as decided
     school_name: Optional[str] = Field(None, min_length=1, max_length=200, description="Name of the school the teacher belongs to")
     role: TeacherRole = Field(default=TeacherRole.TEACHER, description="The primary role of the teacher/user")
     is_administrator: bool = Field(default=False, description="Flag indicating if the user has administrative privileges")
@@ -24,75 +22,81 @@ class TeacherBase(BaseModel):
 
     model_config = ConfigDict(
         use_enum_values=True,
-        from_attributes=True, # Added for consistency
-        populate_by_name=True, # Added for consistency
+        from_attributes=True,
+        populate_by_name=True,
     )
 
-# --- CORRECTED TeacherCreate ---
 # Properties required on creation - Inherits from TeacherBase
 class TeacherCreate(TeacherBase):
-    # Inherits: first_name, last_name, email, role (with default), is_active (with default),
-    #           how_did_you_hear (optional), description (optional)
-
-    # Make fields required for creation that were optional in Base
-    school_name: str = Field(..., min_length=1, max_length=200) # Make school_name required
-    country: str = Field(...) # Make country required
-    state_county: str = Field(...) # Make state_county required
-    # Role is already required (with default) in Base.
-    # Email is already required in Base.
-    # Kinde ID will be set separately by backend logic
+    school_name: str = Field(..., min_length=1, max_length=200)
+    country: str = Field(...)
+    state_county: str = Field(...)
 
     model_config = ConfigDict(
-        use_enum_values=True, # Inherited but good to be explicit
+        use_enum_values=True,
         json_schema_extra={
             "example": {
                 "first_name": "John",
                 "last_name": "Doe",
-                "email": "john.doe@example.com", # Inherited
-                "school_name": "Example School", # Now required here
-                "role": "teacher", # Inherited (uses default if not provided)
-                "country": "United Kingdom", # Now required here
-                "state_county": "London", # Now required here
-                # "how_did_you_hear": "Google", # Example optional inherited field
-                # "description": "Experienced educator", # Example optional inherited field
-                # "is_active": True # Inherited (uses default if not provided)
+                "email": "john.doe@example.com",
+                "school_name": "Example School",
+                "role": "teacher",
+                "country": "United Kingdom",
+                "state_county": "London",
             }
         }
     )
-# --- END CORRECTION ---
 
 # Properties stored in DB
 class TeacherInDBBase(TeacherBase):
-    # Use Kinde ID as the primary identifier, mapping to MongoDB's _id
     id: uuid.UUID = Field(default_factory=uuid.uuid4, alias="_id", description="Internal unique identifier for the teacher record")
-    # Kinde User ID, indexed and should be unique logically
-    kinde_id: str = Field(..., description="Kinde User ID, obtained from authentication token")
+    kinde_id: str = Field(..., description="Kinde User ID, obtained from authentication token", index=True) # Suggest adding index=True for querying
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    is_deleted: bool = Field(default=False, description="Flag for soft delete status")
 
-    # --- RBAC Changes Below ---
-    is_deleted: bool = Field(default=False, description="Flag for soft delete status") # ADDED
-    # --- RBAC Changes Above ---
+    # --- STRIPE SUBSCRIPTION FIELDS START ---
+    current_plan: SubscriptionPlan = Field(
+        default=SubscriptionPlan.FREE,
+        description="Current subscription plan of the teacher"
+    )
+    stripe_customer_id: Optional[str] = Field(
+        default=None,
+        description="Stripe Customer ID, links to Stripe's customer object",
+        index=True # Suggest adding index=True for querying (especially by webhooks)
+    )
+    stripe_subscription_id: Optional[str] = Field(
+        default=None,
+        description="Stripe Subscription ID, if on a paid plan (e.g., Pro)",
+        index=True # Suggest adding index=True for querying
+    )
+    subscription_status: Optional[StripeSubscriptionStatus] = Field(
+        default=None,
+        description="Status of the Stripe subscription (e.g., active, canceled, past_due)"
+    )
+    current_period_end: Optional[datetime] = Field(
+        default=None,
+        description="End date of the current billing period for an active subscription"
+    )
+    # --- STRIPE SUBSCRIPTION FIELDS END ---
 
-    # Inherit model_config from Base, add specifics if needed
     model_config = ConfigDict(
-        populate_by_name=True, # Ensures alias _id works for id field
-        from_attributes=True, 
-        arbitrary_types_allowed=True, # Important for UUID type
-        use_enum_values=True, 
+        populate_by_name=True,
+        from_attributes=True,
+        arbitrary_types_allowed=True, # Important for UUID and datetime
+        use_enum_values=True,
     )
 
 # Final model representing a Teacher read from DB (API Response)
 class Teacher(TeacherInDBBase):
-    # Inherits all fields including RBAC changes
+    # Inherits all fields including Stripe subscription fields
     pass
 
-# Model for updating (Profile Page uses this)
+# Model for updating (Profile Page uses this, or admin updates)
 class TeacherUpdate(BaseModel):
     first_name: Optional[str] = Field(None, min_length=1, max_length=100)
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    # email: Optional[EmailStr] = None # Email usually not updatable
     school_name: Optional[str] = Field(None, min_length=1, max_length=200)
     role: Optional[TeacherRole] = None
     is_administrator: Optional[bool] = Field(None, description="Set administrative privileges")
@@ -100,9 +104,15 @@ class TeacherUpdate(BaseModel):
     country: Optional[str] = Field(None)
     state_county: Optional[str] = Field(None)
     is_active: Optional[bool] = Field(None)
-    # is_deleted is not updatable via this model
+
+    # --- OPTIONAL STRIPE FIELDS FOR UPDATE (Primarily for admin/system use) ---
+    # These fields are typically managed by Stripe webhooks, but an admin might need to override.
+    current_plan: Optional[SubscriptionPlan] = None
+    subscription_status: Optional[StripeSubscriptionStatus] = None
+    # stripe_customer_id and stripe_subscription_id are usually not directly updatable once set.
+    # current_period_end is also typically set by webhooks.
+    # --- END OPTIONAL STRIPE FIELDS ---
 
     model_config = ConfigDict(
         use_enum_values=True,
     )
-

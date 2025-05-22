@@ -1,3 +1,4 @@
+# backend/app/main.py
 import logging
 import psutil # For system metrics in health check
 import time   # For uptime calculation
@@ -12,9 +13,11 @@ from pymongo.errors import OperationFailure
 import os
 import pymongo
 from pymongo import IndexModel
+import stripe # Import the stripe library
 
 # Import config and database lifecycle functions
-from .core.config import PROJECT_NAME, API_V1_PREFIX, VERSION
+# Assuming your config.py provides 'settings' object and other constants
+from .core.config import settings, PROJECT_NAME, API_V1_PREFIX, VERSION
 from .db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
 
 # Import all endpoint routers
@@ -27,39 +30,72 @@ from .api.v1.endpoints.documents import router as documents_router
 from .api.v1.endpoints.results import router as results_router
 from .api.v1.endpoints.dashboard import router as dashboard_router
 from .api.v1.endpoints.analytics import router as analytics_router
+# --- NEW: Import Stripe subscription and webhook routers ---
+from .api.v1.endpoints.subscriptions import router as subscriptions_router
+from .api.v1.webhooks.stripe import router as stripe_webhook_router
+# --- END NEW IMPORTS ---
+
 
 # Import worker and processor classes directly
 from .tasks.batch_processor import BatchProcessor
 from .tasks.assessment_worker import AssessmentWorker
 
-# Setup logging
+# Setup logging (initial basic config, refined in startup)
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.INFO) # Ensure logging is configured appropriately
+# Basic config to ensure logger works before startup_event refines it.
+# The startup_event will set more detailed formatting and levels.
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+
+
+# --- INITIALIZE STRIPE ---
+# This should be done once when the application starts.
+# It configures the Stripe library with your secret key.
+if settings.STRIPE_SECRET_KEY:
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    # You can also set a specific Stripe API version if needed for compatibility
+    # stripe.api_version = "2022-11-15" # Example, check Stripe docs for latest or recommended
+    logger.info("Stripe client initialized successfully with configured API key.")
+else:
+    logger.critical("CRITICAL: STRIPE_SECRET_KEY is not set in settings. Stripe client cannot be initialized.")
+    # Depending on your app's needs, you might want to prevent startup or run in a degraded mode.
+# --- END INITIALIZE STRIPE ---
+
 
 # Track application start time for uptime calculation
 APP_START_TIME = time.time()
 
-frontend_origin = os.getenv("FRONTEND_URL")
-origins = [
-    "http://localhost:5173",  # Vite frontend
-    "http://localhost:3000",  # Alternative frontend port
-    "http://127.0.0.1:5173",  # Alternative localhost
-    "http://127.0.0.1:3000",  # Alternative localhost
-    "https://gray-mud-0fe5b3703.6.azurestaticapps.net", # Production frontend origin
-    frontend_origin  # Add frontend URL from environment variable
-]
+# --- CORS Setup ---
+# Use ALLOWED_ORIGINS from settings if available, otherwise use the hardcoded list + env var
+if settings.ALLOWED_ORIGINS:
+    origins_to_use = [str(origin) for origin in settings.ALLOWED_ORIGINS]
+    logger.info(f"Using ALLOWED_ORIGINS from settings for CORS: {origins_to_use}")
+else:
+    logger.warning("ALLOWED_ORIGINS not set in config. Falling back to default list and FRONTEND_URL env var for CORS.")
+    frontend_origin_env = os.getenv("FRONTEND_URL")
+    default_origins = [
+        "http://localhost:5173",  # Vite frontend
+        "http://localhost:3000",  # Alternative frontend port
+        "http://127.0.0.1:5173",  # Alternative localhost
+        "http://127.0.0.1:3000",  # Alternative localhost
+        "https://gray-mud-0fe5b3703.6.azurestaticapps.net", # Production frontend origin
+    ]
+    if frontend_origin_env:
+        default_origins.append(frontend_origin_env)
+    origins_to_use = [o for o in default_origins if o] # Remove any None values
 
-# Remove any None values in case the env var is not set
-origins = [o for o in origins if o]
+if not origins_to_use:
+    logger.error("CRITICAL: No CORS origins configured. Frontend communication will likely fail.")
+# --- End CORS Setup ---
+
 
 # Create FastAPI app instance with detailed configuration
 _original_fastapi_app = FastAPI(
-    title=f"{PROJECT_NAME} - Sentient AI Detector App",
-    version=VERSION,
+    title=f"{settings.PROJECT_NAME} - Sentient AI Detector App", # Use settings.PROJECT_NAME
+    version=settings.VERSION, # Use settings.VERSION
     description="API for detecting AI-generated content in educational settings",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json"
+    docs_url="/api/docs", # Consider making this conditional on settings.DEBUG
+    redoc_url="/api/redoc", # Consider making this conditional on settings.DEBUG
+    openapi_url="/api/openapi.json" # Consider f"{settings.API_V1_PREFIX}/openapi.json"
 )
 
 # Initialize app.state for storing worker/processor instances and tasks
@@ -69,13 +105,14 @@ _original_fastapi_app.state.batch_processor_instance = None
 _original_fastapi_app.state.batch_processor_task = None
 
 # Add CORS middleware
-_original_fastapi_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-)
+if origins_to_use:
+    _original_fastapi_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins_to_use,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        allow_headers=["*"],
+    )
 
 # --- Event Handlers for DB Connection and Batch Processor ---
 @_original_fastapi_app.on_event("startup")
@@ -83,47 +120,32 @@ async def startup_event():
     """
     Event handler for application startup.
     Connects to the database, ensures necessary indexes are created,
-    and starts background tasks.
+    and starts background tasks. Refines logging configuration.
     """
-    # --- Configure Logging ---
-    # MODIFIED: Default to DEBUG if LOG_LEVEL is not explicitly INFO, WARNING, ERROR, or CRITICAL
-    log_level_name = os.getenv("LOG_LEVEL", "DEBUG").upper() # Default to DEBUG
-    if log_level_name not in ["INFO", "WARNING", "ERROR", "CRITICAL"]:
-        log_level_name = "DEBUG" # Force DEBUG if invalid or other value like "DEBUG"
-    numeric_log_level = getattr(logging, log_level_name, logging.DEBUG)
+    # --- Configure Logging (Refined) ---
+    log_level_env_val = os.getenv("LOG_LEVEL", "INFO" if not settings.DEBUG else "DEBUG").upper()
+    numeric_log_level = getattr(logging, log_level_env_val, logging.INFO if not settings.DEBUG else logging.DEBUG)
 
-    # Get the root logger
     root_logger = logging.getLogger()
-    # Set its level. Uvicorn might also set this, but we re-affirm.
-    root_logger.setLevel(numeric_log_level)
+    root_logger.setLevel(numeric_log_level) # Set root logger level
 
-    # Check if a handler with our specific formatter already exists to avoid duplicates if reloaded
-    # This is a simple check; more robust would be to name the handler or check its type/formatter more precisely.
-    handler_exists = any(
-        isinstance(h, logging.StreamHandler) and 
-        isinstance(h.formatter, logging.Formatter) and 
-        h.formatter._fmt == "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        for h in root_logger.handlers
+    # Remove existing handlers to avoid duplication if app reloads (e.g., with uvicorn --reload)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        handler.close() # Close handler before removing
+
+    # Add a new, correctly formatted StreamHandler
+    stream_handler = logging.StreamHandler(sys.stdout) # Use sys.stdout
+    formatter = logging.Formatter(
+        fmt="%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s", # More detailed format
+        datefmt="%Y-%m-%d %H:%M:%S"
     )
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(numeric_log_level) # Set level on handler too
+    root_logger.addHandler(stream_handler)
     
-    if not handler_exists:
-        stream_handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
-        stream_handler.setFormatter(formatter)
-        # Set level on the handler itself too, though root_logger.setLevel is primary
-        stream_handler.setLevel(numeric_log_level) 
-        root_logger.addHandler(stream_handler)
-        logger_to_use = logging.getLogger("startup_config_adder")
-        logger_to_use.info(f"Added new StreamHandler to root logger. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
-    else:
-        logger_to_use = logging.getLogger("startup_config_existing")
-        logger_to_use.info(f"StreamHandler with correct formatter already exists. Root logger level: {logging.getLevelName(root_logger.level)} ({root_logger.level}). LOG_LEVEL env: {log_level_name}.")
+    logger.info(f"Logging re-configured in startup. Root level: {logging.getLevelName(root_logger.level)}. LOG_LEVEL env: {log_level_env_val}.")
     # --- End Logging Configuration ---
-
-    logger.info(f"Logging configured. Root level: {logging.getLevelName(root_logger.level)}.")
 
     logger.info("Executing startup event: Connecting to database...")
     try:
@@ -137,25 +159,45 @@ async def startup_event():
     db = get_database()
     if db is None:
         logger.critical("[STARTUP_CRITICAL] get_database() returned None. Cannot ensure indexes.")
+        # Depending on policy, you might want to raise an exception here to stop startup
         return
     try:
+        # Ensure index on teachers.kinde_id (non-unique as per your model structure)
         await db.teachers.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
-        logger.info("Index on teachers.kinde_id ensured.")
-        idx_assessment_dequeue = IndexModel([("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)], name="idx_assessment_tasks_dequeue_order")
+        logger.info("Index on teachers.kinde_id ensured (unique=False).")
+
+        # Ensure Stripe related indexes on teachers collection
+        await db.teachers.create_index("stripe_customer_id", name="idx_teacher_stripe_customer_id", unique=True, sparse=True)
+        logger.info("Index on teachers.stripe_customer_id ensured (unique=True, sparse=True).")
+        await db.teachers.create_index("stripe_subscription_id", name="idx_teacher_stripe_subscription_id", unique=True, sparse=True)
+        logger.info("Index on teachers.stripe_subscription_id ensured (unique=True, sparse=True).")
+
+
+        # Index for assessment_tasks dequeue order
+        idx_assessment_dequeue = IndexModel(
+            [("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)],
+            name="idx_assessment_tasks_dequeue_order"
+        )
         await db.assessment_tasks.create_indexes([idx_assessment_dequeue])
         logger.info("Index on assessment_tasks for dequeue order ensured.")
+
     except OperationFailure as e:
-        if e.code == 85 or "The order by query does not have a corresponding composite index" in e.details.get('errmsg', ''):
-            logger.warning(f"Index creation/verification conflict/issue: {e.details.get('errmsg', str(e))}. App will continue.")
+        # Code 85: IndexOptionsConflict (e.g., trying to change unique property of existing index)
+        # Code 86: IndexKeySpecsConflict (e.g., trying to change fields of existing index)
+        if e.code in [85, 86] or "already exists with different options" in e.details.get('errmsg', ''):
+            logger.warning(f"Index creation conflict for an existing index: {e.details.get('errmsg', str(e))}. App will continue.")
+        elif "The order by query does not have a corresponding composite index" in e.details.get('errmsg', ''): # For CosmosDB specific messages if applicable
+            logger.warning(f"CosmosDB index hint: {e.details.get('errmsg', str(e))}. App will continue.")
         else:
             logger.error(f"Database OperationFailure during index creation: {e}", exc_info=True)
-            raise
+            # Depending on policy, you might want to raise to stop startup
     except Exception as e:
         logger.error(f"Error during index creation: {e}", exc_info=True)
+        # Depending on policy, you might want to raise
 
     # Start BatchProcessor
     try:
-        bp_instance = BatchProcessor() # Uses imported class
+        bp_instance = BatchProcessor()
         _original_fastapi_app.state.batch_processor_instance = bp_instance
         _original_fastapi_app.state.batch_processor_task = asyncio.create_task(bp_instance.process_batches())
         logger.info("BatchProcessor started and stored in app.state.")
@@ -164,9 +206,9 @@ async def startup_event():
 
     # Start AssessmentWorker
     try:
-        db_for_worker = get_database() # Re-fetch or ensure db is still valid if startup is long
+        db_for_worker = get_database()
         if db_for_worker is not None:
-            aw_instance = AssessmentWorker(db=db_for_worker) # Uses imported class
+            aw_instance = AssessmentWorker(db=db_for_worker)
             _original_fastapi_app.state.assessment_worker_instance = aw_instance
             _original_fastapi_app.state.assessment_worker_task = asyncio.create_task(aw_instance.run())
             logger.info("AssessmentWorker started and stored in app.state.")
@@ -176,6 +218,7 @@ async def startup_event():
         logger.critical(f"[STARTUP_CRITICAL] Failed to start AssessmentWorker: {e}", exc_info=True)
     
     logger.info("[STARTUP_EVENT] >>> FastAPI startup_event function COMPLETED.")
+
 
 @_original_fastapi_app.on_event("shutdown")
 async def shutdown_event():
@@ -187,15 +230,17 @@ async def shutdown_event():
     bp_task = getattr(_original_fastapi_app.state, 'batch_processor_task', None)
     if bp_instance and hasattr(bp_instance, 'stop'):
         logger.info("Requesting BatchProcessor to stop...")
-        bp_instance.stop()
+        bp_instance.stop() # Signal stop
         if bp_task and not bp_task.done():
             logger.info("Waiting for BatchProcessor task to complete...")
             try:
-                await asyncio.wait_for(bp_task, timeout=10.0)
+                await asyncio.wait_for(bp_task, timeout=10.0) # Wait for graceful exit
                 logger.info("BatchProcessor task completed.")
             except asyncio.TimeoutError:
-                logger.warning("BatchProcessor task timed out. Cancelling...")
+                logger.warning("BatchProcessor task timed out during shutdown. Cancelling...")
                 bp_task.cancel()
+                try: await bp_task
+                except asyncio.CancelledError: logger.info("BatchProcessor task successfully cancelled.")
             except Exception as e_bp_shutdown:
                 logger.error(f"Error during BatchProcessor task shutdown: {e_bp_shutdown}", exc_info=True)
     
@@ -204,19 +249,19 @@ async def shutdown_event():
     aw_task = getattr(_original_fastapi_app.state, 'assessment_worker_task', None)
     if aw_instance and hasattr(aw_instance, 'stop'):
         logger.info("Requesting AssessmentWorker to stop...")
-        aw_instance.stop()
+        aw_instance.stop() # Signal stop
         if aw_task and not aw_task.done():
             logger.info("Waiting for AssessmentWorker task to complete...")
             try:
-                timeout_aw = getattr(aw_instance, 'poll_interval', 10.0) + 5.0
-                await asyncio.wait_for(aw_task, timeout=timeout_aw)
+                # Use a reasonable timeout, perhaps related to its poll interval
+                timeout_aw = getattr(aw_instance, 'poll_interval', 5.0) + 5.0 
+                await asyncio.wait_for(aw_task, timeout=timeout_aw) # Wait for graceful exit
                 logger.info("AssessmentWorker task completed.")
             except asyncio.TimeoutError:
-                logger.warning("AssessmentWorker task timed out. Cancelling...")
+                logger.warning("AssessmentWorker task timed out during shutdown. Cancelling...")
                 aw_task.cancel()
                 try: await aw_task
                 except asyncio.CancelledError: logger.info("AssessmentWorker task successfully cancelled.")
-                except Exception as e_aw_cancel: logger.error(f"Error awaiting cancelled AW task: {e_aw_cancel}", exc_info=True)
             except Exception as e_aw_shutdown:
                 logger.error(f"Error during AssessmentWorker task shutdown: {e_aw_shutdown}", exc_info=True)
 
@@ -225,12 +270,12 @@ async def shutdown_event():
     logger.info("Database connection closed. Shutdown event complete.")
 
 # --- API Endpoints ---
-@_original_fastapi_app.get("/", tags=["Root"], include_in_schema=False)
+@_original_fastapi_app.get("/", tags=["Root"], include_in_schema=False) # Keep include_in_schema=False if intended
 async def read_root():
     """Root endpoint welcome message."""
-    return {"message": f"Welcome to {PROJECT_NAME}"}
+    return {"message": f"Welcome to {settings.PROJECT_NAME}"} # Use settings.PROJECT_NAME
 
-@_original_fastapi_app.get("/health", status_code=200, tags=["Health Check"])
+@_original_fastapi_app.get("/health", status_code=status.HTTP_200_OK, tags=["Health Check"]) # Use status from fastapi
 async def health_check() -> Dict[str, Any]:
     """
     Comprehensive health check endpoint that verifies:
@@ -238,16 +283,16 @@ async def health_check() -> Dict[str, Any]:
     - Database connectivity and collections
     """
     db_health = await check_database_health()
-    process = psutil.Process()
+    process = psutil.Process(os.getpid()) # Get current process
     memory_info = process.memory_info()
     uptime_seconds = time.time() - APP_START_TIME
     uptime = str(timedelta(seconds=int(uptime_seconds)))
 
     health_info = {
-        "status": "OK",
+        "status": "OK", # Default to OK, will be overridden if DB has issues
         "application": {
-            "name": PROJECT_NAME,
-            "version": VERSION,
+            "name": settings.PROJECT_NAME, # Use settings
+            "version": settings.VERSION,     # Use settings
             "status": "OK",
             "uptime": uptime,
             "memory_usage": {
@@ -257,13 +302,22 @@ async def health_check() -> Dict[str, Any]:
             }
         },
         "database": db_health,
-        "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z" # Standard ISO format
     }
 
+    # Override overall status based on DB health
     if db_health.get("status") == "ERROR":
         health_info["status"] = "ERROR"
-    elif db_health.get("status") == "WARNING":
+    elif db_health.get("status") == "WARNING": # If db_health can return WARNING
         health_info["status"] = "WARNING"
+        
+    # Determine appropriate HTTP status code based on overall health
+    if health_info["status"] == "ERROR":
+        # This endpoint is tricky. If /health returns 503, K8s might restart it.
+        # Usually /health is for "is it running at all?" (should be 200 if so)
+        # and /readyz is for "can it take traffic?".
+        # For now, keeping 200 but reflecting error in payload.
+        pass # Default status_code=200 from decorator
 
     return health_info
 
@@ -274,7 +328,7 @@ async def liveness_probe():
     return {"status": "live"}
 
 @_original_fastapi_app.get("/readyz", tags=["Probes"])
-async def readiness_probe(response: Response):
+async def readiness_probe(response: Response): # Inject Response to modify status code
     """Readiness probe: Checks if the application is ready to serve traffic (e.g., DB connected)."""
     db_health = await check_database_health()
     if db_health.get("status") == "OK":
@@ -282,21 +336,41 @@ async def readiness_probe(response: Response):
         return {"status": "ready", "database": db_health}
     else:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        # Log why it's not ready
+        logger.warning(f"Readiness probe failed: Database status is {db_health.get('status')}")
         return {"status": "not_ready", "database": db_health}
 
 # --- Include API Routers ---
-_original_fastapi_app.include_router(schools_router, prefix=API_V1_PREFIX)
-_original_fastapi_app.include_router(teachers_router, prefix=API_V1_PREFIX)
-_original_fastapi_app.include_router(class_groups_router, prefix=API_V1_PREFIX)
-_original_fastapi_app.include_router(students_router, prefix=API_V1_PREFIX)
-# _original_fastapi_app.include_router(assignments_router, prefix=API_V1_PREFIX) # COMMENTED OUT
-_original_fastapi_app.include_router(documents_router, prefix=API_V1_PREFIX)
-_original_fastapi_app.include_router(results_router, prefix=API_V1_PREFIX)
-_original_fastapi_app.include_router(dashboard_router, prefix=API_V1_PREFIX)
-_original_fastapi_app.include_router(analytics_router, prefix=API_V1_PREFIX)
+# Use settings.API_V1_PREFIX for consistency
+_original_fastapi_app.include_router(schools_router, prefix=settings.API_V1_PREFIX, tags=["Schools"])
+_original_fastapi_app.include_router(teachers_router, prefix=settings.API_V1_PREFIX, tags=["Teachers"])
+_original_fastapi_app.include_router(class_groups_router, prefix=settings.API_V1_PREFIX, tags=["Class Groups"])
+_original_fastapi_app.include_router(students_router, prefix=settings.API_V1_PREFIX, tags=["Students"])
+# _original_fastapi_app.include_router(assignments_router, prefix=settings.API_V1_PREFIX, tags=["Assignments"]) # COMMENTED OUT
+_original_fastapi_app.include_router(documents_router, prefix=settings.API_V1_PREFIX, tags=["Documents"])
+_original_fastapi_app.include_router(results_router, prefix=settings.API_V1_PREFIX, tags=["Results"])
+_original_fastapi_app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX, tags=["Dashboard"])
+_original_fastapi_app.include_router(analytics_router, prefix=settings.API_V1_PREFIX, tags=["Analytics"])
 
-@_original_fastapi_app.get("/api/v1/test-health")
+# --- NEW: Include Stripe Subscription and Webhook Routers ---
+_original_fastapi_app.include_router(
+    subscriptions_router,
+    prefix=settings.API_V1_PREFIX, # This will make it /api/v1/subscriptions/...
+    tags=["Subscriptions - Stripe"]
+)
+_original_fastapi_app.include_router(
+    stripe_webhook_router,
+    prefix=f"{settings.API_V1_PREFIX}/webhooks", # This makes the path /api/v1/webhooks/stripe
+    tags=["Webhooks - Stripe"]
+)
+# --- END NEW ROUTER INCLUSIONS ---
+
+
+# This test endpoint might be redundant if you have a proper root or health check
+# If it's for a specific test, ensure it's clear.
+@_original_fastapi_app.get(f"{settings.API_V1_PREFIX}/test-health", tags=["Test"]) # Use settings prefix
 def read_root_test_health():
-    return {"Status": "OK"}
+    return {"Status": "OK", "Message": "API v1 test health endpoint is responsive."}
 
+# Assign to 'app' for uvicorn or other ASGI servers to find
 app = _original_fastapi_app

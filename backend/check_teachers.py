@@ -20,7 +20,7 @@ load_dotenv(dotenv_path=env_path)
 logger.info(f"Loaded environment variables from: {os.path.abspath(env_path)}")
 
 MONGO_DETAILS = os.getenv("MONGODB_URL")
-DATABASE_NAME = os.getenv("DB_NAME", "aidetector_dev")
+DATABASE_NAME = os.getenv("DB_NAME", "aidetector_dev1")
 
 if not MONGO_DETAILS:
     logger.error("MONGODB_URL environment variable not set.")

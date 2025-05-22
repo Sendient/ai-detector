@@ -49,7 +49,7 @@ param parEnvVariables01 = [
   {
     name: 'MONGO_DATABASE_NAME'
     value: 'aidetector_${parEnv}'
-    // value: 'aidetector_dev'
+    // value: 'aidetector_dev1'
   }
   {
     name: 'FRONTEND_URL'
