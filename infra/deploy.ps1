@@ -37,3 +37,6 @@ az deployment sub create --name "containerAppDeployProd" --location "uksouth" --
 //Frontend Subdomain DNS
 az network dns record-set cname set-record -g rg-sdt-uks-dns-prod -z smartdetector.ai -n app -c nice-stone-0864d4c03.6.azurestaticapps.net
 az staticwebapp hostname set -n app-sdt-uks-aid-prod --hostname app.smartdetector.ai
+
+az deployment sub create --name "StaticWebAppDeploy" --location "uksouth" --template-file "./infra/staticWebApp/staticWebApp.bicep" --parameters "./infra/staticWebApp/params/staticWebApp.bicepparam" --parameters "parEnv=dev1" --parameters "parCustomDomainName=dev-app.smartdetector.ai" 
+     

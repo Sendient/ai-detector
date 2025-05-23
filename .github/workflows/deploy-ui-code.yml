@@ -58,11 +58,7 @@ jobs:
           echo "::add-mask::$TOKEN"
       
           # Get the default hostname (i.e., app URL)
-          URL=$(az staticwebapp show \
-            --name "$APP_NAME" \
-            --resource-group "$RG_NAME" \
-            --query defaultHostname \
-            --output tsv)
+          URL=$(az staticwebapp hostname list -n "app-sdt-uks-aid-dev1" --resource-group "rg-sdt-uks-aid-dev1" --query "[0].domainName" --output tsv)
       
           # Output both for downstream use
           echo "token=$TOKEN" >> $GITHUB_OUTPUT
