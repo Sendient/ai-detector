@@ -9,8 +9,6 @@
    - Set up the following Kinde environment variables in your GitHub repository secrets:
      - `KINDE_ISSUER_URL`
      - `KINDE_CLIENT_ID`
-     - `KINDE_REDIRECT_URI`
-     - `KINDE_LOGOUT_REDIRECT_URI`
 
 This is the frontend application for the AI Detector, built with React and Vite, featuring a modern UI with Tailwind CSS and DaisyUI components.
 
