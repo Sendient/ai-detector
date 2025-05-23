@@ -490,5 +490,40 @@
     "messages_delete_failed": "Failed to delete document: {{detail}}",
     "messages_delete_success": "Document deleted successfully!",
     "messages_delete_failed_default": "Failed to delete document.",
-    "common_status_deleting": "Deleting..."
+    "common_status_deleting": "Deleting...",
+
+    "subscriptions_page_title": "Choose Your Plan",
+    "subscriptions_free_price": "£0/month",
+    "subscriptions_pro_price": "£8/month",
+    "subscriptions_schools_price": "Contact Us",
+    "subscriptions_free_subtitle": "For individual casual use",
+    "subscriptions_pro_subtitle": "For professionals and frequent users",
+    "subscriptions_schools_subtitle": "For educational institutions",
+    "subscriptions_cta_upgrade_pro": "Upgrade to Pro",
+    "subscriptions_cta_manage": "Manage Subscription",
+    "subscriptions_cta_contact_us": "Contact Us",
+    "subscriptions_cta_downgrade_free": "Downgrade to Free",
+    "subscriptions_current_plan": "Current Plan",
+    "subscriptions_current_arrangement": "Current Arrangement",
+    "subscriptions_error_loading_profile": "Error loading profile: {{message}}",
+
+    "features_aiDetection": "AI Detection",
+    "features_wordLimits": "Word Limits",
+    "features_pageLimits": "Page Limits",
+    "features_pdfSupport": "PDF Support",
+    "features_wordSupport": "Word Support",
+    "features_allocation": "Allocation Features",
+    "features_studentAllocation": "Student Allocation",
+    "features_classroomAllocation": "Classroom Allocation",
+    "features_analytics": "Analytics",
+    "features_plagiarismDetection": "Plagiarism Detection",
+    "features_lmsIntegration": "Integration with LMS",
+    "features_teamsIntegration": "Integration with Teams",
+    "features_googleClassroom": "Integration with Google Classroom",
+
+    "common_features": "Features",
+    "common_processing": "Processing...",
+    "common_coming_soon": "Coming Soon!",
+
+    "profile_page_title": "Your Profile"
 }

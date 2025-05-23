@@ -19,6 +19,25 @@ class MarketingSource(str, Enum):
     OTHER = "Other"
     # Add other sources as relevant to your marketing efforts
 
+class FileType(str, Enum):
+    PDF = "application/pdf"
+    DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    TXT = "text/plain"
+    TEXT = "text/plain"  # Alias for TXT
+    PNG = "image/png"
+    JPG = "image/jpeg"
+    JPEG = "image/jpeg" # Alias for JPG
+
+class DocumentStatus(str, Enum):
+    UPLOADED = "UPLOADED"
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"       # As seen in tests and common usage
+    RETRYING = "RETRYING"   # As seen in tests and usage
+    ERROR = "ERROR"         # As seen in usage, can be distinct from FAILED
+    # Add other statuses as needed
+
 # --- NEW ENUMS FOR STRIPE INTEGRATION ---
 class SubscriptionPlan(str, Enum):
     FREE = "Free"
@@ -39,3 +58,28 @@ class StripeSubscriptionStatus(str, Enum):
     # These are common Stripe statuses. You can expand or refine based on Stripe's documentation
     # and how you want to handle each case in your application.
 # --- END NEW ENUMS ---
+
+class ResultStatus(str, Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"  # Added as a common intermediate state
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    RETRYING = "RETRYING" # As seen in tests
+    # Add other statuses as needed, e.g., CANCELED if applicable to results
+
+class BatchStatus(str, Enum):
+    CREATED = "CREATED"               # Batch record created, files may not be uploaded yet
+    UPLOADING = "UPLOADING"           # Files are being uploaded
+    VALIDATING = "VALIDATING"         # Basic validation of files in progress
+    QUEUED = "QUEUED"                 # All files uploaded and validated, batch is queued for processing
+    PROCESSING = "PROCESSING"           # Batch is actively being processed (documents are being assessed)
+    COMPLETED = "COMPLETED"             # All documents in the batch processed successfully
+    PARTIAL_FAILURE = "PARTIAL_FAILURE" # Some documents processed, some failed
+    ERROR = "ERROR"                   # A critical error occurred processing the batch itself, or all files failed
+    # Add other statuses as needed, e.g., CANCELLED
+
+class BatchPriority(str, Enum):
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+    URGENT = "URGENT"

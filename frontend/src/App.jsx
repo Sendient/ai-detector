@@ -21,6 +21,9 @@ import AIDetectionReportPage from './components/AIDetectionReportPage';
 import QuickStartPage from './pages/QuickStartPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import BulkUploadPage from './pages/BulkUploadPage';
+import PaymentSuccessPage from './pages/PaymentSuccessPage';
+import PaymentCancelPage from './pages/PaymentCancelPage';
+import SubscriptionsPage from './pages/SubscriptionsPage';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
@@ -60,6 +63,9 @@ function App() {
         <Route path="/schools" element={<SchoolsPage />} />
         <Route path="/teachers" element={<TeachersPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
+        <Route path="/payment/success" element={<PaymentSuccessPage />} />
+        <Route path="/payment/canceled" element={<PaymentCancelPage />} />
+        <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

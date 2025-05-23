@@ -198,15 +198,15 @@ async def trigger_assessment(
 
     if current_result:
         logger.debug(f"Found existing result {current_result.id} with status {current_result.status} for doc {document.id}")
-        if current_result.status in [ResultStatus.COMPLETED, ResultStatus.ASSESSING, ResultStatus.RETRYING]:
+        if current_result.status in [ResultStatus.COMPLETED.value, ResultStatus.PROCESSING.value, ResultStatus.RETRYING.value]:
             logger.info(f"Assessment for doc {document.id} is already {current_result.status}. Returning current result.")
             return current_result
         
         # If PENDING or ERROR, we can attempt to re-queue via the AssessmentTask mechanism
-        if current_result.status in [ResultStatus.PENDING, ResultStatus.ERROR]:
+        if current_result.status in [ResultStatus.PENDING.value, ResultStatus.ERROR.value]:
             logger.info(f"Result for doc {document.id} is {current_result.status}. Attempting to re-queue for assessment.")
             # Ensure document status is also appropriate for re-queue (e.g., not already COMPLETED)
-            if document.status not in [DocumentStatus.COMPLETED, DocumentStatus.PROCESSING]: # PROCESSING implies worker has it
+            if document.status not in [DocumentStatus.COMPLETED.value, DocumentStatus.PROCESSING.value]: # Compare with .value
                 enqueue_success = await enqueue_assessment_task(
                     document_id=document.id,
                     user_id=auth_teacher_id,
@@ -216,18 +216,18 @@ async def trigger_assessment(
                     updated_doc = await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.QUEUED)
                     logger.info(f"Successfully re-queued doc {document.id}. Document status set to QUEUED. Worker will pick it up.")
                     # Update result status to PENDING to reflect it's waiting for worker again
-                    await crud.update_result(result_id=current_result.id, update_data={"status": ResultStatus.PENDING}, teacher_id=auth_teacher_id)
+                    await crud.update_result(result_id=current_result.id, update_data={"status": ResultStatus.PENDING.value}, teacher_id=auth_teacher_id) # Use .value for payload
                     # Return the result as it is now (PENDING, and doc QUEUED)
                     # The worker will eventually change this result's status.
                     # Fetch it again to get the PENDING status if update_result doesn't return it directly with that change.
                     current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
                     return current_result # Should now be PENDING
                 else:
-                    logger.error(f"Failed to re-enqueue doc {document.id}. Current result status: {current_result.status}")
+                    logger.error(f"Failed to re-enqueue doc {document.id}. Current result status: {current_result.status}") # Removed .value
                     # Fall through to raise an error or return current (error) state
                     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to re-queue document for assessment.")
             else:
-                logger.info(f"Document {document.id} is already {document.status}. Not re-queueing. Returning current result {current_result.id} ({current_result.status}).")
+                logger.info(f"Document {document.id} is already {document.status}. Not re-queueing. Returning current result {current_result.id} ({current_result.status}).") # Removed .value
                 return current_result
     else:
         # No result record exists. This is unusual if upload creates one.
@@ -256,7 +256,7 @@ async def trigger_assessment(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to queue document after creating result.")
 
     # Fallback if no specific condition above was met to return/raise (should be rare)
-    logger.error(f"Reached end of trigger_assessment for doc {document.id} without explicit return. Result status: {current_result.status if current_result else 'None'}")
+    logger.error(f"Reached end of trigger_assessment for doc {document.id} without explicit return. Result status: {current_result.status if current_result else 'None'}") # Removed .value
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not determine appropriate action for assessment trigger.")
 
 
@@ -824,9 +824,9 @@ async def cancel_assessment_status_endpoint( # Renamed
     logger.info(f"Current status of document {document.id} is '{document.status}'. Checking if cancellable.")
 
     # Define cancellable document statuses
-    cancellable_doc_statuses = [DocumentStatus.PROCESSING, DocumentStatus.RETRYING, DocumentStatus.QUEUED, DocumentStatus.UPLOADED]
+    cancellable_doc_statuses = [DocumentStatus.PROCESSING.value, DocumentStatus.RETRYING.value, DocumentStatus.QUEUED.value, DocumentStatus.UPLOADED.value]
     # Define cancellable result statuses (when document is being cancelled)
-    cancellable_res_statuses = [ResultStatus.ASSESSING, ResultStatus.RETRYING, ResultStatus.PENDING]
+    cancellable_res_statuses = [ResultStatus.PROCESSING.value, ResultStatus.RETRYING.value, ResultStatus.PENDING.value] # Use .value for list comparison
 
     document_updated = False
     result_updated = False
@@ -836,9 +836,9 @@ async def cancel_assessment_status_endpoint( # Renamed
         updated_doc = await crud.update_document_status(
             document_id=document.id, 
             teacher_id=auth_teacher_id, 
-            status=DocumentStatus.ERROR
+            status=DocumentStatus.ERROR.value
         )
-        if updated_doc and updated_doc.status == DocumentStatus.ERROR:
+        if updated_doc and updated_doc.status == DocumentStatus.ERROR.value:
             document_updated = True
             logger.info(f"Successfully set document {document.id} status to ERROR.")
         else:
@@ -855,13 +855,13 @@ async def cancel_assessment_status_endpoint( # Renamed
                     update_data={"status": ResultStatus.ERROR.value}, 
                     teacher_id=auth_teacher_id
                 )
-                if updated_res and updated_res.status == ResultStatus.ERROR:
+                if updated_res and updated_res.status == ResultStatus.ERROR.value:
                     result_updated = True
                     logger.info(f"Successfully set result {current_result.id} status to ERROR.")
                 else:
                     logger.error(f"Failed to update result {current_result.id} status to ERROR. Current status: {updated_res.status if updated_res else 'None'}.")
             else:
-                logger.info(f"Result {current_result.id} status '{current_result.status}' is not in a cancellable state ({cancellable_res_statuses}). No action taken on result.")
+                logger.info(f"Result {current_result.id} status '{current_result.status}' is not in a cancellable state ({[s for s in cancellable_res_statuses]}). No action taken on result.")
         else:
             logger.warning(f"No result record found for document {document.id} during cancellation. Cannot update result status.")
     else:
@@ -869,7 +869,7 @@ async def cancel_assessment_status_endpoint( # Renamed
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Document status '{document.status}' is not cancellable. "
-                   f"Cancellable states are: {[s.value for s in cancellable_doc_statuses]}."
+                   f"Cancellable states are: {[s for s in cancellable_doc_statuses]}."
         )
     
     if document_updated or result_updated:

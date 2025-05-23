@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
 import LocaleSelector from './LocaleSelector.jsx';
+import { User, LogOut, CreditCard } from 'lucide-react';
 
 function Header() {
     const { t } = useTranslation();
@@ -49,7 +50,7 @@ function Header() {
 
                         {isProfileMenuOpen && (
                             <div
-                                className="origin-top-right absolute right-0 mt-2 top-full w-48 rounded-md shadow-lg py-1 bg-base-100 border border-base-300 focus:outline-none z-50"
+                                className="origin-top-right absolute right-0 mt-2 top-full w-56 rounded-md shadow-lg py-1 bg-base-100 border border-base-300 focus:outline-none z-50"
                                 role="menu" aria-orientation="vertical" aria-labelledby="user-menu-button" tabIndex="-1"
                             >
                                 <div className="px-4 py-2 text-sm text-gray-500 border-b border-base-300">
@@ -58,16 +59,27 @@ function Header() {
                                 <Link
                                     to="/profile"
                                     onClick={() => setIsProfileMenuOpen(false)}
-                                    className="block px-4 py-2 text-sm text-base-content hover:bg-base-200"
+                                    className="flex items-center px-4 py-2 text-sm text-base-content hover:bg-base-200"
                                     role="menuitem" tabIndex="-1" id="user-menu-item-0"
                                 >
+                                    <User className="mr-2 h-4 w-4" />
                                     {t('header_menu_profile')}
+                                </Link>
+                                <Link
+                                   to="/subscriptions"
+                                   onClick={() => setIsProfileMenuOpen(false)}
+                                   className="flex items-center px-4 py-2 text-sm text-base-content hover:bg-base-200"
+                                   role="menuitem" tabIndex="-1" id="user-menu-item-subscriptions"
+                                >
+                                   <CreditCard className="mr-2 h-4 w-4" />
+                                   {t('header_menu_subscriptions', 'Subscriptions')}
                                 </Link>
                                 <button
                                     onClick={() => { logout(); setIsProfileMenuOpen(false); }}
-                                    className="block w-full text-left px-4 py-2 text-sm text-error hover:bg-base-200"
+                                    className="flex items-center w-full text-left px-4 py-2 text-sm text-error hover:bg-base-200"
                                     role="menuitem" tabIndex="-1" id="user-menu-item-1"
                                 >
+                                    <LogOut className="mr-2 h-4 w-4" />
                                     {t('header_menu_sign_out')}
                                 </button>
                             </div>

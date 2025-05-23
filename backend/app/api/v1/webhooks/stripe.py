@@ -6,13 +6,11 @@ import stripe
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase # For type hinting the DB
 
-from app.core.config import settings
-# Adjust the import path for your CRUD operations for teachers
-from app.db.crud import teacher as crud_teacher
-# Import your actual database dependency function
-from app.db.database import get_database # Assuming this is your DB dependency function
-from app.models.teacher import TeacherUpdate, Teacher as TeacherModel # Your Teacher Pydantic models
-from app.models.enums import SubscriptionPlan, StripeSubscriptionStatus # Your enums
+from ....core.config import settings
+from ....db import crud as crud_teacher # crud.py contains teacher-related functions
+from ....db.database import get_database
+from ....models.teacher import TeacherUpdate, Teacher as TeacherModel
+from ....models.enums import SubscriptionPlan, StripeSubscriptionStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

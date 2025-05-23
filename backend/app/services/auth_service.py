@@ -4,7 +4,7 @@ import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
 from ..core.config import settings
 from ..models.teacher import TeacherInDBBase, TeacherCreate
-from ..core.security import verify_token
+from ..core.security import validate_token
 
 class AuthService:
     def __init__(self, db: AsyncIOMotorClient):
@@ -74,7 +74,7 @@ class AuthService:
 
     async def verify_token_and_get_teacher(self, token: str) -> Optional[TeacherInDBBase]:
         """Verify token and return associated teacher."""
-        payload = verify_token(token)
+        payload = await validate_token(token)
         if not payload:
             return None
         

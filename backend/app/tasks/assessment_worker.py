@@ -112,7 +112,7 @@ class AssessmentWorker:
                 await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
                 return
         
-        await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ASSESSING}, teacher_id=teacher_id)
+        await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.PROCESSING}, teacher_id=teacher_id)
 
         extracted_text: Optional[str] = None
         character_count: Optional[int] = None
@@ -201,7 +201,7 @@ class AssessmentWorker:
                 logger.info(f"[AssessmentWorker] Successfully updated document {document.id} to COMPLETED.")
                 await self._delete_assessment_task(task.id) # MODIFIED: Uses self.db via the method call
             else:
-                logger.error(f"[AssessmentWorker] Failed to update result record for doc {document.id}. Status will remain ASSESSING. Task {task.id} will be retried.")
+                logger.error(f"[AssessmentWorker] Failed to update result record for doc {document.id}. Status will remain PROCESSING. Task {task.id} will be retried.")
                 await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR, character_count=character_count, word_count=word_count)
 
         except Exception as e:

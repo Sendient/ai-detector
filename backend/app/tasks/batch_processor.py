@@ -34,7 +34,7 @@ class BatchProcessor:
         active_statuses = [
             BatchStatus.QUEUED.value,
             BatchStatus.PROCESSING.value,
-            BatchStatus.PARTIAL.value,
+            BatchStatus.PARTIAL_FAILURE.value,
             BatchStatus.UPLOADING.value,
             BatchStatus.VALIDATING.value,
         ]
@@ -51,7 +51,7 @@ class BatchProcessor:
         processing = status_counts.get(DocumentStatus.PROCESSING.value, 0)
 
         if completed + failed >= batch.total_files:
-            new_status = (BatchStatus.COMPLETED if failed == 0 else BatchStatus.PARTIAL)
+            new_status = (BatchStatus.COMPLETED if failed == 0 else BatchStatus.PARTIAL_FAILURE)
         elif processing > 0 or completed > 0 or failed > 0:
             new_status = BatchStatus.PROCESSING
         else:

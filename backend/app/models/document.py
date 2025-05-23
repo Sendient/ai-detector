@@ -3,7 +3,7 @@
 import uuid
 from pydantic import BaseModel, Field, field_validator, ConfigDict # Added ConfigDict for V2
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any # Added Any for validator
 
 # Import Enums with correct names
 from .enums import FileType, DocumentStatus # Corrected: DocumentStatus
@@ -29,6 +29,26 @@ class DocumentBase(BaseModel):
     # Analytics fields
     character_count: Optional[int] = Field(default=None, description="Number of characters in the extracted text")
     word_count: Optional[int] = Field(default=None, description="Number of words in the extracted text")
+
+    @field_validator('file_type', mode='before')
+    @classmethod
+    def map_short_extension_to_filetype(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            # Ensure mapping keys are lowercase to match potential input variations
+            value_lower = value.lower()
+            mapping = {
+                "pdf": FileType.PDF,
+                "docx": FileType.DOCX,
+                "txt": FileType.TXT,
+                "text": FileType.TEXT, # TEXT is an alias for TXT in FileType enum
+                "png": FileType.PNG,
+                "jpg": FileType.JPG,
+                "jpeg": FileType.JPEG, # JPEG is an alias for JPG in FileType enum
+            }
+            # Return the enum member if found, otherwise return the original value
+            # for Pydantic's default validation to handle (which might raise an error if it's still invalid)
+            return mapping.get(value_lower, value)
+        return value
 
     # Pydantic V2 model config (can be defined here or in inheriting classes)
     model_config = ConfigDict(
