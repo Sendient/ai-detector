@@ -83,18 +83,40 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
         "students": AsyncMock(),
         "documents": AsyncMock(),
         "results": AsyncMock(),
-        "batches": AsyncMock()
+        "batches": AsyncMock(),
+        "assessment_tasks": AsyncMock()
     }
     
     # Configure each mock collection with proper methods
-    for collection in mock_collections.values():
+    for name, collection in mock_collections.items():
         # Configure create_index to return None
         collection.create_index = AsyncMock(return_value=None)
         
         # Configure find to return an AsyncMock that can be awaited
         mock_cursor = AsyncMock()
+        
+        # Make mock_cursor itself an async iterable (e.g., by mocking __aiter__)
+        # It will yield items from an empty list by default.
+        # Tests requiring specific find results should mock .find().return_value.__aiter__ or .to_list()
+        async def mock_aiter_impl():
+            if hasattr(mock_cursor, '_custom_find_results'):
+                for item in mock_cursor._custom_find_results:
+                    yield item
+                return
+            for item in []: # Default empty list
+                yield item
+        
+        mock_cursor.__aiter__ = Mock(side_effect=mock_aiter_impl) # Use Mock for synchronous __aiter__ assignment
+        
+        # Configure skip and limit to return the same mock_cursor instance
+        # So that collection.find().skip().limit() works and returns the iterable mock_cursor
+        mock_cursor.skip = Mock(return_value=mock_cursor)
+        mock_cursor.limit = Mock(return_value=mock_cursor)
+        
+        # Configure to_list to return an empty list by default
         mock_cursor.to_list = AsyncMock(return_value=[])
-        collection.find = AsyncMock(return_value=mock_cursor)
+
+        collection.find = Mock(return_value=mock_cursor)
         
         # Configure find_one to return None by default
         collection.find_one = AsyncMock(return_value=None)
@@ -116,7 +138,14 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
         mock_delete_result = AsyncMock()
         mock_delete_result.deleted_count = 1
         collection.delete_one = AsyncMock(return_value=mock_delete_result)
+
+        # ADDED: Default find_one_and_update mock for all collections
+        # This can be overridden per collection if needed (like for 'batches' below)
+        collection.find_one_and_update = AsyncMock(return_value=None)
     
+    # ADDED: Explicitly set find_one_and_update for assessment_tasks to return None
+    mock_collections["assessment_tasks"].find_one_and_update = AsyncMock(return_value=None)
+
     # Configure the mock database to return appropriate collections
     def get_collection(name):
         return mock_collections.get(name, AsyncMock())
@@ -146,12 +175,28 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
         # Use a simple dict instead of trying to mock __getitem__
         mock_batch_dict = {"_id": "mocked_batch_id"}
         
-        # Mock the find_one_and_update to return the dict directly
-        mock_db_instance.batches = AsyncMock()
-        mock_db_instance.batches.find_one_and_update = AsyncMock(return_value=mock_batch_dict)
+        # Mock the find_one_and_update to return the dict directly for 'batches' specifically
+        # This will override the default None set above for the 'batches' collection
+        mock_collections["batches"].find_one_and_update = AsyncMock(return_value=mock_batch_dict)
         
         # Replace real BatchProcessor with mock version
         mocker.patch("backend.app.tasks.batch_processor.BatchProcessor", return_value=mock_batch_processor)
+
+        # ADDED: Mock AssessmentWorker's _run_loop to prevent it from actually running
+        # try:
+        #     mocker.patch("backend.app.main.AssessmentWorker._run_loop", new_callable=AsyncMock)
+        # except AttributeError: # If the class or method doesn't exist, pass silently
+        #     pass
+
+        # NEW: Patch the entire AssessmentWorker class in main to be an AsyncMock
+        # mocker.patch("backend.app.main.AssessmentWorker", new_callable=AsyncMock)
+
+        # REVISED: Patch AssessmentWorker to return a specific AsyncMock instance
+        mock_aw_instance = AsyncMock(name="MockAssessmentWorkerInstance")
+        mock_aw_instance.run = AsyncMock(name="MockAssessmentWorkerInstance.run") 
+        mock_aw_instance.stop = Mock(name="MockAssessmentWorkerInstance.stop")
+        mocker.patch("backend.app.main.AssessmentWorker", return_value=mock_aw_instance)
+
     except ImportError:
         pass
 
@@ -242,3 +287,19 @@ async def app_without_auth(app: FastAPI) -> FastAPI:
     # Restore original override if it existed
     if original_override:
         app.dependency_overrides[get_current_user_payload] = original_override
+
+# --- Pytest Hooks for Logging ---
+
+def pytest_collectreport(report):
+    """Log collection errors with more detail."""
+    if report.failed:
+        # Safely access nodeid, provide a default if not present
+        node_name = getattr(report, 'nodeid', 'Initial Collection Phase') 
+        # Ensure longreprtext is a string before logging
+        longrepr_text = str(getattr(report, 'longreprtext', 'No longrepr available'))
+        logger.error(f"Test collection failed for {node_name}: {longrepr_text}")
+
+def pytest_exception_interact(node, call, report):
+    """Log details of exceptions during test execution."""
+    if report.failed:
+        logger.error(f"Test {node.nodeid} failed during {call.when}:")

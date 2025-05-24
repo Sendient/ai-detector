@@ -11,24 +11,29 @@ from .enums import FileType, DocumentStatus # Corrected: DocumentStatus
 # --- Base Model ---
 class DocumentBase(BaseModel):
     original_filename: str = Field(..., description="Original name of the uploaded file")
-    storage_blob_path: str = Field(..., description="Path or name of the file in blob storage")
-    file_type: FileType = Field(..., description="Detected type of the file (PDF, DOCX, etc.)")
-    upload_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    status: DocumentStatus = Field(default=DocumentStatus.UPLOADED, description="Processing status of the document")
-    student_id: uuid.UUID = Field(..., description="ID of the student associated with this document")
-    assignment_id: uuid.UUID = Field(..., description="ID of the assignment associated with this document")
-    teacher_id: str = Field(..., description="Kinde User ID of the Teacher who owns this document")
+    storage_blob_path: str = Field(..., description="Path to the file in blob storage")
+    file_type: FileType = Field(..., description="Detected type of the file (PDF, DOCX, TXT)")
+    upload_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp of when the document was uploaded")
+    student_id: Optional[uuid.UUID] = Field(None, description="Internal ID of the student associated with the document")
+    assignment_id: Optional[uuid.UUID] = Field(None, description="ID of the assignment associated with the document")
+    status: DocumentStatus = Field(default=DocumentStatus.UPLOADED, description="Current processing status of the document")
+    
+    # Optional fields based on your application's needs
+    batch_id: Optional[uuid.UUID] = Field(None, description="ID of the batch this document belongs to, if any")
+    queue_position: Optional[int] = Field(None, description="Position in the processing queue (if applicable)")
+    processing_priority: int = Field(default=0, description="Priority for processing (e.g., 0=normal, 1=high)")
+    
+    # Fields to be populated after processing by the ML model or text extraction
+    character_count: Optional[int] = Field(None, description="Number of characters in the document")
+    word_count: Optional[int] = Field(None, description="Number of words in the document")
+    # summary: Optional[str] = Field(None, description="AI-generated summary of the document") # Example
+    # keywords: Optional[List[str]] = Field(default_factory=list, description="AI-extracted keywords") # Example
 
-    # Batch processing fields
-    batch_id: Optional[uuid.UUID] = Field(default=None, description="ID of the batch this document belongs to")
-    queue_position: Optional[int] = Field(default=None, description="Position in the processing queue")
-    processing_priority: Optional[int] = Field(default=0, description="Processing priority (higher = more priority)")
-    processing_attempts: Optional[int] = Field(default=0, description="Number of processing attempts")
-    error_message: Optional[str] = Field(default=None, description="Error message if processing failed")
-
-    # Analytics fields
-    character_count: Optional[int] = Field(default=None, description="Number of characters in the extracted text")
-    word_count: Optional[int] = Field(default=None, description="Number of words in the extracted text")
+    # teacher_id should always be present and is derived from the authenticated user
+    # It's not Optional[str] here because DocumentBase might be used where it's always expected.
+    # However, for DocumentCreate, it's set by the backend. For Document, it's always there.
+    # For consistency in schemas that expect it, keep it non-optional in Base, handle in Create/Update.
+    teacher_id: str = Field(..., description="Kinde ID of the teacher who uploaded/owns the document")
 
     @field_validator('file_type', mode='before')
     @classmethod
@@ -54,7 +59,20 @@ class DocumentBase(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
         populate_by_name=True,
-        use_enum_values = True # Ensure enums are handled correctly
+        use_enum_values = True, # Ensure enums are handled correctly
+        json_encoders = {
+            datetime: lambda dt: dt.isoformat(),
+            uuid.UUID: lambda u: str(u),
+            # Handling Enums: Pydantic v2 typically handles enums well by default.
+            # If you need their string values in JSON, ensure they are stored/retrieved as such
+            # or add specific encoders if the default behavior isn't what you need.
+            # DocumentStatus: lambda ds: ds.value, 
+            # FileType: lambda ft: ft.value,
+        }
+        # Ensure this alias is correctly handled if you use `_id` in DB and `id` in model
+        # alias_generator = to_snake_case # If you use camelCase in Python and snake_case in JSON/DB
+        # Example for `id` vs `_id`:
+        # fields = {'id': '_id'} # This is for Pydantic V1. V2 uses Field(alias='_id')
     )
 
 # --- Model for Creation (received via API) ---

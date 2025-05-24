@@ -69,7 +69,7 @@ async def read_result_for_document(
 
     # If authorized to view document, attempt to get the result
     # Assuming get_result_by_document_id respects soft delete if implemented
-    result = await crud.get_result_by_document_id(document_id=document_id)
+    result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=user_kinde_id)
     if result is None:
         # Result might not exist yet (pending/failed) or could be (soft) deleted
         raise HTTPException(

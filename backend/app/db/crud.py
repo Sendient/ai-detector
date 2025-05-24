@@ -53,43 +53,45 @@ DOCUMENT_COLLECTION = "documents"
 RESULT_COLLECTION = "results"
 
 # --- Transaction and Helper Functions ---
+# --- Database Transaction Utilities ---
+# Ensure this is imported correctly
+from backend.app.db.database import get_database # Removed 'db' import
+
+# Global variable for database instance, primarily for the transaction context
+# This will be set by get_database() during app startup or when first called
+# db_instance_for_crud: Optional[AsyncIOMotorDatabase] = None # Not strictly needed if get_database() is always used
+
+# Async context manager for database transactions
 @asynccontextmanager
 async def transaction():
-    db = get_database()
-    if db is None: raise RuntimeError("Database connection not available for transaction (db is None)")
-    if not hasattr(db, 'client') or db.client is None:
-        logger.warning("Database client not available or does not support sessions. Proceeding without transaction.")
-        yield None
-        return # Exit context manager
-    if hasattr(db.client, 'start_session'):
-        session = None # Initialize session to None
-        try:
-            async with await db.client.start_session() as session:
-                async with session.start_transaction():
-                    logger.debug("MongoDB transaction started.")
-                    try:
-                        yield session
-                        if session.in_transaction:
-                            logger.debug("MongoDB transaction committing.")
-                            await session.commit_transaction()
-                            logger.debug("MongoDB transaction committed.")
-                        else:
-                            logger.warning("Session not in transaction at commit point.")
-                    except Exception as e:
-                        logger.error(f"MongoDB transaction aborted due to error: {e}", exc_info=True)
-                        if session and session.in_transaction:
-                            await session.abort_transaction()
-                            logger.debug("MongoDB transaction explicitly aborted.")
-                        raise
-        except Exception as outer_e:
-            # Catch potential errors starting the session itself
-            logger.error(f"Failed to start MongoDB session or transaction: {outer_e}", exc_info=True)
-            raise # Re-raise the exception that occurred during session/transaction start
+    """
+    Provides a database transaction context using the MongoDB session.
+    Ensures that the session is started and properly committed or aborted.
+    """
+    # global db_instance_for_crud # Not needed
+    # if db_instance_for_crud is None:
+    #     db_instance_for_crud = get_database() # Initialize if not already
 
-    else:
-        logger.warning("Database client does not support sessions/transactions. Proceeding without transaction.")
-        yield None
+    current_db = get_database() # Use get_database()
 
+    if current_db is None: # Check the result of get_database()
+        logger.error("Transaction cannot proceed: Database not initialized (get_database() returned None).")
+        raise RuntimeError("Database connection not available for transaction (get_database() returned None)")
+
+    # Using the client from the database instance
+    async with await current_db.client.start_session() as session:
+        async with session.start_transaction():
+            logger.debug(f"Transaction started with session ID: {session.session_id}")
+            try:
+                yield session
+                if session.in_transaction:
+                    await session.commit_transaction()
+                    logger.debug(f"Transaction committed for session ID: {session.session_id}")
+            except Exception as e:
+                logger.error(f"Transaction aborted due to error: {e} for session ID: {session.session_id}", exc_info=True)
+                if session.in_transaction:
+                    await session.abort_transaction()
+                raise # Re-raise the exception after aborting
 
 def with_transaction(func):
     @wraps(func)

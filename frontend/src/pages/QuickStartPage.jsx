@@ -71,19 +71,46 @@ function QuickStartPage() {
         throw new Error(t('messages_error_authTokenMissing'));
       }
 
-      // Extract UUID from Kinde ID format (kp_[UUID])
-      const studentId = '00000000-0000-0000-0000-000000000001';
-      const assignmentId = '00000000-0000-0000-0000-000000000002';
+      // Placeholder UUIDs
+      const placeholderStudentId = '00000000-0000-0000-0000-000000000001';
+      const placeholderAssignmentId = '00000000-0000-0000-0000-000000000002';
+
+      // Actual IDs to be sent - use empty string if they are placeholders, otherwise use the actual ID.
+      // This assumes that in the future, studentId and assignmentId might come from state/props.
+      let studentIdToSend = ''; // Default to empty string for 'unassigned'
+      let assignmentIdToSend = ''; // Default to empty string for 'unassigned'
+
+      // Example: If you had actual state for these, you might do:
+      // const actualStudentIdFromState = someStateValueForStudentId;
+      // const actualAssignmentIdFromState = someStateValueForAssignmentId;
+      // studentIdToSend = actualStudentIdFromState && actualStudentIdFromState !== placeholderStudentId ? actualStudentIdFromState : '';
+      // assignmentIdToSend = actualAssignmentIdFromState && actualAssignmentIdFromState !== placeholderAssignmentId ? actualAssignmentIdFromState : '';
       
-      // Log the IDs being used
-      console.log('Using IDs:', {
-        student_id: studentId,
-        assignment_id: assignmentId
+      // For now, since they are always placeholders, they will become empty strings.
+      // This part is more for future-proofing if dynamic IDs are introduced.
+      const currentStudentId = '00000000-0000-0000-0000-000000000001'; // Simulating current value
+      const currentAssignmentId = '00000000-0000-0000-0000-000000000002'; // Simulating current value
+
+      if (currentStudentId !== placeholderStudentId) {
+        studentIdToSend = currentStudentId;
+      }
+      if (currentAssignmentId !== placeholderAssignmentId) {
+        assignmentIdToSend = currentAssignmentId;
+      }
+
+      console.log('Using IDs to send:', {
+        student_id: studentIdToSend,
+        assignment_id: assignmentIdToSend
       });
 
       const formData = new FormData();
-      formData.append('student_id', studentId);
-      formData.append('assignment_id', assignmentId);
+      // Only append if they are not empty, letting backend handle None/null if not present
+      if (studentIdToSend) {
+        formData.append('student_id', studentIdToSend);
+      }
+      if (assignmentIdToSend) {
+        formData.append('assignment_id', assignmentIdToSend);
+      }
       
       // Log the files being uploaded
       console.log('Files being uploaded:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));

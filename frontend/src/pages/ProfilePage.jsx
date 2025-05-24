@@ -53,7 +53,8 @@ function ProfilePage() {
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState('');
 
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+    // const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+    const PROXY_PATH = import.meta.env.VITE_API_PROXY_PATH || '/api/v1';
 
     // Effect 1: Populate initial form data from Kinde user when available
     useEffect(() => {
@@ -129,7 +130,8 @@ function ProfilePage() {
                 throw new Error(t('messages_profile_error_noToken'));
             }
 
-            const response = await fetch(`${API_BASE_URL}/api/v1/teachers/me`, {
+            // const response = await fetch(`${API_BASE_URL}/api/v1/teachers/me`, {
+            const response = await fetch(`${PROXY_PATH}/teachers/me`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,

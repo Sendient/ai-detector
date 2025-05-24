@@ -41,7 +41,7 @@ function DocumentsPage() {
   const [deleteSuccess, setDeleteSuccess] = useState(null);
   const [cancellingStatus, setCancellingStatus] = useState({});
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const PROXY_PATH = import.meta.env.VITE_API_PROXY_PATH || '/api/v1';
 
   // Polling interval in milliseconds
   const POLLING_INTERVAL = 5000; // 5 seconds
@@ -50,7 +50,7 @@ function DocumentsPage() {
     if (!token || !docIds || docIds.length === 0) return;
     console.log(`[DocumentsPage] Fetching results for docs: ${docIds.join(', ')}`);
     const resultsPromises = docIds.map(docId =>
-        fetch(`${API_BASE_URL}/api/v1/results/document/${docId}`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${PROXY_PATH}/results/document/${docId}`, { headers: { 'Authorization': `Bearer ${token}` } })
             .then(async res => {
                 if (!res.ok) {
                     let detail = `Status: ${res.status}`;
@@ -99,7 +99,7 @@ function DocumentsPage() {
       try {
         const token = await getToken();
         if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
-        const response = await fetch(`${API_BASE_URL}/api/v1/documents/`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const response = await fetch(`${PROXY_PATH}/documents/`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!response.ok) {
             let errorDetail = `HTTP error ${response.status}`;
             try { const errData = await response.json(); errorDetail = errData.detail || errorDetail; } catch (e) { /* Ignore */ }
@@ -154,7 +154,7 @@ function DocumentsPage() {
         formData.append('file', selectedFile);
         formData.append('student_id', placeholderStudentId);
         formData.append('assignment_id', placeholderAssignmentId);
-        const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
+        const response = await fetch(`${PROXY_PATH}/documents/upload`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
         if (!response.ok) {
             let errorDetail = `HTTP error ${response.status}`;
             try { const errData = await response.json(); console.error('[DocumentsPage] Upload Error Response Body:', errData); errorDetail = errData.detail || errorDetail; } catch (e) { const textError = await response.text(); console.error('[DocumentsPage] Upload Error Response Text:', textError); errorDetail = textError || errorDetail; }
@@ -187,7 +187,7 @@ function DocumentsPage() {
     try {
         const token = await getToken();
         if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
-        const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/assess`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+        const response = await fetch(`${PROXY_PATH}/documents/${documentId}/assess`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
         
         if (!response.ok) {
             let errorDetail = `HTTP error ${response.status}`;
@@ -244,7 +244,7 @@ function DocumentsPage() {
     try {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${deletingDocId}`, {
+      const response = await fetch(`${PROXY_PATH}/documents/${deletingDocId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -288,7 +288,7 @@ function DocumentsPage() {
         const token = await getToken();
         if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
         
-        const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/cancel`, {
+        const response = await fetch(`${PROXY_PATH}/documents/${documentId}/cancel-assessment`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
         });

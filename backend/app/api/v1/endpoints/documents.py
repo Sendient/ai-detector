@@ -535,14 +535,14 @@ async def delete_document_endpoint( # Renamed to avoid potential clash
     description="Uploads multiple files, creates a batch record, and queues them for processing. Requires authentication."
 )
 async def upload_batch(
-    student_id: uuid.UUID = Form(..., description="Internal ID of the student associated with the documents"),
-    assignment_id: uuid.UUID = Form(..., description="ID of the assignment associated with the documents"),
+    student_id: Optional[uuid.UUID] = Form(None, description="Internal ID of the student associated with the documents"),
+    assignment_id: Optional[uuid.UUID] = Form(None, description="ID of the assignment associated with the documents"),
     files: List[UploadFile] = File(..., description="The document files to upload (PDF, DOCX, TXT, PNG, JPG)"),
     priority: BatchPriority = Form(BatchPriority.NORMAL, description="Processing priority for the batch"),
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to upload batch of {len(files)} documents")
+    logger.info(f"User {user_kinde_id} attempting to upload batch of {len(files)} documents. Student ID: {student_id}, Assignment ID: {assignment_id}")
 
     batch_data = BatchCreate(
         teacher_id=user_kinde_id, # Assuming Batch model's user_id field stores Kinde ID
@@ -605,14 +605,14 @@ async def upload_batch(
                 upload_timestamp=now,
                 student_id=student_id,
                 assignment_id=assignment_id,
-                status=DocumentStatus.UPLOADED, # Start as UPLOADED, then QUEUED after enqueue
+                status=DocumentStatus.UPLOADED,
                 batch_id=batch.id,
-                queue_position=len(created_docs_list) + 1, # Tentative, may not be strictly used if priority queue
+                queue_position=len(created_docs_list) + 1,
                 processing_priority=doc_processing_priority,
                 teacher_id=user_kinde_id
             )
             
-            document_obj = await crud.create_document(document_in=document_data) # Renamed
+            document_obj = await crud.create_document(document_in=document_data)
             if not document_obj:
                 failed_files_list.append({
                     "filename": original_filename,
@@ -684,7 +684,7 @@ async def upload_batch(
     # Ensure all fields for BatchWithDocuments are correctly populated from updated_batch
     return BatchWithDocuments(
         id=updated_batch.id,
-        user_id=updated_batch.user_id, # Ensure this field name matches your Batch model
+        teacher_id=updated_batch.teacher_id, # Corrected from user_id
         created_at=updated_batch.created_at,
         updated_at=updated_batch.updated_at,
         total_files=updated_batch.total_files,
@@ -716,7 +716,7 @@ async def get_batch_status_endpoint( # Renamed
             detail=f"Batch with ID {batch_id} not found"
         )
 
-    if batch_obj.user_id != user_kinde_id: # Check against user_id from Batch model
+    if batch_obj.teacher_id != user_kinde_id: # Check against user_id from Batch model
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this batch"
@@ -726,7 +726,7 @@ async def get_batch_status_endpoint( # Renamed
     
     return BatchWithDocuments(
         id=batch_obj.id,
-        user_id=batch_obj.user_id,
+        teacher_id=batch_obj.teacher_id,
         created_at=batch_obj.created_at,
         updated_at=batch_obj.updated_at,
         total_files=batch_obj.total_files,

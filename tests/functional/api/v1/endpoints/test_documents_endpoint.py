@@ -484,11 +484,11 @@ async def test_upload_document_no_auth(
         app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
 
 @pytest.mark.asyncio
-async def test_get_document_status_success(
+async def test_update_document_status_success(
     app_with_mock_auth: FastAPI,
     mocker: MockerFixture
 ):
-    """Test successfully getting the status of an uploaded document."""
+    """Test successfully updating the status of an uploaded document via PUT."""
     api_prefix = settings.API_V1_PREFIX
     test_doc_id = uuid.uuid4()
     status_url = f"{api_prefix}/documents/{test_doc_id}/status"
@@ -497,28 +497,30 @@ async def test_get_document_status_success(
     test_user_kinde_id = generate_unique_kinde_id("doc_status_user")
     mock_auth_payload = {
         "sub": test_user_kinde_id,
-        "email": "test@example.com",  # Add email to token payload
+        "email": "test@example.com",
         "roles": ["teacher"],
         "iss": "mock_issuer",
         "aud": ["mock_audience"],
         "exp": time.time() + 3600,
         "iat": time.time()
     }
-    
+
     async def override_auth():
         return mock_auth_payload
-    
+
+    # Store original override to restore later, if any
     original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
     app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_auth
 
-    # 2. Prepare Mock Document Data
-    mock_document_data = {
+    # 2. Prepare Mock Document Data for what crud.get_document_by_id (called by endpoint) will return
+    initial_status = DocumentStatus.PROCESSING
+    mock_initial_document_data = {
         "id": test_doc_id,
         "original_filename": "status_test.pdf",
         "storage_blob_path": "some/path/status_test.pdf",
         "file_type": FileType.PDF,
         "upload_timestamp": datetime.now(timezone.utc),
-        "status": DocumentStatus.PROCESSING,
+        "status": initial_status,
         "student_id": uuid.uuid4(),
         "assignment_id": uuid.uuid4(),
         "teacher_id": test_user_kinde_id,
@@ -526,51 +528,53 @@ async def test_get_document_status_success(
         "updated_at": datetime.now(timezone.utc),
         "is_deleted": False
     }
-    mock_doc_instance = Document(**mock_document_data)
+    mock_initial_doc_instance = Document(**mock_initial_document_data)
+
+    # Mock what crud.update_document_status (called by endpoint) will return
+    updated_status = DocumentStatus.COMPLETED
+    mock_updated_document_data = {**mock_initial_document_data, "status": updated_status, "updated_at": datetime.now(timezone.utc)}
+    mock_updated_doc_instance = Document(**mock_updated_document_data)
 
     # 3. Mock CRUD Layer
-    mock_crud_get_document = mocker.patch(
+    # Mock for the initial check within the endpoint
+    mocker.patch(
         'backend.app.api.v1.endpoints.documents.crud.get_document_by_id',
         new_callable=AsyncMock,
-        return_value=mock_doc_instance
+        return_value=mock_initial_doc_instance
     )
-
+    # Mock for the update operation itself
     mock_crud_update_status = mocker.patch(
         'backend.app.api.v1.endpoints.documents.crud.update_document_status',
         new_callable=AsyncMock,
-        return_value=mock_doc_instance
+        return_value=mock_updated_doc_instance
     )
 
-    # 4. Make the API Request
+    # 4. Make the API Request - Changed to PUT, with JSON body
+    request_payload = {"status": updated_status.value} # Send the string value of the enum
+
     async with AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
-        response = await client.put(
-            status_url,
-            json={"status": DocumentStatus.PROCESSING.value}
-        )
+        response = await client.put(status_url, json=request_payload) # Changed to PUT and added json
 
     # 5. Assertions
     assert response.status_code == status.HTTP_200_OK, \
         f"Expected 200 OK, got {response.status_code}. Response: {response.text}"
     
     response_data = response.json()
+    assert response_data["status"] == updated_status.value, \
+        f"Expected status {updated_status.value}, got {response_data['status']}"
     assert response_data["_id"] == str(test_doc_id)
-    assert response_data["status"] == DocumentStatus.PROCESSING.value
 
-    # Verify CRUD mocks were called correctly
-    mock_crud_get_document.assert_called_once_with(
+    # Assert that crud.update_document_status was called correctly
+    mock_crud_update_status.assert_called_once_with(
         document_id=test_doc_id,
+        status=updated_status, # Endpoint should pass the Enum member
         teacher_id=test_user_kinde_id
     )
 
-    mock_crud_update_status.assert_called_once_with(
-        document_id=test_doc_id,
-        status=DocumentStatus.PROCESSING
-    )
-
-    # 6. Clean up dependency override
-    if original_override:
+    # Clean up: Restore original dependency override if it existed
+    if original_override is not None:
         app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
-    else:
+    elif get_current_user_payload in app_with_mock_auth.dependency_overrides:
         del app_with_mock_auth.dependency_overrides[get_current_user_payload]
 
 # @pytest.mark.asyncio
