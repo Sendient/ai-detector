@@ -5,6 +5,7 @@ from typing import Dict, List
 from pymongo import MongoClient
 from pymongo.database import Database
 from ..core.config import settings
+from ..db.crud import TEACHER_COLLECTION, STUDENT_COLLECTION, CLASSGROUP_COLLECTION, ASSIGNMENT_COLLECTION, DOCUMENT_COLLECTION, RESULT_COLLECTION
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -22,8 +23,8 @@ def get_mongo_client() -> MongoClient:
 def migrate_teachers():
     # Connect to MongoDB
     client = get_mongo_client()
-    db = client[settings.MONGODB_DB]
-    teachers_collection = db[settings.TEACHERS_COLLECTION]
+    db = client[settings.DB_NAME]
+    teachers_collection = db[TEACHER_COLLECTION]
 
     # Get all teachers
     teachers = list(teachers_collection.find())
@@ -71,11 +72,11 @@ def migrate_teachers():
 def migrate_resources(db: Database, kinde_to_uuid_map: Dict[str, uuid.UUID]):
     """Migrate all resources to use internal teacher UUIDs."""
     collections = {
-        'students': settings.STUDENTS_COLLECTION,
-        'class_groups': settings.CLASS_GROUPS_COLLECTION,
-        'assignments': settings.ASSIGNMENTS_COLLECTION,
-        'documents': settings.DOCUMENTS_COLLECTION,
-        'results': settings.RESULTS_COLLECTION
+        'students': STUDENT_COLLECTION,
+        'class_groups': CLASSGROUP_COLLECTION,
+        'assignments': ASSIGNMENT_COLLECTION,
+        'documents': DOCUMENT_COLLECTION,
+        'results': RESULT_COLLECTION
     }
     
     for resource_name, collection_name in collections.items():
@@ -99,7 +100,7 @@ def run_rbac_migration():
     """Main migration function."""
     logger.info("Starting RBAC migration")
     client = get_mongo_client()
-    db = client[settings.MONGODB_DB]
+    db = client[settings.DB_NAME]
     
     try:
         # Step 1: Migrate teachers and get mapping

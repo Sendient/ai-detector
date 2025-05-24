@@ -105,7 +105,58 @@ function SubscriptionsPage() {
         return <div className="p-4 text-center text-error">{t('subscriptions_error_loading_profile', { message: profileError })}</div>;
     }
 
-    const handleUpgradeToPro = async () => { /* Stripe Checkout logic */ };
+    const handleUpgradeToPro = async () => {
+        setIsProcessing(true);
+        setApiError(null);
+        try {
+            const token = await getAccessToken();
+            if (!token) {
+                throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
+            }
+
+            const proPriceId = import.meta.env.VITE_STRIPE_PRO_PLAN_PRICE_ID;
+            if (!proPriceId) {
+                throw new Error(t('messages_error_stripe_pro_price_id_missing', 'Stripe Pro Plan Price ID is not configured.'));
+            }
+
+            const response = await fetch(`${API_BASE_URL}/api/v1/subscriptions/create-checkout-session`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ price_id: proPriceId }),
+            });
+
+            if (!response.ok) {
+                let errorData;
+                try {
+                    errorData = await response.json();
+                } catch (e) {
+                    // Ignore if response is not JSON
+                }
+                const errorMessage = errorData?.detail || response.statusText || t('messages_error_create_checkout_failed', 'Failed to create checkout session.');
+                throw new Error(errorMessage);
+            }
+
+            const session = await response.json();
+            const sessionId = session?.session_id; // Or session.id depending on backend response
+
+            if (sessionId) {
+                console.log("Stripe Checkout Session ID:", sessionId); // Log for now, redirect in next step
+                // TODO: Redirect to Stripe using stripe.redirectToCheckout({ sessionId: sessionId });
+            } else {
+                throw new Error(t('messages_error_checkout_session_id_missing', 'Checkout session ID not found in response.'));
+            }
+
+        } catch (error) {
+            console.error("handleUpgradeToPro error:", error);
+            setApiError(error.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const handleManageSubscription = async () => { /* Stripe Portal logic */ };
     const handleContactSchools = () => { navigate('/contact-us'); };
 

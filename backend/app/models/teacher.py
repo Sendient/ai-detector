@@ -56,6 +56,13 @@ class TeacherInDBBase(TeacherBase):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_deleted: bool = Field(default=False, description="Flag for soft delete status")
 
+    # --- Kinde specific fields from token ---
+    kinde_permissions: Optional[List[str]] = Field(default_factory=list, description="Permissions from Kinde token")
+    kinde_org_code: Optional[str] = Field(None, description="Organization code from Kinde token")
+    kinde_picture: Optional[str] = Field(None, description="User picture URL from Kinde token")
+    kinde_given_name: Optional[str] = Field(None, description="User given name from Kinde token")
+    kinde_family_name: Optional[str] = Field(None, description="User family name from Kinde token")
+
     # --- STRIPE SUBSCRIPTION FIELDS START ---
     current_plan: SubscriptionPlan = Field(
         default=SubscriptionPlan.FREE,

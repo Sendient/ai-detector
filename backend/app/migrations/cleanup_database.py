@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import logging
 from pymongo import MongoClient
 from ..core.config import settings
+from ..db.crud import TEACHER_COLLECTION, STUDENT_COLLECTION, CLASSGROUP_COLLECTION, ASSIGNMENT_COLLECTION, DOCUMENT_COLLECTION, RESULT_COLLECTION
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -20,17 +21,17 @@ async def cleanup_database():
     """Clean up all collections in the database."""
     logger.info("Starting database cleanup")
     client = get_mongo_client()
-    db = client[settings.MONGODB_DB]
+    db = client[settings.DB_NAME]
     
     try:
         # List of collections to clean up
         collections = [
-            settings.TEACHERS_COLLECTION,
-            settings.STUDENTS_COLLECTION,
-            settings.CLASS_GROUPS_COLLECTION,
-            settings.ASSIGNMENTS_COLLECTION,
-            settings.DOCUMENTS_COLLECTION,
-            settings.RESULTS_COLLECTION
+            TEACHER_COLLECTION,
+            STUDENT_COLLECTION,
+            CLASSGROUP_COLLECTION,
+            ASSIGNMENT_COLLECTION,
+            DOCUMENT_COLLECTION,
+            RESULT_COLLECTION
         ]
         
         for collection_name in collections:

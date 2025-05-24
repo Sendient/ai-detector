@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # --- End Stripe Settings ---
 
     # Optional: Allowed origins for CORS (can be a list or a comma-separated string)
-    ALLOWED_ORIGINS: List[str] = []
+    ALLOWED_ORIGINS: str = ""
 
     # Pydantic-settings can automatically load from .env if configured here
     # class Config:

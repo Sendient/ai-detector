@@ -9,7 +9,7 @@ from ..core.security import validate_token
 class AuthService:
     def __init__(self, db: AsyncIOMotorClient):
         self.db = db
-        self.teachers_collection = db[settings.MONGODB_DB][settings.TEACHERS_COLLECTION]
+        self.teachers_collection = db[settings.DB_NAME]["teachers"]
 
     async def get_teacher_by_kinde_id(self, kinde_id: str) -> Optional[TeacherInDBBase]:
         """Get teacher by their Kinde ID."""

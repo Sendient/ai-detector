@@ -67,7 +67,8 @@ APP_START_TIME = time.time()
 # --- CORS Setup ---
 # Use ALLOWED_ORIGINS from settings if available, otherwise use the hardcoded list + env var
 if settings.ALLOWED_ORIGINS:
-    origins_to_use = [str(origin) for origin in settings.ALLOWED_ORIGINS]
+    # Split the comma-separated string into a list of origins
+    origins_to_use = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(',') if origin.strip()]
     logger.info(f"Using ALLOWED_ORIGINS from settings for CORS: {origins_to_use}")
 else:
     logger.warning("ALLOWED_ORIGINS not set in config. Falling back to default list and FRONTEND_URL env var for CORS.")
@@ -167,10 +168,10 @@ async def startup_event():
         logger.info("Index on teachers.kinde_id ensured (unique=False).")
 
         # Ensure Stripe related indexes on teachers collection
-        await db.teachers.create_index("stripe_customer_id", name="idx_teacher_stripe_customer_id", unique=True, sparse=True)
-        logger.info("Index on teachers.stripe_customer_id ensured (unique=True, sparse=True).")
-        await db.teachers.create_index("stripe_subscription_id", name="idx_teacher_stripe_subscription_id", unique=True, sparse=True)
-        logger.info("Index on teachers.stripe_subscription_id ensured (unique=True, sparse=True).")
+        await db.teachers.create_index("stripe_customer_id", name="idx_teacher_stripe_customer_id", unique=False, sparse=True)
+        logger.info("Index on teachers.stripe_customer_id ensured (unique=False, sparse=True) - TEMPORARILY NON-UNIQUE.")
+        await db.teachers.create_index("stripe_subscription_id", name="idx_teacher_stripe_subscription_id", unique=False, sparse=True)
+        logger.info("Index on teachers.stripe_subscription_id ensured (unique=False, sparse=True) - TEMPORARILY NON-UNIQUE.")
 
 
         # Index for assessment_tasks dequeue order
@@ -355,7 +356,7 @@ _original_fastapi_app.include_router(analytics_router, prefix=settings.API_V1_PR
 # --- NEW: Include Stripe Subscription and Webhook Routers ---
 _original_fastapi_app.include_router(
     subscriptions_router,
-    prefix=settings.API_V1_PREFIX, # This will make it /api/v1/subscriptions/...
+    prefix=f"{settings.API_V1_PREFIX}/subscriptions", # This will make it /api/v1/subscriptions/...
     tags=["Subscriptions - Stripe"]
 )
 _original_fastapi_app.include_router(

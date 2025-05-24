@@ -4,6 +4,7 @@ import asyncio
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from ..core.config import settings
+from ..db.crud import TEACHER_COLLECTION
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -14,8 +15,8 @@ async def create_unique_email_index():
     try:
         # Connect to MongoDB
         client = AsyncIOMotorClient(settings.MONGODB_URL)
-        db = client[settings.MONGODB_DB]
-        collection = db[settings.TEACHERS_COLLECTION]
+        db = client[settings.DB_NAME]
+        collection = db[TEACHER_COLLECTION]
 
         # Create the unique index
         await collection.create_index(
