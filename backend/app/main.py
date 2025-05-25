@@ -356,12 +356,12 @@ _original_fastapi_app.include_router(analytics_router, prefix=settings.API_V1_PR
 # --- NEW: Include Stripe Subscription and Webhook Routers ---
 _original_fastapi_app.include_router(
     subscriptions_router,
-    prefix=f"{settings.API_V1_PREFIX}/subscriptions", # This will make it /api/v1/subscriptions/...
+    prefix=f"{settings.API_V1_PREFIX}/subscriptions", # Ensure this matches your API structure
     tags=["Subscriptions - Stripe"]
 )
 _original_fastapi_app.include_router(
     stripe_webhook_router,
-    prefix=f"{settings.API_V1_PREFIX}/webhooks", # This makes the path /api/v1/webhooks/stripe
+    prefix="/webhooks",  # This prefix + "/stripe" from the webhook router itself = /webhooks/stripe
     tags=["Webhooks - Stripe"]
 )
 # --- END NEW ROUTER INCLUSIONS ---

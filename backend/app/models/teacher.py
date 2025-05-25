@@ -112,13 +112,16 @@ class TeacherUpdate(BaseModel):
     state_county: Optional[str] = Field(None)
     is_active: Optional[bool] = Field(None)
 
-    # --- OPTIONAL STRIPE FIELDS FOR UPDATE (Primarily for admin/system use) ---
-    # These fields are typically managed by Stripe webhooks, but an admin might need to override.
+    # --- Fields for Stripe Integration ---
+    # Typically, stripe_customer_id is set once and not changed.
+    # Other Stripe fields (current_plan, subscription_status, stripe_subscription_id, current_period_end)
+    # are usually managed by webhooks. They are included here for completeness if admin override is needed.
+    stripe_customer_id: Optional[str] = Field(None, description="Stripe Customer ID")
     current_plan: Optional[SubscriptionPlan] = None
     subscription_status: Optional[StripeSubscriptionStatus] = None
-    # stripe_customer_id and stripe_subscription_id are usually not directly updatable once set.
-    # current_period_end is also typically set by webhooks.
-    # --- END OPTIONAL STRIPE FIELDS ---
+    # stripe_subscription_id: Optional[str] = None # Usually set by webhooks, not direct update
+    # current_period_end: Optional[datetime] = None # Usually set by webhooks, not direct update
+    # --- End Stripe Integration Fields ---
 
     model_config = ConfigDict(
         use_enum_values=True,

@@ -30,6 +30,8 @@ async def stripe_webhook(
     Handles incoming webhook events from Stripe.
     Verifies the event signature and processes relevant events to update the application's state.
     """
+    logger.info(f"ENTERED STRIPE WEBHOOK HANDLER. Value of settings.STRIPE_WEBHOOK_SECRET: '{settings.STRIPE_WEBHOOK_SECRET}'")
+
     if not settings.STRIPE_WEBHOOK_SECRET:
         logger.error("CRITICAL: STRIPE_WEBHOOK_SECRET is not configured. Cannot process Stripe webhooks.")
         raise HTTPException(
@@ -94,10 +96,90 @@ async def stripe_webhook(
                 return {"status": "error", "message": "Missing customer/subscription ID in event"}
 
             try:
-                subscription = stripe.Subscription.retrieve(stripe_subscription_id)
-                current_period_end_ts = subscription.current_period_end
+                # Expand necessary fields to ensure they are populated
+                logger.info(f"Retrieving subscription {stripe_subscription_id} with expansion for items.data.price and items.data.plan.")
+                subscription = stripe.Subscription.retrieve(
+                    stripe_subscription_id,
+                    expand=['items.data.price', 'items.data.plan'] # Ensure price and plan details are expanded
+                )
+                
+                logger.info(f"Retrieved subscription object for {stripe_subscription_id}.")
+                try:
+                    # Log structure as seen by Python Stripe library
+                    sub_dict = subscription.to_dict_recursive()
+                    logger.debug(f"Subscription object for {stripe_subscription_id} (recursive dict): {sub_dict}")
+                    items_from_dict = sub_dict.get('items', {}).get('data', [])
+                    logger.debug(f"Items from dict for {stripe_subscription_id}: {items_from_dict}")
+                    top_level_cpe_from_dict = sub_dict.get('current_period_end')
+                    logger.debug(f"Top-level current_period_end from dict for {stripe_subscription_id}: {top_level_cpe_from_dict}")
+                except Exception as e_log_struct:
+                    logger.warning(f"Could not log subscription structure as dict for {stripe_subscription_id}: {e_log_struct}")
+
+                current_period_end_ts = None
+                plan_id_from_stripe = None
+
+                # Attempt 1: Access through the dictionary representation (more reliable given logs)
+                try:
+                    sub_dict = subscription.to_dict_recursive() # Already logged above, re-access for clarity
+                    logger.info(f"Attempting to access data from subscription_dict for {stripe_subscription_id}")
+                    
+                    items_data = sub_dict.get('items', {}).get('data', [])
+                    if items_data:
+                        subscription_item_dict = items_data[0]
+                        current_period_end_ts = subscription_item_dict.get('current_period_end')
+                        price_dict = subscription_item_dict.get('price', {})
+                        plan_id_from_stripe = price_dict.get('id')
+                        logger.info(f"From dict access on items: current_period_end_ts={current_period_end_ts}, plan_id_from_stripe={plan_id_from_stripe}")
+                    else:
+                        logger.warning(f"items.data was empty or not found in subscription_dict for {stripe_subscription_id}. Dict items: {sub_dict.get('items')}")
+                except Exception as e_dict_access:
+                    logger.error(f"Error accessing data via dict for {stripe_subscription_id}: {e_dict_access}", exc_info=True)
+
+                # Attempt 2: Fallback to direct attribute access if dict access somehow failed (less likely now)
+                if current_period_end_ts is None or plan_id_from_stripe is None:
+                    logger.warning(f"Dict access failed for {stripe_subscription_id} (cpe_ts: {current_period_end_ts}, plan_id: {plan_id_from_stripe}). Attempting direct attribute access as fallback.")
+                    try:
+                        if subscription.items and hasattr(subscription.items, 'data') and subscription.items.data:
+                            subscription_item = subscription.items.data[0]
+                            if current_period_end_ts is None: # Only overwrite if not found from dict
+                                current_period_end_ts = subscription_item.current_period_end
+                            if plan_id_from_stripe is None: # Only overwrite if not found from dict
+                                if hasattr(subscription_item, 'price') and subscription_item.price and hasattr(subscription_item.price, 'id'):
+                                    plan_id_from_stripe = subscription_item.price.id
+                            logger.info(f"From fallback attribute access: current_period_end_ts={current_period_end_ts}, plan_id_from_stripe={plan_id_from_stripe}")
+                        else:
+                            logger.warning(f"Fallback attribute access: subscription.items.data was not valid or empty for {stripe_subscription_id}.")
+                    except Exception as e_attr_fallback:
+                        logger.error(f"Error during fallback attribute access for {stripe_subscription_id}: {e_attr_fallback}", exc_info=True)
+
+                # Attempt 3: Deep fallback for current_period_end to top-level object if still not found
+                if current_period_end_ts is None:
+                    logger.warning(f"current_period_end_ts is still None for {stripe_subscription_id}. Attempting deep fallback to subscription.current_period_end (attribute). REMOVE IF UNNECESSARY")
+                    try:
+                        current_period_end_ts = subscription.current_period_end # Direct attribute on main object
+                        logger.info(f"Deep fallback to subscription.current_period_end (attribute) yielded: {current_period_end_ts}")
+                    except AttributeError:
+                        logger.error(f"AttributeError on deep fallback subscription.current_period_end (attribute) for {stripe_subscription_id}.")
+                    except Exception as e_deep_fallback_cpe:
+                         logger.error(f"Unexpected error on deep fallback subscription.current_period_end (attribute) for {stripe_subscription_id}: {e_deep_fallback_cpe}", exc_info=True)
+
+                # Fallback for plan_id using subscription.plan.id if it's still None
+                if plan_id_from_stripe is None:
+                    logger.warning(f"plan_id_from_stripe is still None for {stripe_subscription_id}. Checking subscription.plan.id (attribute) as final fallback.")
+                    try:
+                        if hasattr(subscription, 'plan') and subscription.plan and hasattr(subscription.plan, 'id'):
+                            plan_id_from_stripe = subscription.plan.id
+                            logger.info(f"Final fallback to subscription.plan.id (attribute) yielded: {plan_id_from_stripe}")
+                        else:
+                            logger.warning(f"subscription.plan or subscription.plan.id not found on attribute fallback for {stripe_subscription_id}.")
+                    except Exception as e_final_fallback_plan:
+                         logger.error(f"Unexpected error on final fallback subscription.plan.id (attribute) for {stripe_subscription_id}: {e_final_fallback_plan}", exc_info=True)
+                
+                if current_period_end_ts is None:
+                    logger.critical(f"CRITICAL FAILURE: current_period_end_ts is STILL None for {stripe_subscription_id} after all attempts. Cannot process this event properly.")
+                    return {"status": "error", "message": "Critical: Could not determine subscription period end after all attempts."}
+
                 current_period_end_dt = datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
-                plan_id_from_stripe = subscription.items.data[0].price.id if subscription.items.data else None
                 
                 update_data = {
                     "stripe_subscription_id": stripe_subscription_id,
@@ -112,7 +194,7 @@ async def stripe_webhook(
                 await _update_teacher_record(stripe_customer_id, update_data, "checkout.session.completed")
 
             except stripe.error.StripeError as se:
-                logger.error(f"Stripe error retrieving subscription {stripe_subscription_id} for checkout.session.completed: {se}", exc_info=True)
+                logger.error(f"Stripe error retrieving or processing subscription {stripe_subscription_id} for checkout.session.completed: {se}", exc_info=True)
             except Exception as e_sub:
                 logger.error(f"Error processing subscription details for {stripe_subscription_id} (checkout.session.completed): {e_sub}", exc_info=True)
 
@@ -162,6 +244,42 @@ async def stripe_webhook(
             await _update_teacher_record(stripe_customer_id, update_data, "invoice.payment_failed")
             # Consider sending a notification to the user.
 
+        elif event_type == 'customer.subscription.created':
+            logger.info(f"Handling customer.subscription.created for subscription: {event_data.id}")
+            stripe_customer_id = event_data.get("customer")
+            stripe_subscription_id = event_data.id # The event_data is the subscription object
+            subscription_status_str = event_data.get("status")
+            current_period_end_ts = event_data.get("current_period_end")
+            plan_data = event_data.get("items", {}).get("data", [])
+            plan_id_from_stripe = plan_data[0].get("price", {}).get("id") if plan_data else None
+
+            if not stripe_customer_id:
+                logger.error(f"Missing customer ID in customer.subscription.created: {event_data.id}")
+                return {"status": "error", "message": "Missing customer ID in event"}
+
+            update_data: Dict[str, Any] = {
+                "stripe_subscription_id": stripe_subscription_id,
+            }
+
+            try:
+                if subscription_status_str:
+                    update_data["subscription_status"] = StripeSubscriptionStatus(subscription_status_str)
+            except ValueError:
+                logger.warning(f"Unknown subscription status '{subscription_status_str}' received from Stripe for sub {stripe_subscription_id} (customer.subscription.created).")
+
+            if current_period_end_ts:
+                update_data["current_period_end"] = datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
+
+            if plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID:
+                update_data["current_plan"] = SubscriptionPlan.PRO
+            elif plan_id_from_stripe: # It's a different plan
+                logger.warning(f"Subscription {stripe_subscription_id} (customer.subscription.created) has unexpected plan ID {plan_id_from_stripe} vs expected {settings.STRIPE_PRO_PLAN_PRICE_ID}. Setting plan to FREE or NONE based on your logic.")
+                # Decide if you want to set to FREE or leave as is / set to another status
+                update_data["current_plan"] = SubscriptionPlan.FREE # Example: Downgrade if plan is unknown
+            
+            if update_data: # Only update if there's something to update
+                 await _update_teacher_record(stripe_customer_id, update_data, "customer.subscription.created")
+
         elif event_type == 'customer.subscription.updated':
             logger.info(f"Handling customer.subscription.updated for subscription: {event_data.id}")
             stripe_customer_id = event_data.get("customer")
@@ -209,6 +327,33 @@ async def stripe_webhook(
                 "current_period_end": None,     # Clear the period end
             }
             await _update_teacher_record(stripe_customer_id, update_data, "customer.subscription.deleted")
+
+        # --- Start of new logging-only handlers ---
+        elif event_type == 'customer.created':
+            logger.info(f"Webhook received: {event_type} for customer {event_data.id}. Customer creation is primarily handled during checkout session initiation or by customer.subscription.created.")
+        
+        elif event_type == 'charge.succeeded':
+            logger.info(f"Webhook received: {event_type} for charge {event_data.id}. Relevant subscription updates are handled by invoice events (e.g. invoice.paid).")
+
+        elif event_type == 'payment_method.attached':
+            customer_id = event_data.get("customer", "N/A")
+            logger.info(f"Webhook received: {event_type} for customer {customer_id}, payment_method {event_data.id}.")
+
+        elif event_type == 'payment_intent.created':
+            logger.info(f"Webhook received: {event_type} for payment_intent {event_data.id}.")
+
+        elif event_type == 'payment_intent.succeeded':
+            logger.info(f"Webhook received: {event_type} for payment_intent {event_data.id}. Relevant subscription updates are handled by invoice events.")
+
+        elif event_type == 'invoice.created':
+            logger.info(f"Webhook received: {event_type} for invoice {event_data.id}. Awaiting payment confirmation (e.g., via invoice.paid).")
+
+        elif event_type == 'invoice.finalized':
+            logger.info(f"Webhook received: {event_type} for invoice {event_data.id}. Awaiting payment confirmation (e.g., via invoice.paid).")
+            
+        elif event_type == 'invoice.payment_succeeded':
+            logger.info(f"Webhook received: {event_type} for invoice {event_data.id}. Core logic typically handled by invoice.paid.")
+        # --- End of new logging-only handlers ---
 
         else:
             logger.info(f"Unhandled Stripe event type: {event_type} (ID: {event.id})")

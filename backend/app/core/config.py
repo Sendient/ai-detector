@@ -3,20 +3,23 @@ import os
 import logging
 from dotenv import load_dotenv
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 
 # --- Path Setup & .env Loading ---
 # Assume .env is in the backend project root, two levels up from core
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 ENV_PATH = BASE_DIR / '.env'
+# print(f"CONFIG.PY: ENV_PATH determined as: {ENV_PATH}") # REMOVED DEBUG PRINT
+# print(f"CONFIG.PY: Does ENV_PATH exist? {ENV_PATH.is_file()}") # REMOVED DEBUG PRINT
 
 # Check if .env exists and load it
-if ENV_PATH.is_file():
-    load_dotenv(dotenv_path=ENV_PATH)
-else:
-    # Use print for early config warnings as logger might not be set up yet
-    print(f"Warning: .env file not found at {ENV_PATH}. Relying on system environment variables.")
+# if ENV_PATH.is_file(): # MODIFIED: Commented out
+#     load_dotenv(dotenv_path=ENV_PATH) # MODIFIED: Commented out
+# else: # MODIFIED: Commented out
+#     # Use print for early config warnings as logger might not be set up yet # MODIFIED: Commented out
+#     print(f"Warning: .env file not found at {ENV_PATH}. Relying on system environment variables.") # MODIFIED: Commented out
 
 # --- Pydantic Settings Class ---
 class Settings(BaseSettings):
@@ -56,13 +59,81 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = ""
 
     # Pydantic-settings can automatically load from .env if configured here
+    # For Pydantic V2, model_config is used. For V1, it's class Config.
+    # Assuming Pydantic V2 or later, which uses pydantic-settings
+    # print(f"CONFIG.PY: About to define Settings.model_config with ENV_PATH: {ENV_PATH}") # REMOVED DEBUG PRINT
+    model_config = {
+        "env_file": ENV_PATH,
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
+    }
+    # If using older Pydantic (V1.x), this would be:
     # class Config:
-    # env_file = ENV_PATH # Use the path determined above
-    # env_file_encoding = "utf-8"
-    # extra = 'ignore' # Ignore extra fields in .env not defined in Settings
+    #     env_file = ENV_PATH
+    #     env_file_encoding = "utf-8"
+    #     extra = 'ignore'
+
+    @model_validator(mode='before')
+    @classmethod
+    def load_deprecated_db_env_vars(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Load database connection details from deprecated environment variables
+        if the new ones (MONGODB_URL, DB_NAME) are not already set.
+        """
+        # Using print here because logger might not be configured when this validator runs
+        print("DEBUG [Config Validator]: Entered load_deprecated_db_env_vars.")
+
+        initial_mongodb_url = values.get('MONGODB_URL')
+        initial_db_name = values.get('DB_NAME')
+
+        print(f"DEBUG [Config Validator]: Initial MONGODB_URL from values: {'SET' if initial_mongodb_url else 'NOT SET'}")
+        if initial_mongodb_url:
+            print(f"DEBUG [Config Validator]: Initial MONGODB_URL value (truncated): {str(initial_mongodb_url)[:30]}...")
+        
+        print(f"DEBUG [Config Validator]: Initial DB_NAME from values: {initial_db_name if initial_db_name else 'NOT SET'}")
+
+
+        # Fallback for MONGODB_URL
+        if not initial_mongodb_url:
+            print("DEBUG [Config Validator]: MONGODB_URL not in initial values. Attempting fallback from MONGO_DETAILS.")
+            mongodb_url_from_deprecated = os.getenv('MONGO_DETAILS')
+            if mongodb_url_from_deprecated:
+                values['MONGODB_URL'] = mongodb_url_from_deprecated
+                print(f"INFO [Config Validator]: Using MONGO_DETAILS for MONGODB_URL: {mongodb_url_from_deprecated[:30]}...")
+            else:
+                print("DEBUG [Config Validator]: MONGO_DETAILS not found in os.getenv(). MONGODB_URL remains unset by fallback.")
+        else:
+            print("DEBUG [Config Validator]: MONGODB_URL found in initial values. No fallback needed from MONGO_DETAILS.")
+
+        # Fallback for DB_NAME
+        # Pydantic applies the default 'aidetector_dev1' for DB_NAME if it's not in .env or system env *after* this validator.
+        # So, if 'DB_NAME' is not in 'values', it means it wasn't explicitly set via .env or system env.
+        if 'DB_NAME' not in values:
+            print("DEBUG [Config Validator]: DB_NAME not in initial values. Attempting fallback from MONGO_INITDB_DATABASE.")
+            db_name_from_deprecated = os.getenv('MONGO_INITDB_DATABASE')
+            if db_name_from_deprecated:
+                values['DB_NAME'] = db_name_from_deprecated
+                print(f"INFO [Config Validator]: Using MONGO_INITDB_DATABASE for DB_NAME: {db_name_from_deprecated}")
+            else:
+                print("DEBUG [Config Validator]: MONGO_INITDB_DATABASE not found in os.getenv(). DB_NAME will rely on Pydantic default or remain unset by fallback.")
+        else:
+            # If DB_NAME was in values, it means it was explicitly set.
+            print(f"DEBUG [Config Validator]: DB_NAME ('{initial_db_name}') found in initial values. No fallback needed from MONGO_INITDB_DATABASE.")
+        
+        final_mongodb_url = values.get('MONGODB_URL')
+        final_db_name = values.get('DB_NAME') # This could be the default if not set by .env or fallback
+
+        print(f"DEBUG [Config Validator]: Final MONGODB_URL to be used: {'SET' if final_mongodb_url else 'NOT SET'}")
+        if final_mongodb_url:
+            print(f"DEBUG [Config Validator]: Final MONGODB_URL value (truncated): {str(final_mongodb_url)[:30]}...")
+        print(f"DEBUG [Config Validator]: Final DB_NAME to be used: {final_db_name if final_db_name else 'Pydantic Default will apply'}")
+        print("DEBUG [Config Validator]: Exiting load_deprecated_db_env_vars.")
+        return values
 
 # Create an instance of the Settings class
+# print("CONFIG.PY: About to create Settings() instance.") # REMOVED DEBUG PRINT
 settings = Settings()
+# print(f"CONFIG.PY: Settings() instance created. settings.STRIPE_WEBHOOK_SECRET: {settings.STRIPE_WEBHOOK_SECRET}") # REMOVED DEBUG PRINT
 
 # --- Logging Setup ---
 # Set logging level based on settings.DEBUG
