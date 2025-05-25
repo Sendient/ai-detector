@@ -1,0 +1,63 @@
+## Azure Configuration for Stripe Integration (Multi-Environment Strategy)
+
+This document outlines the principles and specific setup for configuring Stripe integration variables across different Azure environments (dev1, stg, prod) for the AI Detector application, using Azure Key Vault and Azure Container Apps.
+
+### Principles:
+
+1.  **Centralized Secret Management:** All sensitive information (API keys, secrets) is stored securely in Azure Key Vault. This provides a single source of truth for secrets, enhances security, and allows for auditing.
+2.  **Environment-Specific Secrets:** For each environment (dev1, stg, prod), distinct secrets are created in Key Vault (e.g., `stripe-secret-dev1`, `stripe-secret-stg`). This ensures that each environment uses its own isolated set of credentials and configurations.
+3.  **Container App Secret Referencing:** Azure Container Apps do not store the actual secret values directly. Instead, they store *references* (aliases) to the secrets held in Azure Key Vault. This maintains a separation of concerns and leverages Key Vault's security.
+4.  **Environment Variable Mapping:** Within each Container App (for both backend and frontend), these Container App secret references (aliases) are mapped to specific environment variable names that the application code expects (e.g., `STRIPE_SECRET_KEY`, `VITE_STRIPE_PUBLISHABLE_KEY`).
+5.  **Application Code Agnosticism:** The application code (FastAPI backend, Vite frontend) remains environment-agnostic. It reads configuration from standard environment variable names. The Azure infrastructure handles injecting the correct values for the specific environment it's running in.
+6.  **Managed Identity:** Container Apps should use Managed Identities with appropriate "Get Secret" permissions on the Azure Key Vault to securely access the referenced secrets.
+
+### Configuration for `dev1` Environment:
+
+**1. Azure Key Vault (`kv-sdt-uks-aid-dev1`):**
+
+The following secrets have been created/updated in this Key Vault specifically for the `dev1` environment:
+
+*   **`stripe-secret-dev1`**:
+    *   **Value:** The Stripe **Secret Key** for `dev1` (e.g., `sk_test_...` or `sk_live_...`). (Actual value confirmed to be at version `...ca1cac48c0fb4c30a8e5c3da1a450438`).
+    *   **Purpose:** Used by the backend to authenticate API calls to Stripe.
+*   **`stripe-webhook-secret-dev1`**:
+    *   **Value:** The Stripe **Webhook Signing Secret** for `dev1` (e.g., `whsec_...`).
+    *   **Purpose:** Used by the backend to verify incoming webhook events from Stripe.
+*   **`stripe-pro-plan-price-id-dev1`**:
+    *   **Value:** The Stripe **Price ID** for the "Pro" plan in `dev1` (e.g., `price_...`).
+    *   **Purpose:** Used by the backend to create Stripe Checkout Sessions.
+*   **`vite-stripe-publishable-key-dev1`**:
+    *   **Value:** The Stripe **Publishable Key** for `dev1` (e.g., `pk_test_...` or `pk_live_...`).
+    *   **Purpose:** Used by the frontend (Stripe.js) for client-side operations.
+
+**2. Backend Container App (`ca-sdt-uks-aid-dev1`):**
+
+*   **Container App Secrets (Aliases Referencing Key Vault):**
+    *   Alias: `stripe-secret-key` -> Referencing Key Vault secret `stripe-secret-dev1` (specifically URL: `https://kv-sdt-uks-aid-dev1.vault.azure.net/secrets/stripe-secret-dev1/ca1cac48c0fb4c30a8e5c3da1a450438`).
+    *   Alias: `backend-kvref-stripe-webhook` -> Referencing Key Vault secret `stripe-webhook-secret-dev1`.
+    *   Alias: `backend-kvref-stripe-price-id` -> Referencing Key Vault secret `stripe-pro-plan-price-id-dev1`.
+*   **Environment Variables (Mapped in Container Revision):**
+    *   `STRIPE_SECRET_KEY` -> Mapped from Container App secret alias `stripe-secret-key`.
+    *   `STRIPE_WEBHOOK_SECRET` -> Mapped from Container App secret alias `backend-kvref-stripe-webhook`.
+    *   `STRIPE_PRO_PLAN_PRICE_ID` -> Mapped from Container App secret alias `backend-kvref-stripe-price-id`.
+    *   `FRONTEND_URL` -> Manual entry: `https://gray-mud-0fe5b3703.6.azurestaticapps.net` (Confirmed as correct for `dev1` frontend).
+
+**3. Frontend Container App (Name to be confirmed, e.g., `ca-sdt-uks-aid-frontend-dev1`):**
+
+*   **Container App Secrets (Aliases Referencing Key Vault):**
+    *   Alias: (e.g., `frontend-stripe-publishable-key-ref`) -> Referencing Key Vault secret `vite-stripe-publishable-key-dev1`.
+*   **Environment Variables (Mapped in Container Revision):**
+    *   `VITE_STRIPE_PUBLISHABLE_KEY` -> Mapped from Container App secret alias (e.g., `frontend-stripe-publishable-key-ref`).
+    *   `VITE_API_BASE_URL` -> Manual entry: The public HTTPS URL of the `dev1` backend container app (i.e., `ca-sdt-uks-aid-dev1`).
+
+### To-Do & Future Considerations:
+
+1.  **Verify Values:** Double-check that the actual secret values for `dev1` (Stripe keys, IDs, webhook secret) are correctly populated in the corresponding Key Vault secrets (`stripe-secret-dev1`, `stripe-webhook-secret-dev1`, etc.). (Stripe Secret Key value for `stripe-secret-dev1` confirmed to be at the specified version).
+2.  **Cleanup Placeholders in Key Vault:**
+    *   Review the generic `stripe-secret-key` (without `-dev1` suffix) in Key Vault `kv-sdt-uks-aid-dev1`. If `stripe-secret-dev1` is now the definitive secret for the dev1 Stripe Secret Key, and the generic one was a placeholder, consider deleting the generic `stripe-secret-key` to avoid confusion. Confirm it's not referenced by any Container App secret before deleting.
+3.  **Configuration for `stg` and `prod` Environments:**
+    *   **Key Vault:** Create new secrets in Key Vault for `stg` and `prod` with appropriate suffixes (e.g., `stripe-secret-stg`, `stripe-webhook-secret-prod`). Populate them with the respective Stripe keys/IDs for those environments.
+    *   **Container Apps:** For the `stg` and `prod` Container Apps (both backend and frontend), configure their "Secrets" sections to reference these new `stg` and `prod` Key Vault secrets, using appropriate alias names within each Container App.
+    *   **Environment Variables:** Update the environment variable mappings in the `stg` and `prod` Container App revisions. This includes `FRONTEND_URL` (for backend) and `VITE_API_BASE_URL` (for frontend) to point to the correct URLs for each environment.
+4.  **Stripe Dashboard Webhook URLs:** Ensure that for each environment (dev1, stg, prod), the Stripe Dashboard has a webhook endpoint configured with the correct public URL of the respective backend container app (e.g., `https://[backend-dev1-url]/webhooks/stripe`, `https://[backend-stg-url]/webhooks/stripe`). Each of these Stripe webhook configurations will have its own Webhook Signing Secret, which corresponds to the `STRIPE_WEBHOOK_SECRET` value stored in Key Vault for that environment.
+5.  **Managed Identity Permissions:** Confirm that the Managed Identities assigned to the backend and frontend Container Apps have the necessary "Get Secret" permissions on the Azure Key Vault (`kv-sdt-uks-aid-dev1`). This is usually configured under Key Vault > Access policies or Access control (IAM) depending on the permission model used (Vault access policy or Azure RBAC).
