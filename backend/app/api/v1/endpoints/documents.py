@@ -201,6 +201,55 @@ async def trigger_assessment(
         # If PENDING or FAILED, we can attempt to re-queue via the AssessmentTask mechanism
         if current_result.status in [ResultStatus.PENDING.value, ResultStatus.FAILED.value]:
             logger.info(f"Result for doc {document.id} is {current_result.status}. Attempting to re-queue for assessment.")
+            
+            # MODIFIED: Add pre-emptive limit check for retry if status is LIMIT_EXCEEDED
+            if document.status == DocumentStatus.LIMIT_EXCEEDED:
+                teacher_db = await crud.get_teacher_by_kinde_id(kinde_id=auth_teacher_id)
+                if not teacher_db:
+                    logger.error(f"Teacher {auth_teacher_id} not found when attempting to retry LIMIT_EXCEEDED doc {document.id}")
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found, cannot verify limits for retry.")
+
+                if teacher_db.current_plan == SubscriptionPlan.SCHOOLS:
+                    logger.info(f"Teacher {auth_teacher_id} is on SCHOOLS plan. Allowing retry for LIMIT_EXCEEDED doc {document.id} without pre-check.")
+                else:
+                    usage_stats = await crud.get_usage_stats_for_period(
+                        teacher_id=auth_teacher_id,
+                        period='monthly',
+                        target_date=datetime.now(timezone.utc).date()
+                    )
+                    current_monthly_words = usage_stats.get("total_words", 0) if usage_stats else 0
+                    current_monthly_chars = usage_stats.get("total_characters", 0) if usage_stats else 0
+                    
+                    doc_word_count = document.word_count if document.word_count is not None else 0
+                    doc_char_count = document.character_count if document.character_count is not None else 0
+
+                    plan_word_limit = None
+                    plan_char_limit = None
+
+                    if teacher_db.current_plan == SubscriptionPlan.FREE:
+                        plan_word_limit = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
+                        plan_char_limit = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+                    elif teacher_db.current_plan == SubscriptionPlan.PRO:
+                        plan_word_limit = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
+                        plan_char_limit = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
+                    else: # Should not happen if not SCHOOLS, but as a safeguard
+                        logger.warning(f"Unknown plan {teacher_db.current_plan} during retry check for doc {document.id}. Denying retry.")
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot verify limits for current plan for retry.")
+
+                    # Pre-emptive check
+                    # Note: The assessment_worker subtracts the current doc's count before adding, here we check if adding it now would exceed.
+                    # Actually, the worker now compares the total *after* update. So this check should be prospective.
+                    if (current_monthly_words + doc_word_count) > plan_word_limit:
+                        logger.warning(f"Retry for doc {document.id} denied for teacher {auth_teacher_id}. Word limit would still be exceeded (current: {current_monthly_words}, doc: {doc_word_count}, limit: {plan_word_limit}).")
+                        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Retry unavailable: Monthly word limit would still be exceeded.")
+                    
+                    if (current_monthly_chars + doc_char_count) > plan_char_limit:
+                        logger.warning(f"Retry for doc {document.id} denied for teacher {auth_teacher_id}. Character limit would still be exceeded (current: {current_monthly_chars}, doc: {doc_char_count}, limit: {plan_char_limit}).")
+                        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Retry unavailable: Monthly character limit would still be exceeded.")
+                    
+                    logger.info(f"Pre-emptive limit check passed for doc {document.id} for teacher {auth_teacher_id}. Proceeding with retry.")
+            # End MODIFIED
+
             # Ensure document status is also appropriate for re-queue (e.g., not already COMPLETED)
             if document.status not in [DocumentStatus.COMPLETED.value, DocumentStatus.PROCESSING.value]: # Compare with .value
                 enqueue_success = await enqueue_assessment_task(
@@ -209,13 +258,15 @@ async def trigger_assessment(
                     priority_level=document.processing_priority or 0
                 )
                 if enqueue_success:
-                    updated_doc = await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=DocumentStatus.QUEUED)
-                    logger.info(f"Successfully re-queued doc {document.id}. Document status set to QUEUED. Worker will pick it up.")
-                    # Update result status to PENDING to reflect it's waiting for worker again
-                    await crud.update_result(result_id=current_result.id, update_data={"status": ResultStatus.PENDING.value}, teacher_id=auth_teacher_id) # Use .value for payload
-                    # Return the result as it is now (PENDING, and doc QUEUED)
-                    # The worker will eventually change this result's status.
-                    # Fetch it again to get the PENDING status if update_result doesn't return it directly with that change.
+                    # For LIMIT_EXCEEDED, we need to ensure the status is updated from LIMIT_EXCEEDED, not just any FAILED status.
+                    # Also, ensure the result error message is cleared if it was related to limits.
+                    update_doc_status_to = DocumentStatus.QUEUED
+                    result_update_payload = {"status": ResultStatus.PENDING.value, "error_message": None} # Clear error message
+                    
+                    updated_doc = await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=update_doc_status_to)
+                    logger.info(f"Successfully re-queued doc {document.id}. Document status set to {update_doc_status_to.value}. Worker will pick it up.")
+                    
+                    await crud.update_result(result_id=current_result.id, update_data=result_update_payload, teacher_id=auth_teacher_id)
                     current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
                     return current_result # Should now be PENDING
                 else:

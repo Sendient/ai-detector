@@ -26,6 +26,7 @@ function DocumentsPage() {
   const ERROR_STATUS = 'ERROR';
   const PROCESSING_STATUS = 'PROCESSING';
   const QUEUED_STATUS = 'QUEUED';
+  const LIMIT_EXCEEDED_STATUS = 'LIMIT_EXCEEDED';
 
   const navigate = useNavigate();
   const [assessmentStatus, setAssessmentStatus] = useState({});
@@ -208,14 +209,11 @@ function DocumentsPage() {
         if (resultData && typeof resultData.score === 'number') {
             setAssessmentResults(prev => ({ ...prev, [documentId]: resultData.score }));
         } else {
-            console.warn(`Assessment completed for ${documentId}, but score missing/invalid in response:`, resultData);
+            console.warn(`Assessment triggered for ${documentId}, but score missing/invalid in immediate /assess response:`, resultData);
         }
         
-        // Wait for the document status to update
+        // Refresh the documents list to show the updated status (e.g., PENDING, QUEUED)
         await fetchDocuments();
-        
-        // Automatically navigate to the report page
-        navigate(`/documents/${documentId}/report`);
         
     } catch (err) {
         const errorMessage = err.message || t('messages_assessment_errorUnknown');
@@ -323,6 +321,107 @@ function DocumentsPage() {
             return newStatus;
         });
     }
+  };
+
+  const renderDocumentActions = (doc) => {
+    const isProcessing = assessmentStatus[doc.id] === 'loading';
+    const isCancelling = cancellingStatus[doc.id] === 'loading';
+
+    let statusActions = null;
+
+    switch (doc.status) {
+      case COMPLETED_STATUS:
+        statusActions = (
+          <button
+            onClick={() => handleViewReport(doc.id)}
+            className="btn btn-xs btn-primary btn-outline"
+            title={t('documents_list_button_viewReport_title')}
+          >
+            <EyeIcon className="h-4 w-4" />
+            {t('documents_list_button_report')}
+          </button>
+        );
+        break;
+      case ERROR_STATUS:
+      case LIMIT_EXCEEDED_STATUS:
+        statusActions = (
+          <button
+            onClick={() => handleAssess(doc.id)}
+            className="btn btn-xs btn-warning btn-outline"
+            disabled={isProcessing}
+            title={doc.status === LIMIT_EXCEEDED_STATUS ? t('documents_list_button_retryAssessment_title') : t('documentsPage_tooltip_retryOnError')}
+          >
+            {isProcessing ? (
+              <span className="loading loading-spinner loading-xs"></span>
+            ) : (
+              <ArrowPathIcon className="h-4 w-4" />
+            )}
+            {doc.status === LIMIT_EXCEEDED_STATUS ? t('common_button_retry') : t('documentsPage_button_retryOnError')}
+          </button>
+        );
+        break;
+      case UPLOADED_STATUS:
+      case QUEUED_STATUS: 
+        statusActions = (
+          <button
+            onClick={() => handleAssess(doc.id)}
+            className="btn btn-xs btn-info btn-outline"
+            disabled={isProcessing}
+            title={t('documents_list_button_assess_title')}
+          >
+            {isProcessing ? (
+              <span className="loading loading-spinner loading-xs"></span>
+            ) : (
+              <ArrowPathIcon className="h-4 w-4" />
+            )}
+            {t('documents_list_button_assess')}
+          </button>
+        );
+        break;
+      case PROCESSING_STATUS:
+        statusActions = (
+          <div className="flex items-center space-x-2">
+            <span className="loading loading-spinner loading-xs text-info"></span>
+            <span className="text-xs text-info italic">{t('documentsPage_text_processing')}</span>
+            <button
+                onClick={() => handleCancelAssessment(doc.id)}
+                className="btn btn-xs btn-error btn-outline"
+                disabled={isCancelling}
+                title={t('documentsPage_tooltip_cancelAssessment')}
+            >
+                {isCancelling ? <span className="loading loading-spinner loading-xs"></span> : <StopCircleIcon className="h-4 w-4" />}
+                {t('common_button_cancel')}
+            </button>
+          </div>
+        );
+        break;
+      default:
+        statusActions = <span className="text-xs italic text-gray-500">{t('documentsPage_status_unknown', { status: doc.status })}</span>;
+    }
+
+    return (
+      <div className="flex items-center space-x-2">
+        {statusActions}
+        {doc.status !== PROCESSING_STATUS && (
+            <button
+                onClick={() => handleDeleteClick(doc.id)}
+                className="btn btn-xs btn-error btn-outline"
+                title={t('documentsPage_tooltip_deleteDocument')}
+            >
+                <TrashIcon className="h-4 w-4" />
+            </button>
+        )}
+        {supportedTextTypes.includes(doc.file_type?.toLowerCase()) && doc.status !== PROCESSING_STATUS && (
+            <button
+                onClick={() => handleViewText(doc.id)}
+                className="btn btn-xs btn-ghost"
+                title={t('documents_list_button_viewText_title')}
+            >
+                <DocumentTextIcon className="h-4 w-4" />
+            </button>
+        )}
+      </div>
+    );
   };
 
   // Effect for initial document load
@@ -456,8 +555,15 @@ function DocumentsPage() {
                       <tr key={doc.id} className="hover">
                         <td className="text-sm truncate max-w-xs" title={doc.original_filename}>{doc.original_filename}</td>
                         <td className="text-sm">{doc.file_type}</td>
-                        <td>{statusBadge}</td>
-                        <td className="text-xs">{new Date(doc.upload_timestamp).toLocaleString()}</td>
+                        <td>
+                          {statusBadge}
+                          {assessmentErrors[doc.id] && (
+                              <div className="text-xs text-error mt-1">
+                                  {assessmentErrors[doc.id]}
+                              </div>
+                          )}
+                        </td>
+                        <td>{new Date(doc.upload_timestamp).toLocaleString()}</td>
                         <td className="text-sm font-semibold">
                           {isCompleted && typeof currentResultScore === 'number' 
                             ? `${(currentResultScore > 1 ? currentResultScore : currentResultScore * 100).toFixed(1)}%` 
@@ -466,54 +572,7 @@ function DocumentsPage() {
                         <td className="text-sm">{doc.character_count?.toLocaleString() ?? '-'}</td>
                         <td className="text-sm">{doc.word_count?.toLocaleString() ?? '-'}</td>
                         <td className="space-x-1 whitespace-nowrap">
-                          {canAssess && !isProcessing && !hasFailed && (
-                            <button onClick={() => handleAssess(doc.id)} disabled={currentAssessmentStatus === 'loading' || isCancelling} title={t('documents_list_button_assess_title')} className="btn btn-primary btn-xs">
-                              {t('documents_list_button_assess')}
-                            </button>
-                          )}
-                          {isProcessing && !isCancelling && (
-                             <button disabled title={t('documents_list_button_assessing_title')} className="btn btn-disabled btn-xs">
-                               <span className="loading loading-spinner loading-xs"></span> Assessing...
-                             </button>
-                          )}
-                          {isCancelling && (
-                             <button disabled title="Cancelling assessment..." className="btn btn-disabled btn-xs">
-                                <span className="loading loading-spinner loading-xs"></span> Cancelling...
-                             </button>
-                          )}
-                          {isActuallyProcessing && !isCancelling && (
-                             <button 
-                                onClick={() => handleCancelAssessment(doc.id)} 
-                                title="Cancel this assessment" 
-                                className="btn btn-warning btn-outline btn-xs"
-                                disabled={isCancelling}
-                              >
-                               <StopCircleIcon className="h-3 w-3 mr-1"/> Cancel
-                             </button>
-                          )}
-                          {(isCompleted || (hasFailed && !isProcessing)) && !isCancelling && (
-                            <button onClick={() => handleAssess(doc.id)} disabled={currentAssessmentStatus === 'loading' || isCancelling} title={hasFailed ? t('documents_list_button_retryAssessment_title') : t('documents_list_button_reassess_title')} className={`btn ${hasFailed ? 'btn-error' : 'btn-warning'} btn-xs`}>
-                              <ArrowPathIcon className="h-3 w-3 mr-1"/> {hasFailed ? t('common_button_retry') : t('documents_list_button_reassess')}
-                            </button>
-                          )}
-                          {doc.file_type && supportedTextTypes.includes(doc.file_type.toLowerCase()) && (
-                            <button onClick={() => handleViewText(doc.id)} title={t('documents_list_button_viewText_title')} className="btn btn-info btn-outline btn-xs">
-                              <DocumentTextIcon className="h-3 w-3 mr-1"/> {t('documents_list_button_viewText')}
-                            </button>
-                          )}
-                          {isCompleted && (
-                            <button onClick={() => handleViewReport(doc.id)} title={t('documents_list_button_viewReport_title')} className="btn btn-accent btn-outline btn-xs">
-                              <EyeIcon className="h-3 w-3 mr-1"/> {t('documents_list_button_report')}
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleDeleteClick(doc.id)}
-                            className="btn btn-ghost btn-xs text-error"
-                            title={t('common_button_delete')}
-                            disabled={deleteLoading && deletingDocId === doc.id}
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
+                          {renderDocumentActions(doc)}
                         </td>
                       </tr>
                     );

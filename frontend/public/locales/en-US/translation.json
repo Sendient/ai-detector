@@ -475,5 +475,10 @@
     "students_form_label_descriptor": "Descriptor (Optional)",
     "students_form_label_yearGroup": "Year Group (Optional)",
     "students_form_label_classGroup": "Assign to Class (Optional)",
-    "students_form_select_noClass": "No Class Assigned"
+    "students_form_select_noClass": "No Class Assigned",
+    "documentsPage_tooltip_retryOnError": "Retry processing this document",
+    "documentsPage_button_retryOnError": "Retry",
+    "documentsPage_text_processing": "Processing...",
+    "documentsPage_tooltip_cancelAssessment": "Cancel current assessment",
+    "documentsPage_tooltip_deleteDocument": "Delete this document"
   }
