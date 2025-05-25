@@ -196,6 +196,55 @@ function ProfilePage() {
         <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
             <h1 className="text-xl font-semibold text-base-content mb-6">{t('profilePage_heading')}</h1>
 
+            {/* Subscription Status Section */}
+            {profile && (
+                <div className="card bg-base-200 shadow-sm mb-6">
+                    <div className="card-body">
+                        <h2 className="card-title text-lg">{t('profilePage_subscription_title', 'My Subscription')}</h2>
+                        <div className="divider my-1"></div>
+                        <div className="space-y-2 text-sm">
+                            <p>
+                                <span className="font-medium">{t('profilePage_subscription_currentPlan', 'Current Plan')}:</span> 
+                                <span className="badge badge-lg ml-2">{profile.current_plan || t('common_unknown', 'Unknown')}</span>
+                            </p>
+                            {profile.current_plan === 'Pro' && profile.subscription_status && (
+                                <p>
+                                    <span className="font-medium">{t('profilePage_subscription_status', 'Status')}:</span> 
+                                    <span className={`badge badge-lg ml-2 ${profile.subscription_status === 'active' ? 'badge-success' : 'badge-warning'}`}>
+                                        {profile.subscription_status}
+                                    </span>
+                                </p>
+                            )}
+                            {profile.current_plan === 'Pro' && profile.current_period_end && (
+                                <p>
+                                    <span className="font-medium">{t('profilePage_subscription_renews', 'Renews/Expires on')}:</span> 
+                                    <span className="ml-2">
+                                        {new Date(profile.current_period_end).toLocaleDateString()}
+                                    </span>
+                                </p>
+                            )}
+                        </div>
+                        <div className="card-actions justify-end mt-4">
+                            {profile.current_plan === 'Pro' ? (
+                                <button 
+                                    onClick={() => navigate('/account/billing')} // Placeholder for Stripe Customer Portal
+                                    className="btn btn-outline btn-sm"
+                                >
+                                    {t('profilePage_subscription_manageButton', 'Manage Subscription')}
+                                </button>
+                            ) : (
+                                <button 
+                                    onClick={() => navigate('/subscriptions')}
+                                    className="btn btn-primary btn-sm"
+                                >
+                                    {t('profilePage_subscription_upgradeButton', 'Upgrade to Pro')}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {success && (
                 <div role="alert" className="alert alert-success mb-4 shadow-sm">
                     <CheckCircle2 className="h-6 w-6 stroke-current shrink-0" />

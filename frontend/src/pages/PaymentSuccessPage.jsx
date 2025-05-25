@@ -35,7 +35,7 @@ function PaymentSuccessPage() {
                 {t('payment_success_message1', 'Thank you for your subscription.')}
             </p>
             <p className="text-base-content mb-8">
-                {t('payment_success_message2', 'Your account is being updated. You will be redirected shortly.')}
+                {t('payment_success_message2', 'Your account is being updated with your new Pro plan. This may take a moment. You will be redirected shortly.')}
             </p>
             {sessionId && (
                 <p className="text-xs text-gray-500 mb-4">

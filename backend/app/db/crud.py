@@ -21,7 +21,7 @@ import calendar
 from fastapi import HTTPException # Import HTTPException
 
 # --- Database Access ---
-from .database import get_database
+from .database import get_database # Changed to relative import
 
 # --- Pydantic Models ---
 from ..models.school import SchoolCreate, SchoolUpdate, School
@@ -55,7 +55,7 @@ RESULT_COLLECTION = "results"
 # --- Transaction and Helper Functions ---
 # --- Database Transaction Utilities ---
 # Ensure this is imported correctly
-from backend.app.db.database import get_database # Removed 'db' import
+# from backend.app.db.database import get_database # REMOVED - Redundant and problematic absolute import
 
 # Global variable for database instance, primarily for the transaction context
 # This will be set by get_database() during app startup or when first called

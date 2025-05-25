@@ -168,7 +168,51 @@ function SubscriptionsPage() {
         }
     };
 
-    const handleManageSubscription = async () => { /* Stripe Portal logic */ };
+    const handleManageSubscription = async () => {
+        setIsProcessing(true);
+        setApiError(null);
+        try {
+            const token = await getAccessToken();
+            if (!token) {
+                throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
+            }
+
+            const response = await fetch(`${API_BASE_URL}/api/v1/subscriptions/create-portal-session`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                let errorData;
+                try {
+                    errorData = await response.json();
+                } catch (e) {
+                    // Ignore if response is not JSON
+                }
+                const errorMessage = errorData?.detail || response.statusText || t('messages_error_create_portal_failed', 'Failed to create customer portal session.');
+                throw new Error(errorMessage);
+            }
+
+            const session = await response.json();
+            const portalUrl = session?.url;
+
+            if (portalUrl) {
+                window.location.href = portalUrl; // Redirect to Stripe Customer Portal
+            } else {
+                throw new Error(t('messages_error_portal_url_missing', 'Customer portal URL not found in response.'));
+            }
+
+        } catch (error) {
+            console.error("handleManageSubscription error:", error);
+            setApiError(error.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const handleContactSchools = () => { navigate('/contact-us'); };
 
     return (
