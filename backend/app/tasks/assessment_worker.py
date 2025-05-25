@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 import uuid
 from datetime import datetime, timezone
 import re
+import string # Added import
 
 import httpx
 # --- Database Access ---
@@ -20,7 +21,7 @@ from ..db import crud
 # get_database is still used by crud and queue functions, so it's not removed from here
 # but AssessmentWorker itself will use the passed 'db' instance where possible.
 from ..db.database import get_database 
-from ..models.enums import DocumentStatus, ResultStatus, FileType
+from ..models.enums import DocumentStatus, ResultStatus, FileType, SubscriptionPlan
 from ..models.result import ResultCreate
 
 # Temporary: same ML API URL used in documents endpoint
@@ -138,10 +139,107 @@ class AssessmentWorker:
             extracted_text = await asyncio.to_thread(extract_text_from_bytes, file_bytes, file_type_enum_member)
             if extracted_text is None: extracted_text = "" 
             character_count = len(extracted_text)
-            words = re.split(r'\\s+', extracted_text.strip())
-            word_count = len([w for w in words if w])
+            
+            # Revised word count logic
+            raw_tokens = re.split(r'\s+', extracted_text.strip())
+            # Strip leading/trailing punctuation (e.g., '.', ',', '!', '?') from each token
+            cleaned_tokens = [token.strip(string.punctuation) for token in raw_tokens]
+            # Filter out any empty strings that might result (e.g., if a token was purely punctuation)
+            words = [token for token in cleaned_tokens if token]
+            word_count = len(words)
+            
             logger.info(f"[AssessmentWorker] Text extraction complete for doc {document.id}. Chars: {character_count}, Words: {word_count}")
-            # --- End Text Extraction ---
+
+            # Always update document with character and word counts, regardless of limit checks
+            await crud.update_document_counts(document_id=document.id, teacher_id=teacher_id, character_count=character_count, word_count=word_count)
+            logger.info(f"[AssessmentWorker] Updated char/word counts for doc {document.id}")
+
+            # --- Usage Limit Check ---
+            teacher_db = await crud.get_teacher_by_kinde_id(kinde_id=teacher_id)
+            if not teacher_db:
+                logger.error(f"[AssessmentWorker] Teacher {teacher_id} not found. Cannot check usage limits. Aborting task {task.id} for doc {document.id}")
+                await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": "User not found, cannot verify usage limits."}, teacher_id=teacher_id)
+                await self._delete_assessment_task(task.id)
+                return
+
+            current_plan = teacher_db.current_plan
+            logger.info(f"[AssessmentWorker] Teacher {teacher_id} is on plan: {current_plan}")
+
+            if current_plan == SubscriptionPlan.SCHOOLS:
+                logger.info(f"[AssessmentWorker] Teacher {teacher_id} on SCHOOLS plan. Bypassing usage limit check for doc {document.id}.")
+            else:
+                usage_stats = await crud.get_usage_stats_for_period(
+                    teacher_id=teacher_id,
+                    period='monthly',
+                    target_date=datetime.now(timezone.utc).date()
+                )
+                current_monthly_words = usage_stats.get("total_words", 0) if usage_stats else 0
+                current_monthly_chars = usage_stats.get("total_characters", 0) if usage_stats else 0
+                
+                doc_word_count = word_count if word_count is not None else 0
+                doc_char_count = character_count if character_count is not None else 0
+
+                limit_exceeded = False
+                exceeded_by = ""
+
+                if current_plan == SubscriptionPlan.FREE:
+                    plan_word_limit_free = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
+                    plan_char_limit_free = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+                    logger.info(f"[AssessmentWorker] FREE Plan: Monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_free}")
+                    logger.info(f"[AssessmentWorker] FREE Plan: Monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_free}")
+
+                    if current_monthly_words > plan_word_limit_free:
+                        limit_exceeded = True
+                        exceeded_by = "word"
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed FREE plan monthly word limit of {plan_word_limit_free} (current usage: {current_monthly_words}).")
+                    
+                    if not limit_exceeded and current_monthly_chars > plan_char_limit_free:
+                        limit_exceeded = True
+                        exceeded_by = "character"
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FREE plan monthly char limit of {plan_char_limit_free} (current usage: {current_monthly_chars}).")
+                
+                elif current_plan == SubscriptionPlan.PRO:
+                    plan_word_limit_pro = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
+                    plan_char_limit_pro = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
+                    logger.info(f"[AssessmentWorker] PRO Plan: Monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_pro}")
+                    logger.info(f"[AssessmentWorker] PRO Plan: Monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_pro}")
+
+                    if current_monthly_words > plan_word_limit_pro:
+                        limit_exceeded = True
+                        exceeded_by = "word"
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed PRO plan monthly word limit of {plan_word_limit_pro} (current usage: {current_monthly_words}).")
+                    
+                    if not limit_exceeded and current_monthly_chars > plan_char_limit_pro:
+                        limit_exceeded = True
+                        exceeded_by = "character"
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed PRO plan monthly char limit of {plan_char_limit_pro} (current usage: {current_monthly_chars}).")
+
+                else: # Fallback for any other unknown non-SCHOOLS plan - use FREE plan char limits
+                    plan_char_limit_fallback = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+                    logger.warning(f"[AssessmentWorker] Unknown plan {current_plan} for teacher {teacher_id}. Applying default free character limit ({plan_char_limit_fallback}) as a fallback.")
+                    logger.info(f"[AssessmentWorker] FALLBACK Plan: Monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Limit: {plan_char_limit_fallback}")
+                    if current_monthly_chars > plan_char_limit_fallback:
+                        limit_exceeded = True
+                        exceeded_by = "character (fallback)"
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FALLBACK (free) monthly char limit of {plan_char_limit_fallback} (current usage: {current_monthly_chars}).")
+
+                if limit_exceeded:
+                    error_message = f"Monthly {exceeded_by} limit exceeded."
+                    await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.LIMIT_EXCEEDED)
+                    await crud.update_result(
+                        result_id=result.id, 
+                        update_data={
+                            "status": ResultStatus.FAILED, 
+                            "error_message": error_message
+                        }, 
+                        teacher_id=teacher_id
+                    )
+                    await self._delete_assessment_task(task.id)
+                    logger.info(f"[AssessmentWorker] Task {task.id} for document {document.id} deleted due to {exceeded_by} limit exceeded.")
+                    return # Stop processing this task further
+            
+            # --- End Usage Limit Check ---
 
             # --- ML API Call (Copied from documents.py and adapted) ---
             ml_api_url_worker = settings.ML_API_URL 
@@ -196,25 +294,50 @@ class AssessmentWorker:
                 logger.info(f"[AssessmentWorker] Successfully updated result {result.id} for doc {document.id} to COMPLETED.")
                 await crud.update_document_status(
                     document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.COMPLETED,
-                    character_count=character_count, word_count=word_count
+                    character_count=character_count, word_count=word_count # Counts already set, but good to be explicit
                 )
-                logger.info(f"[AssessmentWorker] Successfully updated document {document.id} to COMPLETED.")
+                logger.info(f"[AssessmentWorker] Document {document.id} status updated to COMPLETED.")
                 await self._delete_assessment_task(task.id) # MODIFIED: Uses self.db via the method call
             else:
                 logger.error(f"[AssessmentWorker] Failed to update result record for doc {document.id}. Status will remain PROCESSING. Task {task.id} will be retried.")
                 await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR, character_count=character_count, word_count=word_count)
 
+        except FileNotFoundError as e:
+            logger.error(f"[AssessmentWorker] File not found during processing for task {task.id}, doc {document.id}: {e}", exc_info=True)
+            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            # Also update the Result status to FAILED
+            if result:
+                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": f"File not found: {e}"}, teacher_id=teacher_id)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"[AssessmentWorker] HTTP error calling ML API for task {task.id}, doc {document.id}: {e.response.status_code} - {e.response.text}", exc_info=True)
+            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            if result: # Update result with error
+                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": f"ML API Error: {e.response.status_code}"}, teacher_id=teacher_id)
+        except ValueError as e: # Catch ValueErrors (e.g. ML_API_URL not set, or unexpected ML response format)
+            logger.error(f"[AssessmentWorker] ValueError during processing for task {task.id}, doc {document.id}: {e}", exc_info=True)
+            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            if result: # Update result with error
+                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": f"Processing error: {e}"}, teacher_id=teacher_id)
         except Exception as e:
-            logger.error(f"[AssessmentWorker] Error processing task {task.id} (doc: {document.id}): {e}", exc_info=True)
-            try:
-                await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR, character_count=character_count, word_count=word_count)
-                if result: 
-                    await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.ERROR}, teacher_id=teacher_id)
-                logger.info(f"[AssessmentWorker] Set document {document.id} and result {result.id if result else 'N/A'} to ERROR due to processing exception for task {task.id}.")
-            except Exception as update_err:
-                logger.error(f"[AssessmentWorker] Further error setting statuses to ERROR for doc {document_id} (task {task.id}): {update_err}", exc_info=True)
-        
-        logger.info(f"[AssessmentWorker] Finished processing attempt for task {task.id} (document_id: {document.id})")
+            logger.error(f"[AssessmentWorker] Unexpected error processing task {task.id} for document {document_id}: {e}", exc_info=True)
+            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            if result: # Update result with a generic error
+                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": "An unexpected error occurred during assessment."}, teacher_id=teacher_id)
+        finally:
+            # Ensure task is deleted if not already deleted due to limit, unless it's a catastrophic error before task object exists
+            # The _delete_assessment_task itself is now robust to errors
+            if task and task.id: # Check if task object and task.id exist
+                 # Check if document status is one that implies the task should already have been deleted.
+                doc_for_status_check = await crud.get_document_by_id(document_id=document_id, teacher_id=teacher_id)
+                current_doc_status = doc_for_status_check.status if doc_for_status_check else None
+                if current_doc_status != DocumentStatus.LIMIT_EXCEEDED:
+                    logger.debug(f"[AssessmentWorker] Task {task.id} not deleted by limit check. Attempting deletion in finally block.")
+                    await self._delete_assessment_task(task.id)
+                else:
+                    logger.debug(f"[AssessmentWorker] Task {task.id} was already deleted due to LIMIT_EXCEEDED. Skipping deletion in finally block.")
+            else:
+                logger.warning(f"[AssessmentWorker] Task object or task.id is None in finally block. Cannot delete task. Document ID: {document_id}")
+            logger.info(f"[AssessmentWorker] Finished processing (or attempted processing) for task related to document_id: {document_id}")
 
     async def run(self):
         """

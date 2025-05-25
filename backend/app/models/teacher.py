@@ -86,6 +86,10 @@ class TeacherInDBBase(TeacherBase):
         default=None,
         description="End date of the current billing period for an active subscription"
     )
+    pro_plan_activated_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of when the current Pro plan was activated"
+    )
     # --- STRIPE SUBSCRIPTION FIELDS END ---
 
     model_config = ConfigDict(
@@ -99,6 +103,10 @@ class TeacherInDBBase(TeacherBase):
 class Teacher(TeacherInDBBase):
     # Inherits all fields including Stripe subscription fields
     pass
+
+class TeacherProfile(Teacher):
+    current_plan_word_limit: Optional[int] = Field(None, description="Monthly word limit for the current plan")
+    current_plan_char_limit: Optional[int] = Field(None, description="Monthly character limit for the current plan")
 
 # Model for updating (Profile Page uses this, or admin updates)
 class TeacherUpdate(BaseModel):
@@ -119,6 +127,7 @@ class TeacherUpdate(BaseModel):
     stripe_customer_id: Optional[str] = Field(None, description="Stripe Customer ID")
     current_plan: Optional[SubscriptionPlan] = None
     subscription_status: Optional[StripeSubscriptionStatus] = None
+    pro_plan_activated_at: Optional[datetime] = None
     # stripe_subscription_id: Optional[str] = None # Usually set by webhooks, not direct update
     # current_period_end: Optional[datetime] = None # Usually set by webhooks, not direct update
     # --- End Stripe Integration Fields ---

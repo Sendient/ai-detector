@@ -188,8 +188,10 @@ async def stripe_webhook(
                 }
                 if plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID:
                     update_data["current_plan"] = SubscriptionPlan.PRO
+                    update_data["pro_plan_activated_at"] = datetime.now(timezone.utc)
                 else:
-                    logger.warning(f"Subscription {stripe_subscription_id} created with unexpected plan ID {plan_id_from_stripe} vs expected {settings.STRIPE_PRO_PLAN_PRICE_ID}")
+                    update_data["pro_plan_activated_at"] = None
+                    logger.warning(f"Subscription {stripe_subscription_id} created with unexpected plan ID {plan_id_from_stripe} vs expected {settings.STRIPE_PRO_PLAN_PRICE_ID}. Plan not set to PRO.")
 
                 await _update_teacher_record(stripe_customer_id, update_data, "checkout.session.completed")
 
@@ -219,8 +221,15 @@ async def stripe_webhook(
                     update_data = {
                         "subscription_status": StripeSubscriptionStatus.ACTIVE,
                         "current_period_end": current_period_end_dt,
-                        "current_plan": SubscriptionPlan.PRO # Reinforce Pro plan status
+                        "current_plan": SubscriptionPlan.PRO, # Reinforce Pro plan status
+                        "pro_plan_activated_at": datetime.now(timezone.utc) # SET/UPDATE PRO ACTIVATION DATE
                     }
+                    teacher_before_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
+                    if teacher_before_update and (teacher_before_update.current_plan != SubscriptionPlan.PRO or teacher_before_update.pro_plan_activated_at is None):
+                        update_data["pro_plan_activated_at"] = datetime.now(timezone.utc)
+                    elif teacher_before_update and teacher_before_update.pro_plan_activated_at is not None:
+                        # If already PRO and activated_at is set, keep the existing one.
+                        pass # pro_plan_activated_at remains
                     await _update_teacher_record(stripe_customer_id, update_data, f"invoice.paid ({billing_reason})")
                 else:
                     logger.warning(f"Could not determine current_period_end from invoice.paid event: {event_data.id}")
@@ -241,6 +250,7 @@ async def stripe_webhook(
             # For simplicity here, we'll set it to PAST_DUE, but a more robust solution
             # would fetch the subscription linked to this customer/invoice.
             update_data = {"subscription_status": StripeSubscriptionStatus.PAST_DUE}
+            # pro_plan_activated_at is not changed here, as the plan is still technically PRO but payment is due.
             await _update_teacher_record(stripe_customer_id, update_data, "invoice.payment_failed")
             # Consider sending a notification to the user.
 
@@ -248,85 +258,100 @@ async def stripe_webhook(
             logger.info(f"Handling customer.subscription.created for subscription: {event_data.id}")
             stripe_customer_id = event_data.get("customer")
             stripe_subscription_id = event_data.id # The event_data is the subscription object
-            subscription_status_str = event_data.get("status")
-            current_period_end_ts = event_data.get("current_period_end")
-            plan_data = event_data.get("items", {}).get("data", [])
-            plan_id_from_stripe = plan_data[0].get("price", {}).get("id") if plan_data else None
-
-            if not stripe_customer_id:
-                logger.error(f"Missing customer ID in customer.subscription.created: {event_data.id}")
-                return {"status": "error", "message": "Missing customer ID in event"}
-
-            update_data: Dict[str, Any] = {
-                "stripe_subscription_id": stripe_subscription_id,
-            }
-
-            try:
-                if subscription_status_str:
-                    update_data["subscription_status"] = StripeSubscriptionStatus(subscription_status_str)
-            except ValueError:
-                logger.warning(f"Unknown subscription status '{subscription_status_str}' received from Stripe for sub {stripe_subscription_id} (customer.subscription.created).")
-
-            if current_period_end_ts:
-                update_data["current_period_end"] = datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
-
-            if plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID:
-                update_data["current_plan"] = SubscriptionPlan.PRO
-            elif plan_id_from_stripe: # It's a different plan
-                logger.warning(f"Subscription {stripe_subscription_id} (customer.subscription.created) has unexpected plan ID {plan_id_from_stripe} vs expected {settings.STRIPE_PRO_PLAN_PRICE_ID}. Setting plan to FREE or NONE based on your logic.")
-                # Decide if you want to set to FREE or leave as is / set to another status
-                update_data["current_plan"] = SubscriptionPlan.FREE # Example: Downgrade if plan is unknown
             
-            if update_data: # Only update if there's something to update
-                 await _update_teacher_record(stripe_customer_id, update_data, "customer.subscription.created")
+            # Retrieve the subscription to get plan details and current_period_end
+            try:
+                subscription = stripe.Subscription.retrieve(stripe_subscription_id, expand=['items.data.price'])
+                current_period_end_dt = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                plan_id_from_stripe = subscription.items.data[0].price.id if subscription.items.data else None
+
+                update_payload_sub_created = {
+                    "stripe_subscription_id": stripe_subscription_id,
+                    "subscription_status": StripeSubscriptionStatus(subscription.status), # Use actual status from Stripe
+                    "current_period_end": current_period_end_dt,
+                }
+
+                if plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID and subscription.status == 'active':
+                    update_payload_sub_created["current_plan"] = SubscriptionPlan.PRO
+                    # Check if already PRO to keep original activation date
+                    teacher_before_create_sub_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
+                    if teacher_before_create_sub_update and (teacher_before_create_sub_update.current_plan != SubscriptionPlan.PRO or teacher_before_create_sub_update.pro_plan_activated_at is None):
+                        update_payload_sub_created["pro_plan_activated_at"] = datetime.now(timezone.utc)
+                    elif teacher_before_create_sub_update and teacher_before_create_sub_update.pro_plan_activated_at is not None:
+                        # If already PRO and activated_at is set, ensure it's not accidentally cleared if not in payload
+                        pass # pro_plan_activated_at remains as is from previous state
+                else:
+                    update_payload_sub_created["pro_plan_activated_at"] = None # Clear if not PRO or not active
+
+                await _update_teacher_record(stripe_customer_id, update_payload_sub_created, "customer.subscription.created")
+
+            except stripe.error.StripeError as se:
+                logger.error(f"Stripe error processing customer.subscription.created ({stripe_subscription_id}): {se}", exc_info=True)
+            except Exception as e_sub_created:
+                logger.error(f"Error processing customer.subscription.created ({stripe_subscription_id}): {e_sub_created}", exc_info=True)
 
         elif event_type == 'customer.subscription.updated':
             logger.info(f"Handling customer.subscription.updated for subscription: {event_data.id}")
             stripe_customer_id = event_data.get("customer")
-            stripe_subscription_id = event_data.id
-            new_status_str = event_data.get("status")
-            current_period_end_ts = event_data.get("current_period_end")
-            cancel_at_period_end = event_data.get("cancel_at_period_end", False)
+            stripe_subscription_id = event_data.id # The event_data is the subscription object
 
-            if not stripe_customer_id:
+            if not stripe_customer_id: # Should always be present for this event
                 logger.error(f"Missing customer ID in customer.subscription.updated: {event_data.id}")
-                return {"status": "error", "message": "Missing customer ID in event"}
+                return {"status": "error", "message": "Missing customer ID"}
 
-            update_data_payload: Dict[str, Any] = {}
-            try:
-                if new_status_str:
-                    update_data_payload["subscription_status"] = StripeSubscriptionStatus(new_status_str)
-            except ValueError:
-                logger.warning(f"Unknown subscription status '{new_status_str}' received from Stripe for sub {stripe_subscription_id}.")
+            current_period_end_dt = datetime.fromtimestamp(event_data.current_period_end, tz=timezone.utc)
+            new_stripe_status_str = event_data.status
+            new_stripe_status_enum = StripeSubscriptionStatus(new_stripe_status_str) # Convert to enum
             
-            if current_period_end_ts:
-                update_data_payload["current_period_end"] = datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
-            
-            # If subscription is active but scheduled for cancellation, status is still 'active'
-            # but cancel_at_period_end is true. 'customer.subscription.deleted' will handle final plan change.
-            if new_status_str == StripeSubscriptionStatus.ACTIVE.value and cancel_at_period_end:
-                 logger.info(f"Subscription {stripe_subscription_id} is active and scheduled to cancel at period end.")
-                 # You might add a custom status in your DB like "active_pending_cancellation" if needed
-                 # For now, we just update status and period_end.
+            plan_id_from_stripe = event_data.items.data[0].price.id if event_data.items.data else None
 
-            if update_data_payload:
-                await _update_teacher_record(stripe_customer_id, update_data_payload, "customer.subscription.updated")
+            update_data_sub_updated = {
+                "stripe_subscription_id": stripe_subscription_id, # Good to update in case it changed (though unlikely for .updated)
+                "subscription_status": new_stripe_status_enum,
+                "current_period_end": current_period_end_dt,
+            }
+
+            # Logic for cancel_at_period_end
+            if event_data.cancel_at_period_end:
+                update_data_sub_updated["subscription_status"] = StripeSubscriptionStatus.CANCELED # Our enum for "will cancel"
+                # pro_plan_activated_at remains as is, plan is still PRO until period end
+                logger.info(f"Subscription {stripe_subscription_id} for customer {stripe_customer_id} is set to cancel at period end ({current_period_end_dt}). Status set to CANCELED (pending expiry).")
+            elif new_stripe_status_enum == StripeSubscriptionStatus.ACTIVE and plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID:
+                update_data_sub_updated["current_plan"] = SubscriptionPlan.PRO
+                # If transitioning to PRO or if pro_plan_activated_at was never set
+                teacher_before_sub_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
+                if teacher_before_sub_update and (teacher_before_sub_update.current_plan != SubscriptionPlan.PRO or teacher_before_sub_update.pro_plan_activated_at is None):
+                    update_data_sub_updated["pro_plan_activated_at"] = datetime.now(timezone.utc)
+                elif teacher_before_sub_update and teacher_before_sub_update.pro_plan_activated_at is not None:
+                     # If already PRO and activated_at is set, keep the existing one.
+                     pass # pro_plan_activated_at remains
+            elif new_stripe_status_enum != StripeSubscriptionStatus.ACTIVE or plan_id_from_stripe != settings.STRIPE_PRO_PLAN_PRICE_ID:
+                # If plan is no longer PRO (e.g., changed to a different plan via Stripe, or status is not active)
+                # or if status is not active for the PRO plan
+                update_data_sub_updated["current_plan"] = SubscriptionPlan.FREE # Default to FREE
+                update_data_sub_updated["pro_plan_activated_at"] = None # Clear pro activation date
+                if new_stripe_status_enum == StripeSubscriptionStatus.CANCELED and not event_data.cancel_at_period_end:
+                     # This means it's truly canceled now, not just pending cancellation
+                     update_data_sub_updated["subscription_status"] = StripeSubscriptionStatus.EXPIRED # Or a more definitive "CANCELED_NOW"
+                     logger.info(f"Subscription {stripe_subscription_id} for customer {stripe_customer_id} is now fully canceled/expired. Plan set to FREE.")
+
+
+            await _update_teacher_record(stripe_customer_id, update_data_sub_updated, "customer.subscription.updated")
 
         elif event_type == 'customer.subscription.deleted':
+            # This event occurs when a subscription is definitively canceled (immediately or at period end if it was scheduled)
             logger.info(f"Handling customer.subscription.deleted for subscription: {event_data.id}")
             stripe_customer_id = event_data.get("customer")
+            stripe_subscription_id = event_data.id
 
-            if not stripe_customer_id:
-                logger.error(f"Missing customer ID in customer.subscription.deleted: {event_data.id}")
-                return {"status": "error", "message": "Missing customer ID in event"}
-
-            update_data = {
+            update_data_sub_deleted = {
                 "current_plan": SubscriptionPlan.FREE,
-                "subscription_status": StripeSubscriptionStatus.CANCELED, # Mark as canceled
-                "stripe_subscription_id": None, # Clear the Stripe subscription ID
-                "current_period_end": None,     # Clear the period end
+                "stripe_subscription_id": None, # Clear the subscription ID
+                "subscription_status": StripeSubscriptionStatus.EXPIRED, # Or CANCELED, EXPIRED seems more final
+                "current_period_end": None, # Clear current period end
+                "pro_plan_activated_at": None # Clear pro activation date
             }
-            await _update_teacher_record(stripe_customer_id, update_data, "customer.subscription.deleted")
+            await _update_teacher_record(stripe_customer_id, update_data_sub_deleted, "customer.subscription.deleted")
 
         # --- Start of new logging-only handlers ---
         elif event_type == 'customer.created':

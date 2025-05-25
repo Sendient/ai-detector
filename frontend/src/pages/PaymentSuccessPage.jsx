@@ -19,7 +19,7 @@ function PaymentSuccessPage() {
 
         // Redirect to dashboard or subscriptions page after a few seconds
         const timer = setTimeout(() => {
-            navigate('/'); // Or '/subscriptions' or '/profile'
+            navigate('/profile'); // Changed to /profile
         }, 5000); // 5 seconds
 
         return () => clearTimeout(timer);

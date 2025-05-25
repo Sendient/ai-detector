@@ -32,16 +32,18 @@ class DocumentStatus(str, Enum):
     UPLOADED = "UPLOADED"
     QUEUED = "QUEUED"
     PROCESSING = "PROCESSING"
-    COMPLETED = "COMPLETED"
+    COMPLETED = "COMPLETED" # Assessment finished, results available
     FAILED = "FAILED"       # As seen in tests and common usage
-    RETRYING = "RETRYING"   # As seen in tests and usage
-    ERROR = "ERROR"         # As seen in usage, can be distinct from FAILED
+    RETRYING = "RETRYING"   # System is retrying a failed step
+    ERROR = "ERROR"         # An error occurred during processing
+    LIMIT_EXCEEDED = "LIMIT_EXCEEDED" # User has exceeded their usage limit
     # Add other statuses as needed
 
 # --- NEW ENUMS FOR STRIPE INTEGRATION ---
 class SubscriptionPlan(str, Enum):
     FREE = "Free"
     PRO = "Pro"
+    SCHOOLS = "Schools"  # Added Schools plan
     # If you had a 'Schools' plan that was NOT going through Stripe checkout
     # but you still wanted to represent its status internally, you might add it here:
     # SCHOOLS_CONTACT_US = "Schools (Contact Us)"

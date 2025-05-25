@@ -196,55 +196,6 @@ function ProfilePage() {
         <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
             <h1 className="text-xl font-semibold text-base-content mb-6">{t('profilePage_heading')}</h1>
 
-            {/* Subscription Status Section */}
-            {profile && (
-                <div className="card bg-base-200 shadow-sm mb-6">
-                    <div className="card-body">
-                        <h2 className="card-title text-lg">{t('profilePage_subscription_title', 'My Subscription')}</h2>
-                        <div className="divider my-1"></div>
-                        <div className="space-y-2 text-sm">
-                            <p>
-                                <span className="font-medium">{t('profilePage_subscription_currentPlan', 'Current Plan')}:</span> 
-                                <span className="badge badge-lg ml-2">{profile.current_plan || t('common_unknown', 'Unknown')}</span>
-                            </p>
-                            {profile.current_plan === 'Pro' && profile.subscription_status && (
-                                <p>
-                                    <span className="font-medium">{t('profilePage_subscription_status', 'Status')}:</span> 
-                                    <span className={`badge badge-lg ml-2 ${profile.subscription_status === 'active' ? 'badge-success' : 'badge-warning'}`}>
-                                        {profile.subscription_status}
-                                    </span>
-                                </p>
-                            )}
-                            {profile.current_plan === 'Pro' && profile.current_period_end && (
-                                <p>
-                                    <span className="font-medium">{t('profilePage_subscription_renews', 'Renews/Expires on')}:</span> 
-                                    <span className="ml-2">
-                                        {new Date(profile.current_period_end).toLocaleDateString()}
-                                    </span>
-                                </p>
-                            )}
-                        </div>
-                        <div className="card-actions justify-end mt-4">
-                            {profile.current_plan === 'Pro' ? (
-                                <button 
-                                    onClick={() => navigate('/account/billing')} // Placeholder for Stripe Customer Portal
-                                    className="btn btn-outline btn-sm"
-                                >
-                                    {t('profilePage_subscription_manageButton', 'Manage Subscription')}
-                                </button>
-                            ) : (
-                                <button 
-                                    onClick={() => navigate('/subscriptions')}
-                                    className="btn btn-primary btn-sm"
-                                >
-                                    {t('profilePage_subscription_upgradeButton', 'Upgrade to Pro')}
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {success && (
                 <div role="alert" className="alert alert-success mb-4 shadow-sm">
                     <CheckCircle2 className="h-6 w-6 stroke-current shrink-0" />
@@ -259,136 +210,213 @@ function ProfilePage() {
                 </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_firstName')}</span>
-                        </label>
-                        <input
-                            type="text"
-                            name="first_name"
-                            value={formData.first_name}
-                            onChange={handleInputChange}
-                            className="input input-bordered w-full"
-                            required
-                        />
-                    </div>
+            {/* Personal Information Card - Remains largely the same, but Account Created On will be moved */}
+            <div className="card bg-base-100 shadow-md mb-6"> {/* Added mb-6 for spacing between cards */}
+                <div className="card-body">
+                    <h2 className="card-title text-lg">{t('profilePage_personalInfo_title', 'Personal Information')}</h2>
+                    <div className="divider my-1"></div>
+                    <form onSubmit={handleSubmit} className="space-y-4"> {/* Moved form tag here, simpler structure */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* Reverted to md:grid-cols-2 */}
+                            <div className="form-control w-full">
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_firstName')}</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    name="first_name"
+                                    value={formData.first_name}
+                                    onChange={handleInputChange}
+                                    className="input input-bordered w-full"
+                                    required
+                                />
+                            </div>
 
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_lastName')}</span>
-                        </label>
-                        <input
-                            type="text"
-                            name="last_name"
-                            value={formData.last_name}
-                            onChange={handleInputChange}
-                            className="input input-bordered w-full"
-                            required
-                        />
-                    </div>
+                            <div className="form-control w-full">
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_lastName')}</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    name="last_name"
+                                    value={formData.last_name}
+                                    onChange={handleInputChange}
+                                    className="input input-bordered w-full"
+                                    required
+                                />
+                            </div>
 
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_email')}</span>
-                        </label>
-                        <input
-                            type="email"
-                            name="email"
-                            value={formData.email}
-                            readOnly
-                            className="input input-bordered w-full"
-                        />
-                        <p className="mt-1 text-xs text-gray-500">{t('profilePage_form_helpText_email')}</p>
-                    </div>
+                            <div className="form-control w-full">
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_email')}</span>
+                                </label>
+                                <input
+                                    type="email"
+                                    name="email"
+                                    value={formData.email}
+                                    readOnly
+                                    className="input input-bordered w-full bg-base-200 text-base-content/70 cursor-not-allowed"
+                                />
+                                <p className="mt-1 text-xs text-gray-500">{t('profilePage_form_helpText_email')}</p>
+                            </div>
 
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_schoolName')}</span>
-                        </label>
-                        <input
-                            type="text"
-                            name="school_name"
-                            value={formData.school_name}
-                            onChange={handleInputChange}
-                            className="input input-bordered w-full"
-                            required
-                            placeholder={t('profilePage_form_placeholder_schoolName')}
-                        />
-                    </div>
+                            <div className="form-control w-full">
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_schoolName')}</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    name="school_name"
+                                    value={formData.school_name}
+                                    onChange={handleInputChange}
+                                    className="input input-bordered w-full"
+                                    required
+                                    placeholder={t('profilePage_form_placeholder_schoolName')}
+                                />
+                            </div>
 
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_role')}</span>
-                        </label>
-                        <select
-                            name="role"
-                            value={formData.role}
-                            onChange={handleInputChange}
-                            className="select select-bordered w-full"
-                            required
-                        >
-                            {roleKeys.map(key => (
-                                <option key={key} value={roleValues[key]}>
-                                    {t(key)}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                            <div className="form-control w-full">
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_role')}</span>
+                                </label>
+                                <select
+                                    name="role"
+                                    value={formData.role}
+                                    onChange={handleInputChange}
+                                    className="select select-bordered w-full"
+                                    required
+                                >
+                                    {roleKeys.map(key => (
+                                        <option key={key} value={roleValues[key]}>
+                                            {t(key)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
 
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_country')}</span>
-                        </label>
-                        <select
-                            name="country"
-                            value={formData.country}
-                            onChange={handleInputChange}
-                            className="select select-bordered w-full"
-                            required
-                        >
-                            <option value="">{t('profilePage_form_select_countryPlaceholder')}</option>
-                            {countries.map(country => (
-                                <option key={country} value={country}>
-                                    {country}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                            <div className="form-control w-full">
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_country')}</span>
+                                </label>
+                                <select
+                                    name="country"
+                                    value={formData.country}
+                                    onChange={handleInputChange}
+                                    className="select select-bordered w-full"
+                                    required
+                                >
+                                    <option value="">{t('profilePage_form_select_countryPlaceholder')}</option>
+                                    {countries.map(country => (
+                                        <option key={country} value={country}>
+                                            {country}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
 
-                    <div className="form-control">
-                        <label className="label">
-                            <span className="label-text">{t('profilePage_form_label_stateCounty')}</span>
-                        </label>
-                        <input
-                            type="text"
-                            name="state_county"
-                            value={formData.state_county}
-                            onChange={handleInputChange}
-                            className="input input-bordered w-full"
-                            required
-                        />
-                    </div>
+                            <div className="form-control w-full md:col-span-2"> {/* State/County reverted to md:col-span-2 */}
+                                <label className="label">
+                                    <span className="label-text">{t('profilePage_form_label_stateCounty')}</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    name="state_county"
+                                    value={formData.state_county}
+                                    onChange={handleInputChange}
+                                    className="input input-bordered w-full"
+                                    required
+                                />
+                            </div>
+                        </div>
+                        <div className="card-actions justify-end pt-4 md:col-span-2"> {/* Ensure button spans if needed */}
+                            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                                {isSubmitting ? (
+                                    <>
+                                        <span className="loading loading-spinner"></span>
+                                        {t('profilePage_button_saving')}
+                                    </>
+                                ) : t('profilePage_button_saveChanges')}
+                            </button>
+                        </div>
+                    </form>
                 </div>
+            </div>
 
-                <div className="flex justify-end">
-                    <button
-                        type="submit"
-                        className="btn btn-primary"
-                        disabled={isSubmitting}
-                    >
-                        {isSubmitting ? (
+            {/* My Account Card - Includes Subscription Info */}
+            <div className="card bg-base-100 shadow-md mb-6">
+                <div className="card-body">
+                    <h2 className="card-title text-lg">{t('profilePage_myAccount_title', 'My Account')}</h2>
+                    <div className="divider my-1"></div>
+                    <div className="space-y-2">
+                        <div>
+                            <span className="font-medium">{t('profilePage_account_createdOn', 'Account Created On:')}</span> 
+                            {profile?.created_at ? new Date(profile.created_at).toLocaleString() : t('common_notAvailable')}
+                        </div>
+                        <div>
+                            <span className="font-medium">{t('profilePage_subscription_currentPlan', 'Current Plan:')}</span> 
+                            {profile?.current_plan ? t(`subscriptionPlan_${profile.current_plan.toLowerCase()}`, profile.current_plan) : t('common_notAvailable')}
+                        </div>
+                        {/* MODIFIED: Display Plan Limits */}
+                        {profile?.current_plan && profile.current_plan !== 'Schools' && (
                             <>
-                                <span className="loading loading-spinner loading-sm"></span>
-                                {t('common_saving')}
+                                <div>
+                                    <span className="font-medium">{t('profilePage_subscription_wordLimit', 'Monthly Word Limit:')}</span> 
+                                    {profile.current_plan_word_limit !== null && profile.current_plan_word_limit !== undefined 
+                                        ? profile.current_plan_word_limit.toLocaleString() 
+                                        : t('profilePage_subscription_unlimited', 'Unlimited')}
+                                </div>
+                                <div>
+                                    <span className="font-medium">{t('profilePage_subscription_charLimit', 'Monthly Character Limit:')}</span> 
+                                    {profile.current_plan_char_limit !== null && profile.current_plan_char_limit !== undefined 
+                                        ? profile.current_plan_char_limit.toLocaleString() 
+                                        : t('profilePage_subscription_unlimited', 'Unlimited')}
+                                </div>
                             </>
-                        ) : (
-                            t('profilePage_form_button_save')
                         )}
-                    </button>
+                        {profile?.current_plan === 'Schools' && (
+                            <>
+                                <div>
+                                    <span className="font-medium">{t('profilePage_subscription_wordLimit', 'Monthly Word Limit:')}</span> 
+                                    {t('profilePage_subscription_unlimited', 'Unlimited')}
+                                </div>
+                                <div>
+                                    <span className="font-medium">{t('profilePage_subscription_charLimit', 'Monthly Character Limit:')}</span> 
+                                    {t('profilePage_subscription_unlimited', 'Unlimited')}
+                                </div>
+                            </>
+                        )}
+                        {/* End MODIFIED */}
+                        {profile?.current_plan === 'Pro' && profile?.pro_plan_activated_at && (
+                            <div>
+                                <span className="font-medium">{t('profilePage_subscription_proActivatedOn', 'Pro Plan Activated On:')}</span> 
+                                {new Date(profile.pro_plan_activated_at).toLocaleString()}
+                            </div>
+                        )}
+                        {profile?.current_plan === 'Free' && (
+                            <div className="mt-4">
+                                <button 
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => navigate('/subscribe')} // Navigate to subscribe page
+                                >
+                                    {t('profilePage_button_upgradeToPro', 'Upgrade to Pro')}
+                                </button>
+                            </div>
+                        )}
+                         {profile?.current_plan === 'Pro' && (
+                            <div className="mt-4">
+                                <button 
+                                    className="btn btn-outline btn-sm"
+                                    // onClick={handleManageSubscription} // Implement this function
+                                    onClick={() => window.location.href = profile.stripe_customer_portal_url || '/'} // TEMP: Direct link if available
+                                    disabled={!profile.stripe_customer_portal_url} // Disable if no portal URL
+                                >
+                                    {t('profilePage_button_manageSubscription', 'Manage Subscription')}
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </form>
+            </div>
+
         </div>
     );
 }

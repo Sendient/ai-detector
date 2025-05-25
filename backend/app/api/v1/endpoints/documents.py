@@ -12,11 +12,12 @@ from datetime import datetime, timezone
 import httpx # Import httpx for making external API calls
 import re # Import re for word count calculation
 import asyncio # Added for asyncio.to_thread
+import string # Added for string.punctuation
 
 # Import models
 from ....models.document import Document, DocumentCreate, DocumentUpdate
 from ....models.result import Result, ResultCreate, ResultUpdate, ParagraphResult
-from ....models.enums import DocumentStatus, ResultStatus, FileType, BatchPriority, BatchStatus
+from ....models.enums import DocumentStatus, ResultStatus, FileType, BatchPriority, BatchStatus, SubscriptionPlan
 from ....models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
 
 # Import CRUD functions
@@ -33,12 +34,7 @@ from ....services.text_extraction import extract_text_from_bytes
 from ....queue import enqueue_assessment_task, AssessmentTask # Added AssessmentTask if needed for other parts, ensure enqueue is there
 
 # Import external API URL from config (assuming you add it there)
-# from ....core.config import ML_API_URL, ML_RECAPTCHA_SECRET # Placeholder - add these to config.py
-# --- TEMPORARY: Define URLs directly here until added to config ---
-# Use the URL provided by the user
-ML_API_URL="https://fa-sdt-uks-aitextdet-prod.azurewebsites.net/api/ai-text-detection?code=PZrMzMk1VBBCyCminwvgUfzv_YGhVU-5E1JIs2if7zqiAzFuMhUC-g%3D%3D"
-# ML_RECAPTCHA_SECRET="6LfAEWwqAAAAAKCk5TXLVa7L9tSY-850idoUwOgr" # Store securely if needed - currently unused
-# --- END TEMPORARY ---
+from ....core.config import settings # Import settings
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -202,8 +198,8 @@ async def trigger_assessment(
             logger.info(f"Assessment for doc {document.id} is already {current_result.status}. Returning current result.")
             return current_result
         
-        # If PENDING or ERROR, we can attempt to re-queue via the AssessmentTask mechanism
-        if current_result.status in [ResultStatus.PENDING.value, ResultStatus.ERROR.value]:
+        # If PENDING or FAILED, we can attempt to re-queue via the AssessmentTask mechanism
+        if current_result.status in [ResultStatus.PENDING.value, ResultStatus.FAILED.value]:
             logger.info(f"Result for doc {document.id} is {current_result.status}. Attempting to re-queue for assessment.")
             # Ensure document status is also appropriate for re-queue (e.g., not already COMPLETED)
             if document.status not in [DocumentStatus.COMPLETED.value, DocumentStatus.PROCESSING.value]: # Compare with .value
@@ -437,7 +433,7 @@ async def update_document_processing_status(
     )
     if updated_document is None:
         logger.error(f"Failed to update status for doc {document_id} even after ownership check passed for user {user_kinde_id}.")
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Document {document_id} not found during status update.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found during status update.")
     
     logger.info(f"Document {document_id} status updated to {status_update.status} by user {user_kinde_id}.")
     return updated_document
@@ -542,158 +538,330 @@ async def upload_batch(
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to upload batch of {len(files)} documents. Student ID: {student_id}, Assignment ID: {assignment_id}")
+    if not user_kinde_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User Kinde ID not found in token.")
 
-    batch_data = BatchCreate(
-        teacher_id=user_kinde_id, # Assuming Batch model's user_id field stores Kinde ID
-        total_files=len(files),
-        status=BatchStatus.UPLOADING,
-        priority=priority
-    )
-    batch = await crud.create_batch(batch_in=batch_data)
-    if not batch:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create batch record"
+    logger.info(f"User {user_kinde_id} attempting to upload a batch of {len(files)} files.")
+
+    # --- Pre-emptive Usage Limit Check for Batch ---
+    teacher_db = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id)
+    if not teacher_db:
+        # This case should ideally not happen if user is authenticated and in DB
+        logger.error(f"User {user_kinde_id} not found in teacher DB for batch upload limit check.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User profile not found for usage check.")
+
+    current_plan = teacher_db.current_plan
+    logger.info(f"User {user_kinde_id} on plan {current_plan} attempting batch upload.")
+
+    # Pre-calculate total words and characters for the batch 
+    batch_total_words = 0
+    batch_total_chars = 0
+    temp_extracted_texts = [] # Store extracted texts, counts, and their original filenames for later use
+
+    for file in files:
+        original_filename = file.filename or "unknown_file"
+        file_bytes_content = await file.read()
+        await file.seek(0) # Reset file pointer for potential re-read by blob upload
+        
+        file_type_enum_member: Optional[FileType] = None
+        file_extension = os.path.splitext(original_filename)[1].lower()
+        if file_extension == ".pdf": file_type_enum_member = FileType.PDF
+        elif file_extension == ".docx": file_type_enum_member = FileType.DOCX
+        elif file_extension == ".txt": file_type_enum_member = FileType.TXT
+        elif file_extension == ".png": file_type_enum_member = FileType.PNG
+        elif file_extension in [".jpg", ".jpeg"]: file_type_enum_member = FileType.JPG
+        
+        word_count_for_file = 0
+        char_count_for_file = 0
+        extracted_text_for_file_to_store = "" # Default to empty string
+
+        if not file_type_enum_member:
+            logger.warning(f"Unsupported file type '{original_filename}' in batch for user {user_kinde_id}. Skipping for counts.")
+        else:
+            try:
+                extracted_text_for_file = await asyncio.to_thread(extract_text_from_bytes, file_bytes_content, file_type_enum_member)
+                if extracted_text_for_file is None: extracted_text_for_file = ""
+                extracted_text_for_file_to_store = extracted_text_for_file # Store for later
+                
+                raw_tokens_for_file = re.split(r'\s+', extracted_text_for_file.strip())
+                cleaned_tokens_for_file = [token.strip(string.punctuation) for token in raw_tokens_for_file]
+                words_for_file = [token for token in cleaned_tokens_for_file if token]
+                word_count_for_file = len(words_for_file)
+                char_count_for_file = len(extracted_text_for_file)
+            except Exception as extraction_err:
+                logger.error(f"Error extracting text from {original_filename} in batch for counts: {extraction_err}")
+        
+        batch_total_words += word_count_for_file
+        batch_total_chars += char_count_for_file
+        temp_extracted_texts.append({
+            "original_filename": original_filename, 
+            "text": extracted_text_for_file_to_store, 
+            "file_type": file_type_enum_member,
+            "word_count": word_count_for_file, 
+            "char_count": char_count_for_file
+        })
+
+    logger.info(f"Total words for incoming batch for user {user_kinde_id}: {batch_total_words}")
+    logger.info(f"Total chars for incoming batch for user {user_kinde_id}: {batch_total_chars}")
+
+    if current_plan != SubscriptionPlan.SCHOOLS:
+        usage_stats = await crud.get_usage_stats_for_period(
+            teacher_id=user_kinde_id,
+            period='monthly',
+            target_date=datetime.now(timezone.utc).date()
         )
+        current_monthly_words = usage_stats.get("total_words", 0) if usage_stats else 0
+        current_monthly_chars = usage_stats.get("total_characters", 0) if usage_stats else 0
+        
+        limit_exceeded = False
+        exceeded_by = ""
+        error_detail_for_user = ""
 
-    created_docs_list = [] # Renamed to avoid clash
-    failed_files_list = [] # Renamed
+        if current_plan == SubscriptionPlan.FREE:
+            plan_word_limit_free = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
+            plan_char_limit_free = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+            logger.info(f"Batch Upload FREE Plan: Current words: {current_monthly_words}, Batch words: {batch_total_words}, Word Limit: {plan_word_limit_free}")
+            logger.info(f"Batch Upload FREE Plan: Current chars: {current_monthly_chars}, Batch chars: {batch_total_chars}, Char Limit: {plan_char_limit_free}")
 
-    # Map BatchPriority to integer processing_priority for Document
-    priority_value_map = {
-        BatchPriority.LOW: 0,
-        BatchPriority.NORMAL: 1,
-        BatchPriority.HIGH: 2,
-        BatchPriority.URGENT: 3,
-    }
-    doc_processing_priority = priority_value_map.get(priority, 1) # Default to 1 (NORMAL)
-
-    for file_item in files: # Renamed to avoid clash
-        original_filename = file_item.filename or "unknown_file"
-        try:
-            content_type = file_item.content_type
-            file_extension = os.path.splitext(original_filename)[1].lower()
-            file_type_enum: Optional[FileType] = None
+            if (current_monthly_words + batch_total_words) > plan_word_limit_free:
+                limit_exceeded = True
+                exceeded_by = "word"
+                error_detail_for_user = f"Batch upload would exceed your monthly word limit. Current usage: {current_monthly_words}/{plan_word_limit_free} words. Batch words: {batch_total_words}."
+                logger.warning(f"Batch upload for user {user_kinde_id} (batch words: {batch_total_words}) would exceed FREE plan word limit of {plan_word_limit_free} (current: {current_monthly_words}).")
             
-            if file_extension == ".pdf" and content_type == "application/pdf": file_type_enum = FileType.PDF
-            elif file_extension == ".docx" and content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document": file_type_enum = FileType.DOCX
-            elif file_extension == ".txt" and content_type == "text/plain": file_type_enum = FileType.TXT
-            elif file_extension == ".png" and content_type == "image/png": file_type_enum = FileType.PNG
-            elif file_extension in [".jpg", ".jpeg"] and content_type == "image/jpeg": file_type_enum = FileType.JPG
+            if not limit_exceeded and (current_monthly_chars + batch_total_chars) > plan_char_limit_free:
+                limit_exceeded = True
+                exceeded_by = "character"
+                error_detail_for_user = f"Batch upload would exceed your monthly character limit. Current usage: {current_monthly_chars}/{plan_char_limit_free} characters. Batch characters: {batch_total_chars}."
+                logger.warning(f"Batch upload for user {user_kinde_id} (batch chars: {batch_total_chars}) would exceed FREE plan char limit of {plan_char_limit_free} (current: {current_monthly_chars}).")
 
-            if file_type_enum is None:
-                failed_files_list.append({
-                    "filename": original_filename,
-                    "error": f"Unsupported file type: {content_type}"
-                })
-                continue
+        elif current_plan == SubscriptionPlan.PRO:
+            plan_word_limit_pro = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
+            plan_char_limit_pro = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
+            logger.info(f"Batch Upload PRO Plan: Current words: {current_monthly_words}, Batch words: {batch_total_words}, Word Limit: {plan_word_limit_pro}")
+            logger.info(f"Batch Upload PRO Plan: Current chars: {current_monthly_chars}, Batch chars: {batch_total_chars}, Char Limit: {plan_char_limit_pro}")
 
-            blob_name = await upload_file_to_blob(upload_file=file_item)
-            if not blob_name:
-                failed_files_list.append({
-                    "filename": original_filename,
-                    "error": "Failed to upload to storage"
-                })
-                continue
+            if (current_monthly_words + batch_total_words) > plan_word_limit_pro:
+                limit_exceeded = True
+                exceeded_by = "word"
+                error_detail_for_user = f"Batch upload would exceed your monthly word limit. Current usage: {current_monthly_words}/{plan_word_limit_pro} words. Batch words: {batch_total_words}."
+                logger.warning(f"Batch upload for user {user_kinde_id} (batch words: {batch_total_words}) would exceed PRO plan word limit of {plan_word_limit_pro} (current: {current_monthly_words}).")
+            
+            if not limit_exceeded and (current_monthly_chars + batch_total_chars) > plan_char_limit_pro:
+                limit_exceeded = True
+                exceeded_by = "character"
+                error_detail_for_user = f"Batch upload would exceed your monthly character limit. Current usage: {current_monthly_chars}/{plan_char_limit_pro} characters. Batch characters: {batch_total_chars}."
+                logger.warning(f"Batch upload for user {user_kinde_id} (batch chars: {batch_total_chars}) would exceed PRO plan char limit of {plan_char_limit_pro} (current: {current_monthly_chars}).")
+        else: # Fallback for unknown non-SCHOOLS plan - use FREE plan character limit as the primary fallback
+            plan_char_limit_fallback = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+            logger.warning(f"Unknown plan {current_plan} for user {user_kinde_id} during batch upload. Applying free plan character limit ({plan_char_limit_fallback}) as a fallback.")
+            logger.info(f"Batch Upload FALLBACK Plan: Current monthly chars: {current_monthly_chars}, Batch chars: {batch_total_chars}, Limit: {plan_char_limit_fallback}")
+            if (current_monthly_chars + batch_total_chars) > plan_char_limit_fallback:
+                limit_exceeded = True
+                exceeded_by = "character (fallback)"
+                error_detail_for_user = f"Batch upload would exceed your monthly character limit (fallback). Current usage: {current_monthly_chars}/{plan_char_limit_fallback} characters. Batch characters: {batch_total_chars}."
+                logger.warning(f"Batch upload for user {user_kinde_id} (batch chars: {batch_total_chars}) would exceed FALLBACK char limit of {plan_char_limit_fallback} (current: {current_monthly_chars}).")
 
-            now = datetime.now(timezone.utc)
+        if limit_exceeded:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=error_detail_for_user
+            )
+    else:
+        logger.info(f"User {user_kinde_id} on SCHOOLS plan. Bypassing batch usage limit pre-check.")
+    # --- End Pre-emptive Usage Limit Check ---
+
+    # If checks pass, proceed to create batch and document records
+    # ... (rest of the batch creation logic)
+
+    # Create Batch DB record
+    now = datetime.now(timezone.utc)
+    batch_data = BatchCreate(
+        teacher_id=user_kinde_id,
+        student_id=student_id,
+        assignment_id=assignment_id,
+        priority=priority,
+        status=BatchStatus.PROCESSING, # Initial status
+        upload_timestamp=now
+    )
+    created_batch = await crud.create_batch(batch_in=batch_data)
+    if not created_batch:
+        logger.error(f"Failed to create batch record for user {user_kinde_id}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create batch record.")
+
+    logger.info(f"Batch record {created_batch.id} created for user {user_kinde_id}.")
+    
+    created_documents_list: List[Document] = []
+    tasks_to_enqueue: List[AssessmentTask] = []
+
+    # Process each pre-validated file detail
+    for file_data in temp_extracted_texts:
+        try:
+            # 2a. Upload file to Blob Storage (using stored bytes)
+            # We need to wrap bytes in an UploadFile-like object or adapt upload_file_to_blob
+            # For now, assuming upload_file_to_blob can handle bytes directly or adapt it.
+            # A simpler way: pass original UploadFile object if stored, or reconstruct if necessary.
+            # Let's find the original UploadFile object that matches this detail to pass to upload_file_to_blob
+            
+            # Find the original UploadFile object
+            original_upload_file: Optional[UploadFile] = None
+            for up_file in files:
+                if up_file.filename == file_data["original_filename"]:
+                    original_upload_file = up_file
+                    break
+            
+            if not original_upload_file:
+                logger.error(f"Could not find original UploadFile for {file_data['original_filename']} after text extraction. Skipping.")
+                continue # Should not happen if logic is correct
+
+            # Ensure the file pointer is at the beginning for upload_file_to_blob
+            await original_upload_file.seek(0)
+
+            blob_name = await upload_file_to_blob(upload_file=original_upload_file)
+            if blob_name is None:
+                logger.error(f"Failed to upload {file_data['original_filename']} to blob storage for batch {created_batch.id}.")
+                # Mark this document as error or skip? For now, skip.
+                # Potentially update batch status to PARTIAL_FAILURE or similar.
+                continue 
+
+            # 2b. Create Document metadata record in DB
             document_data = DocumentCreate(
-                original_filename=original_filename,
+                original_filename=file_data["original_filename"],
                 storage_blob_path=blob_name,
-                file_type=file_type_enum,
+                file_type=file_data["file_type"],
                 upload_timestamp=now,
                 student_id=student_id,
                 assignment_id=assignment_id,
                 status=DocumentStatus.UPLOADED,
-                batch_id=batch.id,
-                queue_position=len(created_docs_list) + 1,
-                processing_priority=doc_processing_priority,
-                teacher_id=user_kinde_id
+                teacher_id=user_kinde_id,
+                batch_id=created_batch.id,
+                character_count=file_data["char_count"],
+                word_count=file_data["word_count"]
             )
-            
-            document_obj = await crud.create_document(document_in=document_data)
-            if not document_obj:
-                failed_files_list.append({
-                    "filename": original_filename,
-                    "error": "Failed to create document record"
-                })
+            created_document = await crud.create_document(document_in=document_data)
+            if not created_document:
+                logger.error(f"Failed to create document metadata in DB for {blob_name} (batch {created_batch.id}).")
+                # TODO: Consider deleting the uploaded blob if DB record creation fails
                 continue
 
+            created_documents_list.append(created_document)
+            logger.info(f"Document {created_document.id} ({created_document.original_filename}) created for batch {created_batch.id}.")
+
+            # 2c. Create initial Result record
             result_data = ResultCreate(
-                score=None, status=ResultStatus.PENDING, result_timestamp=now,
-                document_id=document_obj.id, teacher_id=user_kinde_id
+                document_id=created_document.id,
+                teacher_id=user_kinde_id,
+                status=ResultStatus.PENDING
             )
-            batch_created_result = await crud.create_result(result_in=result_data) # Renamed
-            if batch_created_result:
-                logger.info(f"Successfully created initial Result record {batch_created_result.id} for Document {document_obj.id}")
+            created_result = await crud.create_result(result_in=result_data)
+            if not created_result:
+                logger.error(f"Failed to create initial result for document {created_document.id} in batch {created_batch.id}. Document status set to ERROR.")
+                await crud.update_document_status(document_id=created_document.id, teacher_id=user_kinde_id, status=DocumentStatus.ERROR)
+                continue
+
+            # 2d. Prepare AssessmentTask for enqueuing
+            tasks_to_enqueue.append(
+                AssessmentTask(
+                    document_id=created_document.id,
+                    user_id=user_kinde_id, # teacher_id
+                    priority_level=created_document.processing_priority or BatchPriority.NORMAL.value # Use doc's priority
+                )
+            )
+        except Exception as e_doc_processing:
+            logger.error(f"Error processing file {file_data['original_filename']} within batch {created_batch.id} after limit check: {e_doc_processing}", exc_info=True)
+            # This document failed, continue to next in batch.
+            # Consider adding to a list of failed documents to report to user.
+
+    # 3. Enqueue all tasks and update document statuses
+    successful_queues = 0
+    if not tasks_to_enqueue: # if all files failed processing or were skipped
+        logger.warning(f"No valid documents processed or tasks to enqueue for batch {created_batch.id} from user {user_kinde_id}.")
+        # Update batch status if no documents were successfully processed
+        if not created_documents_list:
+            await crud.update_batch(batch_id=created_batch.id, batch_in=BatchUpdate(status=BatchStatus.FAILED, error_message="No valid files in batch or all files failed processing."))
+            # Return the BatchWithDocuments with empty documents list.
+            return BatchWithDocuments(
+                id=created_batch.id,
+                teacher_id=created_batch.teacher_id,
+                student_id=created_batch.student_id,
+                assignment_id=created_batch.assignment_id,
+                priority=created_batch.priority,
+                status=BatchStatus.FAILED,
+                upload_timestamp=created_batch.upload_timestamp,
+                updated_at=datetime.now(timezone.utc), # ensure updated_at is fresh
+                documents=[]
+            )
+
+
+    for task in tasks_to_enqueue:
+        enqueue_success = await enqueue_assessment_task(
+            document_id=task.document_id,
+            user_id=task.user_id,
+            priority_level=task.priority_level
+        )
+        if enqueue_success:
+            updated_doc = await crud.update_document_status(
+                document_id=task.document_id,
+                teacher_id=user_kinde_id,
+                status=DocumentStatus.QUEUED
+            )
+            if updated_doc:
+                successful_queues +=1
+                # Update the document in created_documents_list if needed, or refetch batch.
+                for i, doc in enumerate(created_documents_list):
+                    if doc.id == updated_doc.id:
+                        created_documents_list[i] = updated_doc
+                        break
             else:
-                logger.error(f"!!! Failed to create initial Result record for Document {document_obj.id}. crud.create_result returned None.")
+                logger.error(f"Failed to update document {task.document_id} status to QUEUED after successful enqueue (batch {created_batch.id}).")
+        else:
+            logger.error(f"Failed to enqueue task for document {task.document_id} (batch {created_batch.id}). Setting doc status to ERROR.")
+            await crud.update_document_status(document_id=task.document_id, teacher_id=user_kinde_id, status=DocumentStatus.ERROR)
+            # Update the document in created_documents_list to reflect ERROR status
+            for i, doc in enumerate(created_documents_list):
+                if doc.id == task.document_id:
+                    # Refetch or manually update status, for now, just log
+                    # Potentially, a full refetch of the document might be better
+                    error_doc = await crud.get_document_by_id(document_id=task.document_id, teacher_id=user_kinde_id)
+                    if error_doc: created_documents_list[i] = error_doc
+                    break
+    
+    # 4. Update Batch status based on outcomes
+    final_batch_status = BatchStatus.COMPLETED_WITH_FAILURES
+    if successful_queues == len(tasks_to_enqueue) and len(tasks_to_enqueue) > 0:
+        final_batch_status = BatchStatus.COMPLETED_SUCCESSFULLY
+    elif successful_queues == 0 and len(tasks_to_enqueue) > 0 : # All tasks failed to enqueue
+        final_batch_status = BatchStatus.FAILED
+    elif not tasks_to_enqueue and not created_documents_list: # No files processed at all
+         final_batch_status = BatchStatus.FAILED # Already handled above, but as a safeguard
+    # else: remains COMPLETED_WITH_FAILURES if some succeeded, some failed, or some files skipped pre-task stage
 
-            enqueue_success_item = await enqueue_assessment_task( # Renamed
-                document_id=document_obj.id,
-                user_id=user_kinde_id,
-                priority_level=doc_processing_priority, # Use mapped priority
-            )
-            if enqueue_success_item:
-                updated_doc_item = await crud.update_document_status( # Renamed
-                    document_id=document_obj.id,
-                    teacher_id=user_kinde_id,
-                    status=DocumentStatus.QUEUED,
-                )
-                if updated_doc_item:
-                    document_obj = updated_doc_item # Refresh with new status
-            else: # Enqueue failed
-                logger.error(f"Failed to enqueue assessment task for document {document_obj.id}. Setting status to ERROR.")
-                error_doc_item = await crud.update_document_status( # Renamed
-                     document_id=document_obj.id, teacher_id=user_kinde_id, status=DocumentStatus.ERROR
-                )
-                if error_doc_item: document_obj = error_doc_item # Refresh with ERROR status
+    updated_batch_data = BatchUpdate(status=final_batch_status)
+    if final_batch_status == BatchStatus.FAILED and not created_documents_list:
+        updated_batch_data.error_message = "No valid files were processed from the batch."
 
-
-            created_docs_list.append(document_obj)
-
-        except Exception as e:
-            logger.error(f"Error processing file {original_filename} in batch: {str(e)}", exc_info=True)
-            failed_files_list.append({
-                "filename": original_filename,
-                "error": str(e)
-            })
-
-    batch_status_val = BatchStatus.QUEUED # Default if some docs are queued
-    if not created_docs_list and failed_files_list: # All failed if files were provided
-        batch_status_val = BatchStatus.ERROR
-    elif failed_files_list: # Some succeeded, some failed
-        batch_status_val = BatchStatus.PARTIAL_FAILURE if created_docs_list else BatchStatus.ERROR
-
-    batch_update = BatchUpdate(
-        completed_files=0, # To be updated by worker
-        failed_files=len(failed_files_list),
-        status=batch_status_val,
-        error_message=f"Failed to process {len(failed_files_list)} files during batch upload." if failed_files_list else None
-    )
-    updated_batch = await crud.update_batch(batch_id=batch.id, batch_in=batch_update)
-    if not updated_batch : updated_batch = batch # Fallback if update fails
-
-    if not created_docs_list and files: # If files were provided but none made it to a document object
-        # Consider if a 201 is still appropriate or if an error reflecting partial/total failure should be raised.
-        # For now, returning 201 as batch object was created. Client inspects BatchWithDocuments.
-        logger.warning(f"Batch {updated_batch.id}: No documents successfully processed from the {len(files)} provided files. Failures: {len(failed_files_list)}")
+    final_updated_batch = await crud.update_batch(batch_id=created_batch.id, batch_in=updated_batch_data)
+    if not final_updated_batch:
+        logger.error(f"Failed to update final status for batch {created_batch.id}. Current status might be inaccurate.")
+        # Fallback to the batch object before status update attempt for the return
+        final_updated_batch = created_batch 
+        final_updated_batch.status = updated_batch_data.status # Manually update status for response
+        final_updated_batch.updated_at = datetime.now(timezone.utc)
 
 
-    # Ensure all fields for BatchWithDocuments are correctly populated from updated_batch
+    logger.info(f"Batch {created_batch.id} processing finished. Tasks enqueued: {successful_queues}/{len(tasks_to_enqueue)}. Final Batch Status: {final_updated_batch.status if final_updated_batch else 'Unknown'}")
+
     return BatchWithDocuments(
-        id=updated_batch.id,
-        teacher_id=updated_batch.teacher_id, # Corrected from user_id
-        created_at=updated_batch.created_at,
-        updated_at=updated_batch.updated_at,
-        total_files=updated_batch.total_files,
-        completed_files=updated_batch.completed_files,
-        failed_files=updated_batch.failed_files,
-        status=updated_batch.status,
-        priority=updated_batch.priority,
-        error_message=updated_batch.error_message,
-        document_ids=[doc.id for doc in created_docs_list]
+        id=final_updated_batch.id if final_updated_batch else created_batch.id,
+        teacher_id=final_updated_batch.teacher_id if final_updated_batch else created_batch.teacher_id,
+        student_id=final_updated_batch.student_id if final_updated_batch else created_batch.student_id,
+        assignment_id=final_updated_batch.assignment_id if final_updated_batch else created_batch.assignment_id,
+        priority=final_updated_batch.priority if final_updated_batch else created_batch.priority,
+        status=final_updated_batch.status if final_updated_batch else BatchStatus.UNKNOWN, # provide a fallback
+        upload_timestamp=final_updated_batch.upload_timestamp if final_updated_batch else created_batch.upload_timestamp,
+        updated_at=final_updated_batch.updated_at if final_updated_batch else datetime.now(timezone.utc),
+        error_message=final_updated_batch.error_message if final_updated_batch and hasattr(final_updated_batch, 'error_message') else None,
+        documents=created_documents_list # Return list of docs that were attempted to be created
     )
 
 @router.get(
@@ -779,14 +947,14 @@ async def reset_assessment_status_endpoint( # Renamed
     result_obj = await crud.get_result_by_document_id(document_id=document_obj.id, teacher_id=auth_teacher_id, include_deleted=True) # Renamed, scoped
     result_reset_failed = False
     if result_obj:
-        logger.info(f"Resetting result {result_obj.id} status to ERROR.")
+        logger.info(f"Resetting result {result_obj.id} status to FAILED.") # Corrected to FAILED
         updated_result_obj = await crud.update_result( # Renamed
             result_id=result_obj.id,
             teacher_id=auth_teacher_id, # Pass teacher_id if supported for scoping
-            update_data={"status": ResultStatus.ERROR.value} # Use .value for enums in payload
+            update_data={"status": ResultStatus.FAILED.value} # Use .value for enums in payload, corrected to FAILED
         )
         if not updated_result_obj:
-            logger.error(f"Failed to update result status to ERROR during reset for {result_obj.id} (doc: {document_obj.id}).")
+            logger.error(f"Failed to update result status to FAILED during reset for {result_obj.id} (doc: {document_obj.id}).") # Corrected to FAILED
             result_reset_failed = True
     else:
         logger.warning(f"No result record found to reset for document {document_obj.id}. Document status reset attempt was made.")
@@ -844,22 +1012,22 @@ async def cancel_assessment_status_endpoint( # Renamed
         else:
             logger.error(f"Failed to update document {document.id} status to ERROR. Current status: {updated_doc.status if updated_doc else 'None'}.")
 
-        # Also attempt to set the associated result to ERROR
+        # Also attempt to set the associated result to FAILED
         current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
         if current_result:
             logger.info(f"Found result {current_result.id} with status '{current_result.status}' for document {document.id}. Checking if cancellable.")
             if current_result.status in cancellable_res_statuses:
-                logger.info(f"Result {current_result.id} status is '{current_result.status}'. Attempting to set to ERROR.")
+                logger.info(f"Result {current_result.id} status is '{current_result.status}'. Attempting to set to FAILED.") # Corrected to FAILED
                 updated_res = await crud.update_result(
                     result_id=current_result.id, 
-                    update_data={"status": ResultStatus.ERROR.value}, 
+                    update_data={"status": ResultStatus.FAILED.value}, # Corrected to FAILED
                     teacher_id=auth_teacher_id
                 )
-                if updated_res and updated_res.status == ResultStatus.ERROR.value:
+                if updated_res and updated_res.status == ResultStatus.FAILED.value: # Corrected to FAILED
                     result_updated = True
-                    logger.info(f"Successfully set result {current_result.id} status to ERROR.")
+                    logger.info(f"Successfully set result {current_result.id} status to FAILED.") # Corrected to FAILED
                 else:
-                    logger.error(f"Failed to update result {current_result.id} status to ERROR. Current status: {updated_res.status if updated_res else 'None'}.")
+                    logger.error(f"Failed to update result {current_result.id} status to FAILED. Current status: {updated_res.status if updated_res else 'None'}.") # Corrected to FAILED
             else:
                 logger.info(f"Result {current_result.id} status '{current_result.status}' is not in a cancellable state ({[s for s in cancellable_res_statuses]}). No action taken on result.")
         else:
@@ -874,7 +1042,7 @@ async def cancel_assessment_status_endpoint( # Renamed
     
     if document_updated or result_updated:
         logger.info(f"Cancellation process completed for document {document.id}. Document updated: {document_updated}, Result updated: {result_updated}.")
-        return {"message": f"Attempted cancellation for document {document.id}. Document status set to ERROR: {document_updated}. Result status set to ERROR: {result_updated}."}
+        return {"message": f"Attempted cancellation for document {document_id}. Document status set to ERROR: {document_updated}. Result status set to FAILED: {result_updated}."} # Corrected to FAILED
     else:
         # This case should ideally be caught by the HTTPException above if doc status wasn't cancellable,
         # or if DB updates failed (logged as errors).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -13,6 +14,8 @@ from ..db.database import get_database
 # Default configuration values
 DEFAULT_VISIBILITY_TIMEOUT = 60  # seconds
 MAX_ATTEMPTS = 5
+
+logger = logging.getLogger(__name__)
 
 class AssessmentTask(BaseModel):
     """Model representing a queued assessment task."""
@@ -47,7 +50,10 @@ async def _claim_next_task(db: AsyncIOMotorDatabase, visibility_timeout: int) ->
     filter_query = {
         "$or": [
             {"status": "PENDING"},
-            {"status": "IN_PROGRESS", "available_at": {"$lte": now}},
+            {
+                "status": "IN_PROGRESS",
+                "available_at": {"$lt": now},
+            },
         ]
     }
     update_doc = {
@@ -59,12 +65,15 @@ async def _claim_next_task(db: AsyncIOMotorDatabase, visibility_timeout: int) ->
         "$inc": {"attempts": 1},
     }
     sort = [("priority_level", -1), ("created_at", 1)]
-    return await db.assessment_tasks.find_one_and_update(
+    logger.debug(f"_claim_next_task: Executing find_one_and_update with filter: {filter_query}, sort: {sort}")
+    task_doc = await db.assessment_tasks.find_one_and_update(
         filter=filter_query,
         update=update_doc,
         sort=sort,
         return_document=ReturnDocument.AFTER,
     )
+    logger.debug(f"_claim_next_task: find_one_and_update returned: {task_doc}")
+    return task_doc
 
 async def dequeue_assessment_task(
     visibility_timeout: int = DEFAULT_VISIBILITY_TIMEOUT, 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from pydantic_settings import BaseSettings
 from pydantic import model_validator
+from pydantic import EmailStr
 
 # --- Path Setup & .env Loading ---
 # Assume .env is in the backend project root, two levels up from core
@@ -133,6 +134,20 @@ class Settings(BaseSettings):
         print(f"DEBUG [Config Validator]: Final DB_NAME to be used: {final_db_name if final_db_name else 'Pydantic Default will apply'}")
         print("DEBUG [Config Validator]: Exiting load_deprecated_db_env_vars.")
         return values
+
+    SENDGRID_API_KEY: str = "default_sendgrid_api_key"
+    SENDGRID_FROM_EMAIL: EmailStr = "noreply@example.com"
+
+    # Free Plan: Both Word and Character-based limits
+    FREE_PLAN_MONTHLY_WORD_LIMIT: int = 5000
+    FREE_PLAN_MONTHLY_CHAR_LIMIT: int = 25000
+
+    # Pro Plan: Both Word and Character-based limits
+    PRO_PLAN_MONTHLY_WORD_LIMIT: int = 100000
+    PRO_PLAN_MONTHLY_CHAR_LIMIT: int = 500000
+
+    # Sentry
+    SENTRY_DSN: str | None = None
 
 # Create an instance of the Settings class
 # print("CONFIG.PY: About to create Settings() instance.") # REMOVED DEBUG PRINT

@@ -1,0 +1,20 @@
+## Stripe Customer Portal Configuration
+
+- [ ] Configure Stripe Customer Portal "Return URL" for each environment (dev, stg, prod).
+  - The URL should point back to an appropriate page within the application after a user manages their subscription in the Stripe portal (e.g., /subscriptions or /profile page).
+  - Example for dev1 (replace with actual frontend URL for dev1 if different from the main one used for FRONTEND_URL env var in backend):
+    `https://<dev1-frontend-app-url>/subscriptions`
+  - Example for stg:
+    `https://<stg-frontend-app-url>/subscriptions`
+  - Example for prod:
+    `https://<prod-frontend-app-url>/subscriptions`
+  - This is configured in the Stripe Dashboard under Settings -> Customer portal -> Redirects (or similar path).
+
+## Frontend RBAC and Pro Features
+
+- [ ] Identify areas in the UI (beyond Profile/Subscriptions pages) where "Pro" features exist or behavior should change based on subscription status.
+  - Implement logic to visually distinguish or enable/disable Pro features.
+  - Potentially show upgrade prompts if a non-Pro user tries to access a Pro feature.
+
+## Other Todos (Placeholder for future tasks)
+- [ ] ... 

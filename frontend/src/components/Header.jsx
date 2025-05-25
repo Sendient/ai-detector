@@ -4,11 +4,13 @@ import { Link } from 'react-router-dom';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
 import LocaleSelector from './LocaleSelector.jsx';
-import { User, LogOut, CreditCard } from 'lucide-react';
+import { User, LogOut, CreditCard, ShieldCheck } from 'lucide-react';
+import { useTeacherProfile } from '../hooks/useTeacherProfile';
 
 function Header() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useKindeAuth();
+    const { profile, isLoading: isLoadingProfile } = useTeacherProfile();
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
     const getInitials = () => {
@@ -25,11 +27,29 @@ function Header() {
         ? `${user.givenName} ${user.familyName}`
         : t('header_default_user_name');
 
-    return (
-        <header className="h-16 bg-base-100 border-b border-base-300 flex items-center justify-end px-6 shrink-0 z-10 relative">
-            <div className="mr-4"> <LocaleSelector /> </div>
+    const getPlanDisplayName = () => {
+        if (isLoadingProfile || !isAuthenticated) return null;
+        if (profile && profile.current_plan && profile.current_plan.toLowerCase() !== 'free') {
+            return `${profile.current_plan} Plan`;
+        }
+        return t('header_free_plan', 'Free Plan');
+    };
 
-            <div className="flex items-center space-x-3 relative">
+    const planDisplayName = getPlanDisplayName();
+
+    return (
+        <header className="h-16 bg-base-100 border-b border-base-300 flex items-center justify-between px-6 shrink-0 z-10 relative">
+            <div></div>
+
+            <div className="flex items-center space-x-3">
+                {isAuthenticated && planDisplayName && (
+                     <Link to="/subscriptions" className="btn btn-ghost btn-sm hidden sm:inline-flex items-center">
+                        <ShieldCheck className="h-4 w-4 mr-1.5" /> 
+                        {planDisplayName}
+                    </Link>
+                )}
+                <div className="mr-0"> <LocaleSelector /> </div>
+
                 {isAuthLoading ? (
                     <span className="text-sm text-gray-500">{t('header_loading')}</span>
                 ) : isAuthenticated ? (

@@ -9,11 +9,13 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends, Request
 from pydantic import ValidationError
 
 # Import Pydantic models for Teacher
-from ....models.teacher import Teacher, TeacherCreate, TeacherUpdate
+from ....models.teacher import Teacher, TeacherCreate, TeacherUpdate, TeacherProfile
 # Import CRUD functions for Teacher
 from ....db import crud
 # Import the authentication dependency
 from ....core.security import get_current_user_payload
+from ....core.config import settings
+from ....models.enums import SubscriptionPlan
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -29,7 +31,7 @@ router = APIRouter(
 # --- GET /me endpoint (Fetch Only) ---
 @router.get(
     "/me",
-    response_model=Teacher,
+    response_model=TeacherProfile,
     status_code=status.HTTP_200_OK,
     summary="Get current user's teacher profile (Protected)",
     description=(
@@ -60,7 +62,28 @@ async def read_current_user_profile(
 
     if teacher:
         logger.info(f"Found existing teacher profile for Kinde ID: {user_kinde_id_str}, Internal ID: {teacher.id}")
-        return teacher
+        
+        # MODIFIED: Populate plan limits
+        word_limit = None
+        char_limit = None
+        
+        if teacher.current_plan == SubscriptionPlan.FREE:
+            word_limit = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
+            char_limit = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+        elif teacher.current_plan == SubscriptionPlan.PRO:
+            word_limit = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
+            char_limit = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
+        elif teacher.current_plan == SubscriptionPlan.SCHOOLS:
+            word_limit = None # Or some indicator of "unlimited"
+            char_limit = None # Or some indicator of "unlimited"
+            
+        # Create the TeacherProfile response
+        teacher_profile_response = TeacherProfile(
+            **teacher.model_dump(),
+            current_plan_word_limit=word_limit,
+            current_plan_char_limit=char_limit
+        )
+        return teacher_profile_response
     else:
         # 2. Profile not found, return 404
         logger.warning(f"Teacher profile not found for Kinde ID: {user_kinde_id_str}. Returning 404.")

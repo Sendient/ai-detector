@@ -155,3 +155,28 @@ Here’s how these elements work together to enable RBAC:
     *   This ensures that the `Teacher` model in the application database always has an up-to-date reflection of the user's subscription status, which is then used for RBAC.
 
 ### 5. Conceptual Data Flow and Relationship Diagram
+
+
+
+
+Database structure
+
+-teachers: Manages all teacher user accounts, authentication (Kinde ID), and Stripe subscription plans (Free, Pro).
+
+-documents: Tracks every uploaded file's metadata, including its processing status (Uploaded, Queued, Limit Exceeded, etc.) and character/word counts.
+
+-results: Stores the AI-generated assessment scores and details for each processed document.
+
+-assessment_tasks: A queue holding documents that are waiting to be processed by the AI assessment worker.
+
+-assessment_deadletter: Archives tasks that failed repeatedly during AI assessment.
+
+-batches: Organizes documents that were uploaded together in a single batch by a teacher.
+
+-classgroups: Defines classrooms or groups created by teachers, linking teachers to their students.
+
+-schools: Stores information about different educational institutions.
+
+-students: Manages student profiles, linking them to their respective teachers.
+
+-users: Appears to be an unused or deprecated collection, as its corresponding model file (user.py) is entirely commented out. Teacher-related user management is handled by the teachers collection.

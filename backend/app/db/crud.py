@@ -992,6 +992,35 @@ async def update_document_status(
     except Exception as e: logger.error(f"Error updating document status/counts for ID {document_id}: {e}", exc_info=True); return None
 
 @with_transaction
+async def update_document_counts(
+    document_id: uuid.UUID,
+    teacher_id: str,
+    character_count: int,
+    word_count: int,
+    session=None
+) -> Optional[Document]:
+    collection = _get_collection(DOCUMENT_COLLECTION)
+    if collection is None: return None
+    now = datetime.now(timezone.utc)
+    update_data = {
+        "character_count": character_count,
+        "word_count": word_count,
+        "updated_at": now
+    }
+    logger.info(f"Updating document {document_id} for teacher {teacher_id} with char_count={character_count}, word_count={word_count}")
+    query_filter = {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}}
+    try:
+        updated_doc = await collection.find_one_and_update(
+            query_filter,
+            {"$set": update_data},
+            return_document=ReturnDocument.AFTER,
+            session=session
+        )
+        if updated_doc: return Document(**updated_doc)
+        else: logger.warning(f"Document {document_id} not found or already deleted for count update."); return None
+    except Exception as e: logger.error(f"Error updating document counts for ID {document_id}: {e}", exc_info=True); return None
+
+@with_transaction
 async def delete_document(document_id: uuid.UUID, teacher_id: str, session=None) -> bool: # ADDED teacher_id
     """
     Performs deletion of a document and its associated data (blob, result).
