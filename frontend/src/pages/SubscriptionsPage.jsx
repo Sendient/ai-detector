@@ -140,11 +140,22 @@ function SubscriptionsPage() {
             }
 
             const session = await response.json();
-            const sessionId = session?.session_id; // Or session.id depending on backend response
+            const sessionId = session?.sessionId;
 
             if (sessionId) {
-                console.log("Stripe Checkout Session ID:", sessionId); // Log for now, redirect in next step
-                // TODO: Redirect to Stripe using stripe.redirectToCheckout({ sessionId: sessionId });
+                console.log("Stripe Checkout Session ID:", sessionId);
+                const stripe = await stripePromise; // Get the Stripe instance
+                if (stripe) {
+                    const { error } = await stripe.redirectToCheckout({ sessionId: sessionId });
+                    if (error) {
+                        // If `redirectToCheckout` fails due to a browser policy
+                        // or network error, display the localized error message to your customer.
+                        console.error("Stripe redirectToCheckout error:", error);
+                        setApiError(error.message || t('messages_error_stripe_redirect', 'Failed to redirect to Stripe. Please try again.'));
+                    }
+                } else {
+                    throw new Error(t('messages_error_stripe_not_loaded', 'Stripe.js has not loaded yet.'));
+                }
             } else {
                 throw new Error(t('messages_error_checkout_session_id_missing', 'Checkout session ID not found in response.'));
             }

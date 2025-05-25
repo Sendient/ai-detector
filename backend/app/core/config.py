@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     STRIPE_PRO_PLAN_PRICE_ID: Optional[str] = None # e.g., price_YOURPRICEID (the ID of your £8/month Pro plan)
     # --- End Stripe Settings ---
 
+    # --- Frontend URL for redirects ---
+    FRONTEND_URL: Optional[str] = "http://localhost:5173" # Default for local dev, overridden by .env
+    # --- End Frontend URL ---
+
     # Optional: Allowed origins for CORS (can be a list or a comma-separated string)
     ALLOWED_ORIGINS: str = ""
 
@@ -103,6 +107,11 @@ if not settings.STRIPE_PRO_PLAN_PRICE_ID:
     logger.critical("CRITICAL: STRIPE_PRO_PLAN_PRICE_ID environment variable is not set. Subscribing to Pro plan will fail.")
 # --- End Stripe settings validation ---
 
+# --- Validate Frontend URL ---
+if not settings.FRONTEND_URL:
+    logger.critical("CRITICAL: FRONTEND_URL environment variable is not set. Stripe redirects will likely fail.")
+# --- End Frontend URL validation ---
+
 # --- Log loaded settings (optional, careful with secrets in real logs) ---
 if settings.DEBUG:
     logger.debug(f"PROJECT_NAME: {settings.PROJECT_NAME}")
@@ -113,6 +122,7 @@ if settings.DEBUG:
     logger.debug(f"STRIPE_PUBLISHABLE_KEY Set: {'Yes' if settings.STRIPE_PUBLISHABLE_KEY else 'No - WARNING'}")
     logger.debug(f"STRIPE_WEBHOOK_SECRET Set: {'Yes' if settings.STRIPE_WEBHOOK_SECRET else 'No - CRITICAL'}")
     logger.debug(f"STRIPE_PRO_PLAN_PRICE_ID Set: {'Yes' if settings.STRIPE_PRO_PLAN_PRICE_ID else 'No - CRITICAL'}")
+    logger.debug(f"FRONTEND_URL Set: {'Yes' if settings.FRONTEND_URL else 'No - CRITICAL'}")
 
 
 # --- Aliases for backward compatibility or direct import (optional, but good for transition) ---
@@ -133,4 +143,7 @@ STRIPE_SECRET_KEY = settings.STRIPE_SECRET_KEY
 STRIPE_PUBLISHABLE_KEY = settings.STRIPE_PUBLISHABLE_KEY
 STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET
 STRIPE_PRO_PLAN_PRICE_ID = settings.STRIPE_PRO_PLAN_PRICE_ID
+
+# Frontend URL alias
+FRONTEND_URL = settings.FRONTEND_URL
 

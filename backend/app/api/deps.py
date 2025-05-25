@@ -1,7 +1,7 @@
 from typing import Optional, Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from ..core.config import settings
 from ..services.auth_service import AuthService
 from ..models.teacher import TeacherInDBBase
@@ -10,15 +10,19 @@ from ..db.database import get_database
 
 security = HTTPBearer()
 
-async def get_db() -> AsyncIOMotorClient:
-    """Get database connection."""
-    client = AsyncIOMotorClient(settings.MONGODB_URL)
-    try:
-        yield client
-    finally:
-        client.close()
+async def get_db_session() -> AsyncIOMotorDatabase:
+    """Get database session from the global database setup."""
+    db = get_database()
+    if db is None:
+        # This should ideally not happen if connect_to_mongo is called at startup
+        # and handles errors robustly. Consider more specific error handling or logging.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service is not available."
+        )
+    yield db # FastAPI handles this as a dependency; no try/finally/close needed here for yielded global instance
 
-async def get_auth_service(db: Annotated[AsyncIOMotorClient, Depends(get_db)]) -> AuthService:
+async def get_auth_service(db: Annotated[AsyncIOMotorDatabase, Depends(get_db_session)]) -> AuthService:
     """Get auth service instance."""
     return AuthService(db)
 

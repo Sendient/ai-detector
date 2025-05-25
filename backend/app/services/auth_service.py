@@ -1,15 +1,15 @@
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 import uuid
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from ..core.config import settings
 from ..models.teacher import TeacherInDBBase, TeacherCreate
 from ..core.security import validate_token
 
 class AuthService:
-    def __init__(self, db: AsyncIOMotorClient):
+    def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
-        self.teachers_collection = db[settings.DB_NAME]["teachers"]
+        self.teachers_collection = db["teachers"]
 
     async def get_teacher_by_kinde_id(self, kinde_id: str) -> Optional[TeacherInDBBase]:
         """Get teacher by their Kinde ID."""
