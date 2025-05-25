@@ -106,19 +106,23 @@ class Settings(BaseSettings):
             print("DEBUG [Config Validator]: MONGODB_URL found in initial values. No fallback needed from MONGO_DETAILS.")
 
         # Fallback for DB_NAME
-        # Pydantic applies the default 'aidetector_dev1' for DB_NAME if it's not in .env or system env *after* this validator.
-        # So, if 'DB_NAME' is not in 'values', it means it wasn't explicitly set via .env or system env.
-        if 'DB_NAME' not in values:
-            print("DEBUG [Config Validator]: DB_NAME not in initial values. Attempting fallback from MONGO_INITDB_DATABASE.")
-            db_name_from_deprecated = os.getenv('MONGO_INITDB_DATABASE')
-            if db_name_from_deprecated:
-                values['DB_NAME'] = db_name_from_deprecated
-                print(f"INFO [Config Validator]: Using MONGO_INITDB_DATABASE for DB_NAME: {db_name_from_deprecated}")
+        # Pydantic applies the default for DB_NAME if it's not in .env or system env *after* this validator.
+        if 'DB_NAME' not in values: # If DB_NAME wasn't explicitly set (e.g., by an env var DB_NAME=value)
+            print("DEBUG [Config Validator]: DB_NAME not in initial values. Attempting fallbacks.")
+            mongo_database_name_env = os.getenv('MONGO_DATABASE_NAME') # Check Azure-provided var first
+            mongo_initdb_database_env = os.getenv('MONGO_INITDB_DATABASE') # Check original fallback second
+
+            if mongo_database_name_env:
+                values['DB_NAME'] = mongo_database_name_env
+                print(f"INFO [Config Validator]: Using MONGO_DATABASE_NAME ('{mongo_database_name_env}') for DB_NAME field.")
+            elif mongo_initdb_database_env:
+                values['DB_NAME'] = mongo_initdb_database_env
+                print(f"INFO [Config Validator]: Using MONGO_INITDB_DATABASE ('{mongo_initdb_database_env}') for DB_NAME field.")
             else:
-                print("DEBUG [Config Validator]: MONGO_INITDB_DATABASE not found in os.getenv(). DB_NAME will rely on Pydantic default or remain unset by fallback.")
+                print("DEBUG [Config Validator]: Neither MONGO_DATABASE_NAME nor MONGO_INITDB_DATABASE found in os.getenv(). DB_NAME field will rely on Pydantic default or remain unset by fallback.")
         else:
-            # If DB_NAME was in values, it means it was explicitly set.
-            print(f"DEBUG [Config Validator]: DB_NAME ('{initial_db_name}') found in initial values. No fallback needed from MONGO_INITDB_DATABASE.")
+            # If DB_NAME was in values, it means it was explicitly set by an env var named DB_NAME.
+            print(f"DEBUG [Config Validator]: DB_NAME ('{initial_db_name}') found in initial values (e.g., from .env or system env DB_NAME). No fallback needed.")
         
         final_mongodb_url = values.get('MONGODB_URL')
         final_db_name = values.get('DB_NAME') # This could be the default if not set by .env or fallback
