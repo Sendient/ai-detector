@@ -26,6 +26,7 @@ class DocumentBase(BaseModel):
     # Fields to be populated after processing by the ML model or text extraction
     character_count: Optional[int] = Field(None, description="Number of characters in the document")
     word_count: Optional[int] = Field(None, description="Number of words in the document")
+    score: Optional[float] = Field(None, description="AI-generated score for the document")
     # summary: Optional[str] = Field(None, description="AI-generated summary of the document") # Example
     # keywords: Optional[List[str]] = Field(default_factory=list, description="AI-extracted keywords") # Example
 

@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import MainCardBackground2Image from '../img/maincard2.png'; // Import the new background image maincard2.png
 
 // --- Import Icons ---
 import {
@@ -95,6 +96,15 @@ const ScoreDistributionChart = React.memo(function ScoreDistributionChart({ data
   );
 });
 
+// Moved outside the component
+const processDistributionData = (data) => {
+  if (!Array.isArray(data)) return DEFAULT_RANGES;
+  return data.map(item => ({
+    range: item.range,
+    count: item.count || 0
+  }));
+};
+
 // --- Dashboard Page Component ---
 function DashboardPage() {
   const { t } = useTranslation();
@@ -104,7 +114,14 @@ function DashboardPage() {
   // --- State for Dashboard Data ---
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [keyStats, setKeyStats] = useState(null);
+  const [keyStats, setKeyStats] = useState({
+    current_documents: 0,
+    deleted_documents: 0,
+    total_processed_documents: 0,
+    avgScore: null,
+    flaggedRecent: 0,
+    pending: 0
+  });
   const [chartData, setChartData] = useState(DEFAULT_RANGES);
   const [recentAssessments, setRecentAssessments] = useState([]);
   const [debugInfo, setDebugInfo] = useState({});
@@ -115,20 +132,10 @@ function DashboardPage() {
   // --- Effect to update user name from Kinde auth ---
   useEffect(() => {
     if (user?.givenName) {
-      // Capitalize the first letter
       const capitalizedName = user.givenName.charAt(0).toUpperCase() + user.givenName.slice(1);
       setUserName(capitalizedName);
     }
   }, [user]);
-
-  // Process distribution data for chart
-  const processDistributionData = (data) => {
-    if (!Array.isArray(data)) return DEFAULT_RANGES;
-    return data.map(item => ({
-      range: item.range,
-      count: item.count || 0
-    }));
-  };
 
   // Fetch dashboard data
   const fetchDashboardData = useCallback(async () => {
@@ -137,6 +144,14 @@ function DashboardPage() {
     console.log('[Dashboard] fetchDashboardData: Function started.');
     setIsLoading(true);
     setError(null);
+    setKeyStats({
+        current_documents: 0,
+        deleted_documents: 0,
+        total_processed_documents: 0,
+        avgScore: null,
+        flaggedRecent: 0,
+        pending: 0
+    });
 
     try {
       const token = await getToken();
@@ -146,8 +161,7 @@ function DashboardPage() {
       }
       console.log('[Dashboard] fetchDashboardData: Token obtained successfully.');
 
-      // Fetch all data in parallel
-      console.log('[Dashboard] fetchDashboardData: Initiating fetch for /api/v1/dashboard/recent.');
+      console.log('[Dashboard] fetchDashboardData: Initiating fetch for dashboard data.');
       const [statsResponse, distributionResponse, recentDocsResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -160,13 +174,21 @@ function DashboardPage() {
         })
       ]);
 
-      // Log 6: Log recentDocsResponse status
       console.log('[Dashboard] fetchDashboardData: Received response for /recent. Status:', recentDocsResponse.status, 'OK:', recentDocsResponse.ok);
 
       // Handle Stats Response
       if (statsResponse.ok) {
         const statsData = await statsResponse.json();
-        setKeyStats(statsData);
+        setKeyStats({
+            current_documents: statsData.current_documents || 0,
+            deleted_documents: statsData.deleted_documents || 0,
+            total_processed_documents: statsData.total_processed_documents || 0,
+            avgScore: statsData.avgScore,
+            flaggedRecent: statsData.flaggedRecent || 0,
+            pending: statsData.pending || 0
+        });
+      } else {
+        console.warn(`[Dashboard] Fetch failed for /api/v1/dashboard/stats. Status: ${statsResponse.status}`);
       }
 
       // Handle Distribution Response
@@ -239,15 +261,18 @@ function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, getToken, t, processDistributionData]);
+  }, [isAuthenticated, getToken, t]);
 
   // Effect to fetch dashboard data - Keep simplified dependencies
   useEffect(() => {
     if (isAuthenticated && !isAuthLoading) {
       console.log('[Dashboard] useEffect trigger: Fetching data. isAuthenticated:', isAuthenticated, 'isAuthLoading:', isAuthLoading);
       fetchDashboardData();
+    } else if (!isAuthLoading && !isAuthenticated) {
+      console.log('[Dashboard] useEffect trigger: Not authenticated, redirecting to login.');
+      navigate('/');
     }
-  }, [isAuthenticated, isAuthLoading]);
+  }, [isAuthenticated, isAuthLoading, fetchDashboardData, navigate]);
 
   // Quick Start Button Handler
   const handleQuickStart = () => {
@@ -307,25 +332,39 @@ function DashboardPage() {
   console.log('[Dashboard] Rendering component. Current recentAssessments state:', recentAssessments);
 
   // --- Render Dashboard Grid ---
+  console.log('[DashboardPage] Rendering. Current keyStats:', keyStats);
+
   return (
     <div className="space-y-6">
 
       {/* --- Row 1: Welcome/QuickStart (Left) & Chart (Right) --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* Column 1: Welcome Message & Quick Start Button */}
-        <div className="space-y-4">
-          <h2 className="text-2xl font-semibold text-base-content mb-4">
-            {t('dashboardPage_welcome')} {userName}
-          </h2>
-          <div className="flex justify-start">
-            <Link
-              to="/quickstart"
-              className="btn btn-primary"
-            >
-              <ArrowUpTrayIcon className="h-5 w-5 mr-2"/>
-              {t('dashboardPage_button_quickStart')}
-            </Link>
+        {/* Column 1: Welcome Message & Quick Start Button with Image */}
+        <div 
+          className="p-6 rounded-lg shadow-md border border-base-300 bg-base-100 relative overflow-hidden"
+        >
+          {/* Image as a layer, behind the content */}
+          <img 
+            src={MainCardBackground2Image}
+            alt="Welcome background" 
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          
+          {/* Content - on top of the image. Added left padding to shift content right. */}
+          <div className="relative z-10 space-y-4 pl-8">
+            <h2 className="text-2xl font-semibold text-base-content mb-4">
+              {t('dashboardPage_welcome')} {userName}
+            </h2>
+            <div className="flex justify-start">
+              <Link
+                to="/quickstart"
+                className="btn btn-primary"
+              >
+                <ArrowUpTrayIcon className="h-5 w-5 mr-2"/>
+                {t('dashboardPage_button_quickStart')}
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -344,7 +383,7 @@ function DashboardPage() {
         <div className="stat">
           <div className="stat-figure text-primary"><DocumentDuplicateIcon className="h-8 w-8"/></div>
           <div className="stat-title">Total Documents</div>
-          <div className="stat-value">{keyStats?.totalDocs || '0'}</div>
+          <div className="stat-value">{keyStats?.total_processed_documents || '0'}</div>
         </div>
         <div className="stat">
           <div className="stat-figure text-secondary"><ScaleIcon className="h-8 w-8"/></div>
@@ -372,24 +411,34 @@ function DashboardPage() {
           </div>
           <div className="overflow-x-auto">
             {recentAssessments && recentAssessments.length > 0 ? (
-              <table className="table table-sm w-full">
-                <thead>
+              <table className="min-w-full divide-y divide-base-300">
+                <thead className="bg-base-200">
                   <tr>
-                    <th>Filename</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                    <th>Score</th>
-                    <th>Actions</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_filename')}</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_date')}</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_status')}</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_ai_score')}</th>
+                    <th scope="col" className="relative px-4 py-3">
+                      <span className="sr-only">{t('dashboard_table_view')}</span>
+                    </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="bg-base-100 divide-y divide-base-300">
                   {recentAssessments.map((doc) => (
-                    <tr key={doc.id} className="hover">
-                      <td className="font-medium">{doc.original_filename}</td>
-                      <td>{getStatusBadge(doc.status)}</td>
-                      <td>{new Date(doc.created_at).toLocaleDateString()}</td>
-                      <td>{formatScore(doc.ai_score)}</td>
-                      <td>
+                    <tr key={doc.id || doc._id} className="hover:bg-base-200 transition-colors duration-150">
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-base-content truncate max-w-xs" title={doc.original_filename}>
+                        {doc.original_filename}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-base-content/80">
+                        {new Date(doc.upload_timestamp || doc.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {getStatusBadge(doc.status)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-base-content/80">
+                        {formatScore(doc.score)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                         <button
                           onClick={() => navigate(`/documents/${doc.id}/report`)}
                           className="btn btn-ghost btn-xs"

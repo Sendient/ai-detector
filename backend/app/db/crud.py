@@ -788,7 +788,7 @@ async def get_all_students(
             try:
                 mapped_data = {**doc}
                 if "_id" in mapped_data:
-                    mapped_data["id"] = mapped_data.pop("_id") # Rename key
+                    mapped_data["id"] = mapped_data.pop("_id", None) # Rename key
                 else:
                     logger.warning(f"Student document missing '_id': {doc}")
                     continue # Skip this document if it has no _id
@@ -953,6 +953,7 @@ async def update_document_status(
     status: DocumentStatus,
     character_count: Optional[int] = None, # New optional parameter
     word_count: Optional[int] = None,      # New optional parameter
+    score: Optional[float] = None,         # ADDED: Optional score parameter
     session=None
 ) -> Optional[Document]:
     collection = _get_collection(DOCUMENT_COLLECTION)
@@ -969,9 +970,19 @@ async def update_document_status(
     if word_count is not None:
         update_data["word_count"] = word_count
         logger.info(f"Including word_count={word_count} in update for document {document_id}")
+    
+    # ADDED: Log the received score value
+    logger.info(f"[crud.update_document_status] Received score: {score} for document {document_id}")
+
+    # ADDED: Detailed log for type and value of score before the 'if score is not None' check
+    logger.info(f"[crud.update_document_status] DETAILED CHECK - score value: {repr(score)}, score type: {type(score)} for document {document_id}")
+
+    if score is not None: # ADDED: Include score if provided
+        update_data["score"] = score
+        logger.info(f"Including score={score} in update for document {document_id}")
     # <<< END EDIT >>>
 
-    logger.info(f"Updating document {document_id} for teacher {teacher_id} status to {status.value} and counts if provided.")
+    logger.info(f"Updating document {document_id} for teacher {teacher_id} status to {status.value} and counts/score if provided. Update payload: {update_data}") # MODIFIED log & added payload
     query_filter = {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}}
 
     # <<< START EDIT: Add logging before DB call >>>
@@ -1298,92 +1309,97 @@ async def get_dashboard_stats(current_user_payload: Dict[str, Any]) -> Dict[str,
     Finds the internal teacher ID first.
     """
     teacher_kinde_id = current_user_payload.get("sub")
+    # Restored default_stats to include all fields
+    default_stats = {'current_documents': 0, 'deleted_documents': 0, 'total_processed_documents': 0, 'avgScore': None, 'flaggedRecent': 0, 'pending': 0}
     if not teacher_kinde_id:
         logger.warning("get_dashboard_stats called without teacher Kinde ID (sub) in payload.")
-        return {'totalDocs': 0, 'avgScore': None, 'flaggedRecent': 0, 'pending': 0}
+        return default_stats
 
-    # +++ ADDED Logging +++
     logger.info(f"Calculating dashboard stats for teacher kinde_id: {teacher_kinde_id}")
-    # --- END Logging ---
 
     try:
-        # 1. Find the internal teacher ObjectId using the Kinde ID
         teacher = await get_teacher_by_kinde_id(teacher_kinde_id)
         if not teacher:
-             # +++ ADDED Logging +++
             logger.warning(f"No teacher found in DB for kinde_id: {teacher_kinde_id}")
-             # --- END Logging ---
-            return {'totalDocs': 0, 'avgScore': None, 'flaggedRecent': 0, 'pending': 0}
+            return default_stats
 
-        teacher_internal_id = teacher.id # This is the internal UUID
-        # +++ ADDED Logging +++
-        logger.debug(f"Found internal teacher id: {teacher_internal_id} for kinde_id: {teacher_kinde_id}")
-        # --- END Logging ---
+        # teacher_internal_id = teacher.id # Not strictly needed if queries use teacher_kinde_id
+        # logger.debug(f"Found internal teacher id: {teacher_internal_id} for kinde_id: {teacher_kinde_id}")
 
-        # 2. Get Collections
         docs_collection = _get_collection(DOCUMENT_COLLECTION)
         results_collection = _get_collection(RESULT_COLLECTION)
-        # FIX: Explicitly check against None
+        
         if docs_collection is None or results_collection is None:
             logger.error("Could not get documents or results collection for dashboard stats.")
-            return {'totalDocs': 0, 'avgScore': None, 'flaggedRecent': 0, 'pending': 0}
+            return default_stats
 
-        # 3. Perform Aggregations (using the internal teacher_internal_id)
-        # Total Documents
-        total_docs = await docs_collection.count_documents({"teacher_id": teacher_kinde_id})
-        logger.debug(f"[Stats] Total docs query found: {total_docs}")
+        # RESTORED: Document count calculations
+        active_documents_query = {"teacher_id": teacher_kinde_id, "is_deleted": {"$ne": True}}
+        deleted_documents_query = {"teacher_id": teacher_kinde_id, "is_deleted": True}
 
-        # Average Score (from Results where status is COMPLETED)
-        # Note: We use teacher_kinde_id here as it's on the result record directly
+        current_documents_count = await docs_collection.count_documents(active_documents_query)
+        deleted_documents_count = await docs_collection.count_documents(deleted_documents_query)
+        total_processed_documents_count = current_documents_count + deleted_documents_count
+
+        logger.debug(f"[Stats] Current documents: {current_documents_count}")
+        logger.debug(f"[Stats] Deleted documents: {deleted_documents_count}")
+        logger.debug(f"[Stats] Total processed documents: {total_processed_documents_count}")
+
+        # Get IDs of active documents for filtering results
+        active_doc_ids_cursor = docs_collection.find(active_documents_query, {"_id": 1}) # Use pre-defined active_documents_query
+        active_document_ids = [doc["_id"] async for doc in active_doc_ids_cursor]
+
         avg_score_pipeline = [
-            {"$match": {"teacher_id": teacher_kinde_id, "status": ResultStatus.COMPLETED.value, "score": {"$ne": None}}},
+            {"$match": {
+                "teacher_id": teacher_kinde_id, 
+                "status": ResultStatus.COMPLETED.value, 
+                "score": {"$ne": None},
+                "document_id": {"$in": active_document_ids} 
+            }},
             {"$group": {"_id": None, "avgScore": {"$avg": "$score"}}}
         ]
         avg_score_result = await results_collection.aggregate(avg_score_pipeline).to_list(length=1)
         avg_score = avg_score_result[0]['avgScore'] if avg_score_result else None
-        logger.debug(f"[Stats] Avg score query result: {avg_score}")
+        logger.debug(f"[Stats] Avg score query result (for active docs): {avg_score}")
 
-        # Flagged Recently (Documents with score >= 0.8 in last 7 days)
-        # Requires joining Documents and Results or querying Results directly
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         flagged_recent_pipeline = [
             {"$match": {
                 "teacher_id": teacher_kinde_id,
                 "status": ResultStatus.COMPLETED.value,
                 "score": {"$gte": 0.8},
-                "updated_at": {"$gte": seven_days_ago}
+                "updated_at": {"$gte": seven_days_ago},
+                "document_id": {"$in": active_document_ids}
             }},
             {"$count": "count"}
         ]
         flagged_recent_result = await results_collection.aggregate(flagged_recent_pipeline).to_list(length=1)
         flagged_recent = flagged_recent_result[0]['count'] if flagged_recent_result else 0
-        logger.debug(f"[Stats] Flagged recent query result: {flagged_recent}")
+        logger.debug(f"[Stats] Flagged recent query result (for active docs): {flagged_recent}")
 
-        # Pending/Processing Documents (based on Document status)
         pending_statuses = [
             DocumentStatus.QUEUED.value,
             DocumentStatus.PROCESSING.value,
             DocumentStatus.RETRYING.value,
         ]
-        pending = await docs_collection.count_documents({"teacher_id": teacher_kinde_id, "status": {"$in": pending_statuses}})
+        pending = await docs_collection.count_documents({"teacher_id": teacher_kinde_id, "status": {"$in": pending_statuses}, "is_deleted": {"$ne": True}})
         logger.debug(f"[Stats] Pending query result: {pending}")
 
-        # 4. Assemble Results
         stats = {
-            'totalDocs': total_docs,
+            # RESTORED: current_documents, deleted_documents, total_processed_documents
+            'current_documents': current_documents_count,
+            'deleted_documents': deleted_documents_count,
+            'total_processed_documents': total_processed_documents_count,
             'avgScore': avg_score,
             'flaggedRecent': flagged_recent,
             'pending': pending
         }
-        # +++ ADDED Logging +++
         logger.info(f"Dashboard stats calculated for teacher {teacher_kinde_id}: {stats}")
-        # --- END Logging ---
         return stats
 
     except Exception as e:
         logger.error(f"Error calculating dashboard stats for teacher {teacher_kinde_id}: {str(e)}", exc_info=True)
-        # Return default/empty stats on error to prevent frontend crash
-        return {'totalDocs': 0, 'avgScore': None, 'flaggedRecent': 0, 'pending': 0}
+        return default_stats
 
 async def get_score_distribution(current_user_payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -1507,60 +1523,60 @@ async def get_score_distribution(current_user_payload: Dict[str, Any]) -> Dict[s
 async def get_recent_documents(teacher_id: str, limit: int = 4) -> List[Document]:
     """
     Get the most recent documents for a teacher using their Kinde ID.
+    The 'score' attribute will be populated from the associated Result object.
     Args:
         teacher_id: The teacher's Kinde ID string.
         limit: Maximum number of documents to return.
     Returns:
-        List of Document objects.
+        List of Document objects, with 'score' populated if available.
     """
-    # +++ ADDED Logging +++
     logger.info(f"Fetching recent documents for teacher_id: {teacher_id}, limit: {limit}")
-    # --- END Logging ---
     try:
         docs_collection = _get_collection(DOCUMENT_COLLECTION)
-        # FIX: Explicitly check against None
         if docs_collection is None:
             logger.error("Could not get documents collection for recent documents.")
             return []
 
-        # Use the teacher_id (Kinde ID string) directly for filtering
-        # Ensure the index exists in Cosmos DB: { "teacher_id": 1, "upload_timestamp": -1 }
         cursor = docs_collection.find(
             {
-                "teacher_id": teacher_id
+                "teacher_id": teacher_id,
+                "is_deleted": {"$ne": True} 
             }
         ).sort([("upload_timestamp", -1)]).limit(limit)
 
-        docs = await cursor.to_list(length=limit)
+        docs_data = await cursor.to_list(length=limit)
+        logger.debug(f"Found {len(docs_data)} raw documents for teacher {teacher_id}.")
+        if docs_data:
+            logger.debug(f"First raw doc example: {docs_data[0]}")
 
-        # +++ ADDED Logging +++
-        logger.debug(f"Found {len(docs)} raw documents for teacher {teacher_id}.")
-        # Example log of one document ID if found
-        if docs:
-            logger.debug(f"First raw doc example: {docs[0]}")
-        # --- END Logging ---
-
-        # Convert to Pydantic models
-        # Need to handle potential missing 'ai_score' which might be in the Results collection
-        # This currently only returns Document base fields. We might need results.
-        # TODO: Enhance this to fetch associated result/score if needed by frontend.
-        # For now, return Document model instances.
         documents_list = []
-        for doc in docs:
+        for doc_data in docs_data:
             try:
-                # Map Pydantic field names (like id) from DB field names (_id)
-                doc['id'] = doc.pop('_id', None)
-                documents_list.append(Document(**doc))
+                doc_id = doc_data.get('_id')
+                doc_data['id'] = doc_id # Ensure 'id' field is populated for the Document model
+
+                # Create Document object first (it might not have a score initially)
+                document_obj = Document(**doc_data)
+
+                # Attempt to fetch the result and update the score
+                if doc_id:
+                    result = await get_result_by_document_id(document_id=doc_id, teacher_id=teacher_id)
+                    if result and result.score is not None:
+                        document_obj.score = result.score
+                        logger.debug(f"Updated score for document {doc_id} to {result.score}")
+                    elif result:
+                        logger.debug(f"Result found for document {doc_id}, but score is None.")
+                    else:
+                        logger.debug(f"No result found for document {doc_id}.")
+                
+                documents_list.append(document_obj)
             except ValidationError as ve:
-                logger.warning(f"Validation error converting document {doc.get('id', 'N/A')} to model: {ve}")
+                logger.warning(f"Validation error converting document {doc_data.get('_id', 'N/A')} to model: {ve}")
             except Exception as model_ex:
-                 logger.error(f"Error converting document {doc.get('id', 'N/A')} to model: {model_ex}")
-
-        # +++ ADDED Logging +++
-        logger.info(f"Returning {len(documents_list)} Document objects for teacher {teacher_id}.")
-        # --- END Logging ---
+                 logger.error(f"Error processing document {doc_data.get('_id', 'N/A')}: {model_ex}")
+        
+        logger.info(f"Returning {len(documents_list)} Document objects with scores (if available) for teacher {teacher_id}.")
         return documents_list
-
     except Exception as e:
         logger.error(f"Error fetching recent documents for teacher {teacher_id}: {str(e)}", exc_info=True)
         return []
@@ -1949,137 +1965,175 @@ async def delete_result(result_id: uuid.UUID, session=None) -> bool:
 # <<< START EDIT: Add new analytics CRUD function >>>
 async def get_usage_stats_for_period(
     teacher_id: str,
-    period: str, # 'daily', 'weekly', 'monthly'
-    target_date: date_type # Use the aliased date type
+    period: Optional[str] = None,         # MODIFIED: Made optional
+    target_date: Optional[date_type] = None # MODIFIED: Made optional
 ) -> Optional[Dict[str, Any]]: # Matches UsageStatsResponse structure
     """
-    Aggregates document usage stats (count, characters, words) for a specific teacher
-    over a given period (daily, weekly, monthly) based on a target date.
+    Calculates usage statistics (document count, total words, total characters)
+    for a given teacher over a specified period or all time.
 
-    Args:
-        teacher_id: The Kinde ID of the teacher.
-        period: The time period ('daily', 'weekly', 'monthly').
-        target_date: The date defining the period.
-
-    Returns:
-        A dictionary containing the aggregated stats and period info, or None on error.
+    If 'period' and 'target_date' are provided, stats are for that specific period.
+    If 'period' and 'target_date' are None, stats are calculated for all time,
+    and will include current_documents, deleted_documents, and total_processed_documents.
     """
     collection = _get_collection(DOCUMENT_COLLECTION)
     if collection is None:
-        logger.error(f"Failed to get document collection for usage stats (teacher: {teacher_id})")
+        logger.error("Documents collection not found.")
         return None
 
-    logger.info(f"Calculating usage stats for teacher {teacher_id}, period={period}, target_date={target_date}")
+    match_query: Dict[str, Any] = {
+        "teacher_id": teacher_id,
+        "is_deleted": {"$ne": True}
+    }
 
-    # --- Calculate Date Range in UTC --- START ---
-    start_datetime_utc: Optional[datetime] = None
-    end_datetime_utc: Optional[datetime] = None
-    start_date_local: Optional[date_type] = None # For response
-    end_date_local: Optional[date_type] = None   # For response
-
-    try:
-        # Combine target_date with min/max time and make timezone-aware (UTC)
-        min_time = datetime.min.time()
-        max_time_plus_one = (datetime.combine(target_date, min_time) + timedelta(days=1)).time()
-
+    if period and target_date:
+        start_datetime: Optional[datetime] = None
+        end_datetime: Optional[datetime] = None
+        
         if period == 'daily':
-            start_date_local = target_date
-            end_date_local = target_date
-            start_datetime_utc = datetime.combine(target_date, min_time, tzinfo=timezone.utc)
-            # End date is the beginning of the *next* day, exclusive
-            end_datetime_utc = datetime.combine(target_date + timedelta(days=1), min_time, tzinfo=timezone.utc)
-
+            start_datetime = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
+            # Use combine with max.time() for end of day
+            end_datetime = datetime.combine(target_date, datetime.max.time(), tzinfo=timezone.utc)
         elif period == 'weekly':
-            # Monday is 0, Sunday is 6. Calculate start of week (Monday).
+            # Calculate the start of the week (Monday)
             start_of_week = target_date - timedelta(days=target_date.weekday())
+            # Calculate the end of the week (Sunday)
             end_of_week = start_of_week + timedelta(days=6)
-            start_date_local = start_of_week
-            end_date_local = end_of_week
-            start_datetime_utc = datetime.combine(start_of_week, min_time, tzinfo=timezone.utc)
-            # End date is the beginning of the day *after* the week ends, exclusive
-            end_datetime_utc = datetime.combine(end_of_week + timedelta(days=1), min_time, tzinfo=timezone.utc)
-
+            start_datetime = datetime.combine(start_of_week, datetime.min.time(), tzinfo=timezone.utc)
+            end_datetime = datetime.combine(end_of_week, datetime.max.time(), tzinfo=timezone.utc)
         elif period == 'monthly':
-            # Get the first and last day of the month
-            first_day_of_month = target_date.replace(day=1)
-            last_day_of_month = target_date.replace(day=calendar.monthrange(target_date.year, target_date.month)[1])
-            start_date_local = first_day_of_month
-            end_date_local = last_day_of_month
-            start_datetime_utc = datetime.combine(first_day_of_month, min_time, tzinfo=timezone.utc)
-            # End date is the beginning of the day *after* the month ends, exclusive
-            end_datetime_utc = datetime.combine(last_day_of_month + timedelta(days=1), min_time, tzinfo=timezone.utc)
+            year = target_date.year
+            month = target_date.month
+            # Get the number of days in the given month and year
+            num_days = calendar.monthrange(year, month)[1]
+            # Create the first day of the month
+            first_day_of_month = date_type(year, month, 1)
+            # Create the last day of the month
+            last_day_of_month = date_type(year, month, num_days)
+            # Combine with min/max times for datetime objects
+            start_datetime = datetime.combine(first_day_of_month, datetime.min.time(), tzinfo=timezone.utc)
+            end_datetime = datetime.combine(last_day_of_month, datetime.max.time(), tzinfo=timezone.utc)
         else:
-            raise ValueError(f"Invalid period specified: {period}")
+            logger.error(f"Unsupported period: {period} with target_date: {target_date}")
+            # Consider raising ValueError or returning None if period is unsupported but provided
+            # For now, if period is unrecognized but provided, we might fall through to all-time,
+            # or we should explicitly handle it. Let's return None.
+            return { # Return zeroed stats for unsupported period
+                "teacher_id": teacher_id,
+                "period_start_date": None, # Or some representation of the failed period
+                "period_end_date": None,
+                "document_count": 0,
+                "total_words": 0,
+                "total_characters": 0,
+                "report_generated_at": datetime.now(timezone.utc)
+            }
 
-        logger.debug(f"Calculated UTC range for {teacher_id}, {period}: {start_datetime_utc} to {end_datetime_utc}")
+        if start_datetime and end_datetime:
+            # Ensure end_datetime is inclusive for the query by going to the very end of the target day
+            match_query["upload_timestamp"] = {
+                "$gte": start_datetime,
+                "$lte": end_datetime # up to 23:59:59.999999 of the end_datetime's day
+            }
+            period_start_str = start_datetime.strftime('%Y-%m-%d')
+            period_end_str = end_datetime.strftime('%Y-%m-%d')
+        else: # Should not happen if period and target_date are valid and lead to date calculation
+            logger.warning(f"Could not determine date range for period '{period}' and target_date '{target_date}'. Returning all-time stats instead or error.")
+            # Fallback to no date filter (all time) or handle as error
+            # For now, let's assume this means all-time if dates weren't set.
+            # However, the logic above should ensure start_datetime/end_datetime are set if period is valid.
+            # This path is more of a safeguard.
+            period_start_str = None # Indicates all-time
+            period_end_str = None   # Indicates all-time
+    else:
+        # No period and target_date provided, so calculate for all time
+        logger.info(f"Calculating all-time usage stats for teacher_id: {teacher_id}")
+        period_start_str = None # Indicates all-time
+        period_end_str = None   # Indicates all-time
 
-    except Exception as date_err:
-        logger.error(f"Error calculating date range for usage stats: {date_err}", exc_info=True)
-        return None # Or raise a specific error
-    # --- Calculate Date Range in UTC --- END ---
+        # For all-time, also get deleted documents count
+        deleted_documents_count = await collection.count_documents({"teacher_id": teacher_id, "is_deleted": True})
+        # The main match_query for the pipeline already targets current documents
 
-    # --- Aggregation Pipeline --- START ---
     pipeline = [
         {
-            '$match': {
-                'teacher_id': teacher_id, # Crucial RBAC filter
-                'upload_timestamp': {
-                    '$gte': start_datetime_utc, # Greater than or equal to start
-                    '$lt': end_datetime_utc    # Less than end (exclusive)
-                }
+            "$match": match_query
+        },
+        {
+            "$group": {
+                "_id": "$teacher_id",  # Group by teacher_id
+                "document_count": {"$sum": 1},
+                "total_words": {"$sum": {"$ifNull": ["$word_count", 0]}},
+                "total_characters": {"$sum": {"$ifNull": ["$character_count", 0]}}
             }
         },
         {
-            '$group': {
-                '_id': None, # Group all matched documents together
-                'document_count': {'$sum': 1},
-                # Sum counts, treating null/missing as 0
-                'total_characters': {'$sum': {'$ifNull': ['$character_count', 0]}},
-                'total_words': {'$sum': {'$ifNull': ['$word_count', 0]}}
+            "$project": {
+                "_id": 0,  # Exclude the _id field from the output
+                "teacher_id": "$_id",
+                "document_count": 1,
+                "total_words": 1,
+                "total_characters": 1
             }
         }
     ]
-    # --- Aggregation Pipeline --- END ---
 
     try:
-        aggregation_result = await collection.aggregate(pipeline).to_list(length=1)
-        logger.debug(f"Usage stats aggregation result for {teacher_id}, {period}: {aggregation_result}")
+        aggregation_result_list = await collection.aggregate(pipeline).to_list(length=1)
+        logger.debug(f"Usage stats aggregation result for {teacher_id}, period={period or 'all-time'}: {aggregation_result_list}")
 
-        # --- Process Results --- START ---
-        if aggregation_result:
-            stats = aggregation_result[0]
-            result_payload = {
-                "period": period,
-                "target_date": target_date,
-                "start_date": start_date_local,
-                "end_date": end_date_local,
-                "document_count": stats.get('document_count', 0),
-                "total_characters": stats.get('total_characters', 0),
-                "total_words": stats.get('total_words', 0),
-                "teacher_id": teacher_id
+        response_payload: Dict[str, Any] = {}
+
+        if aggregation_result_list:
+            stats = aggregation_result_list[0]
+            response_payload = {
+                "teacher_id": stats.get("teacher_id", teacher_id), 
+                # For all-time, document_count from pipeline is current_documents
+                # For periodic, it's documents in that period
+                "document_count": stats.get("document_count", 0),
+                "total_words": stats.get("total_words", 0),
+                "total_characters": stats.get("total_characters", 0),
+                "report_generated_at": datetime.now(timezone.utc)
             }
-        else:
-            # No documents found in the period for this teacher
-            logger.info(f"No documents found for usage stats (teacher: {teacher_id}, period: {period}, target: {target_date})")
-            result_payload = {
-                "period": period,
-                "target_date": target_date,
-                "start_date": start_date_local,
-                "end_date": end_date_local,
+            # If all-time, add specific breakdown
+            if not period and not target_date:
+                response_payload["current_documents"] = stats.get("document_count", 0) # current documents
+                response_payload["deleted_documents"] = deleted_documents_count
+                response_payload["total_processed_documents"] = stats.get("document_count", 0) + deleted_documents_count
+                # document_count will still hold current_documents for backward compatibility / other uses of this field
+
+        else: # No documents found matching the criteria
+            logger.info(f"No documents found for usage stats (teacher: {teacher_id}, period: {period or 'all-time'}, target: {target_date})")
+            response_payload = {
+                "teacher_id": teacher_id,
                 "document_count": 0,
-                "total_characters": 0,
                 "total_words": 0,
-                "teacher_id": teacher_id
+                "total_characters": 0,
+                "report_generated_at": datetime.now(timezone.utc)
             }
-        # --- Process Results --- END ---
+            # If all-time and no documents found, also set breakdown to 0
+            if not period and not target_date:
+                response_payload["current_documents"] = 0
+                response_payload["deleted_documents"] = deleted_documents_count # could be > 0 if only deleted ones exist
+                response_payload["total_processed_documents"] = deleted_documents_count
 
-        logger.info(f"Successfully retrieved usage stats for {teacher_id}, period={period}: {result_payload}")
-        return result_payload
+        # Add period-specific fields if they were used for the query
+        if period and target_date and period_start_str and period_end_str: # period_start_str/end_str are set if period/target_date are valid
+            response_payload["period"] = period
+            response_payload["target_date"] = target_date.strftime('%Y-%m-%d') # Format date to string for response
+            response_payload["start_date"] = period_start_str
+            response_payload["end_date"] = period_end_str
+        else: # For all-time, these can be None or omitted if the model allows
+            response_payload["period"] = None
+            response_payload["target_date"] = None
+            response_payload["start_date"] = None
+            response_payload["end_date"] = None
+            
+        logger.info(f"Successfully retrieved usage stats for {teacher_id}, period={period or 'all-time'}: {response_payload}")
+        return response_payload
 
     except Exception as e:
         logger.error(f"Error during usage stats aggregation for teacher {teacher_id}: {e}", exc_info=True)
-        return None # Indicate failure
-# <<< END EDIT: Add new analytics CRUD function >>> 
+        return None
 
 async def get_result_by_id(result_id: uuid.UUID, teacher_id: Optional[str] = None, include_deleted: bool = False, session=None) -> Optional[Result]:
     """Gets a single result by its own ID, optionally checking teacher_id."""

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
 
     # ML API Endpoint
     ML_API_URL: Optional[str] = "https://fa-sdt-uks-aitextdet-prod.azurewebsites.net/api/ai-text-detection?code=PZrMzMk1VBBCyCminwvgUfzv_YGhVU-5E1JIs2if7zqiAzFuMhUC-g%3D%3D" # Default Production URL
+    ML_API_TIMEOUT_SECONDS: int = 60 # Timeout for ML API calls in seconds
 
     # --- Stripe Settings ---
     STRIPE_SECRET_KEY: Optional[str] = None # e.g., sk_test_YOURKEY or sk_live_YOURKEY

@@ -148,6 +148,7 @@
   
     "studentsPage_heading": "Students",
     "studentsPage_button_add": "Add New Student",
+    "studentsPage_button_bulkUpload": "Bulk Upload",
     "students_list_empty": "No students found. Click 'Add New Student' to get started.",
     "common_label_name": "Name",
     "common_label_yearGroup": "Year Group",
@@ -483,7 +484,12 @@
     "dashboardPage_heading": "Dashboard",
     "dashboardPage_button_quickStart": "Quick Start",
     "dashboardPage_chart_heading": "AI Score Distribution",
-    "dashboardPage_noAssessments": "No recent assessments found.",
+    "dashboardPage_noAssessments": "No recent assessments to display.",
+    "dashboard_table_filename": "Filename",
+    "dashboard_table_date": "Date",
+    "dashboard_table_status": "Status",
+    "dashboard_table_ai_score": "AI Score",
+    "dashboard_table_view": "View",
   
     "documents_delete_modal_heading": "Delete document '{{filename}}'?",
     "documents_delete_modal_confirm": "Are you sure you want to delete this document? This cannot be undone.",
@@ -525,5 +531,6 @@
     "common_processing": "Processing...",
     "common_coming_soon": "Coming Soon!",
 
-    "profile_page_title": "Your Profile"
+    "profile_page_title": "Your Profile",
+    "documentsPage_tooltip_deleteDocument": "Delete this document"
 }

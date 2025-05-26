@@ -21,7 +21,18 @@ const StatCard = ({ title, value, description, icon: Icon, isLoading, className 
         {Icon && <Icon className="h-5 w-5 text-gray-400 dark:text-gray-500" />}
       </div>
       <div>
-        {isLoading ? ( <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded animate-pulse w-3/4 mb-1"></div> ) : ( <p className="text-2xl font-semibold text-gray-900 dark:text-white">{value ?? 'N/A'}</p> )}
+        {isLoading ? (
+          <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded animate-pulse w-3/4 mb-1"></div>
+        ) : typeof value === 'object' && value !== null && value.current !== undefined ? (
+          // Display structured data for document counts if value is an object with 'current'
+          <div className="mt-1">
+            <p className="text-xl font-semibold text-gray-900 dark:text-white">{value.current} <span className="text-xs font-normal text-gray-500 dark:text-gray-400">Current</span></p>
+            <p className="text-lg font-medium text-gray-700 dark:text-gray-300">{value.deleted} <span className="text-xs font-normal text-gray-500 dark:text-gray-400">Deleted</span></p>
+            <p className="text-lg font-medium text-gray-700 dark:text-gray-300">{value.total} <span className="text-xs font-normal text-gray-500 dark:text-gray-400">Total Processed</span></p>
+          </div>
+        ) : (
+          <p className="text-2xl font-semibold text-gray-900 dark:text-white">{value ?? 'N/A'}</p>
+        )}
         {description && !isLoading && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{description}</p>}
       </div>
     </div>
@@ -215,7 +226,21 @@ function AnalyticsPage() {
            </div>
         </div>
         {/* Other Stat Cards */}
-        <StatCard title="Total Documents Assessed" value={dashboardStats?.totalAssessed?.toLocaleString()} description="All time" icon={FileText} isLoading={isLoadingDashboard} className="col-span-1" />
+        <StatCard 
+          title="Total Documents Assessed" 
+          value={
+            isLoadingDashboard ? null : // Show loading state for value
+            dashboardStats ? { // Check if dashboardStats is available
+              current: dashboardStats.current_documents !== undefined ? dashboardStats.current_documents.toLocaleString() : 'N/A',
+              deleted: dashboardStats.deleted_documents !== undefined ? dashboardStats.deleted_documents.toLocaleString() : 'N/A',
+              total: dashboardStats.total_processed_documents !== undefined ? dashboardStats.total_processed_documents.toLocaleString() : 'N/A'
+            } : { current: 'N/A', deleted: 'N/A', total: 'N/A' } // Fallback if dashboardStats is null
+          }
+          description="All time" 
+          icon={FileText} 
+          isLoading={isLoadingDashboard} 
+          className="col-span-1" 
+        />
         <StatCard title="Average AI Score" value={dashboardStats?.avgScore !== null && dashboardStats?.avgScore !== undefined ? `${(dashboardStats.avgScore * 100).toFixed(1)}%` : 'N/A'} description="Across all assessed" icon={TrendingUp} isLoading={isLoadingDashboard} className="col-span-1" />
         <StatCard title="Pending Documents" value={dashboardStats?.pending?.toLocaleString()} description="In queue or processing" icon={Users} isLoading={isLoadingDashboard} className="col-span-1" />
         <StatCard title="Score Distribution" value={"See Chart"} description="Breakdown of AI scores" icon={BarChart2} isLoading={false} className="col-span-1" />
@@ -239,27 +264,52 @@ function AnalyticsPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                      {isLoadingActivity ? ( [...Array(3)].map((_, i) => ( <tr key={`loading-${i}`} className="animate-pulse"> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> </tr> )))
+                      {isLoadingActivity ? ( [...Array(3)].map((_, i) => ( <tr key={`loading-${i}`} className="animate-pulse"><td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> </tr> )))
                       : recentActivity.length > 0 ? ( recentActivity.map((activity) => {
                             // Add Debug Logging Inside the Map
-                            console.log('Mapping activity item:', activity);
+                            console.log('Mapping activity item for Recent Activity:', activity); // Enhanced log
                             // Prepare Filename Display Logic
-                            const displayFilename = activity.original_filename ? activity.original_filename : '-';
+                            const displayFilename = activity.original_filename ? activity.original_filename : 'N/A'; // Ensure fallback
+                            
+                            // AI Score Display Logic
+                            let scoreDisplay = 'N/A';
+                            if (typeof activity.score === 'number') { // Check if score is a number
+                                scoreDisplay = `${(activity.score * 100).toFixed(1)}%`;
+                            }
+
                             return (
-                                <tr key={activity.id}> 
+                                <tr key={activity.id || activity._id}> {/* Use _id as fallback key */}
                                     {/* Update the Table Cell (td) for Filename */}
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white truncate max-w-xs" title={displayFilename}>
+                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 truncate max-w-xs" title={displayFilename}>
                                         {displayFilename}
-                                    </td> 
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap"> <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeClass(activity.status)}`}> {activity.status || 'UNKNOWN'} </span> </td> 
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"> {activity.score !== null && activity.score !== undefined ? `${(activity.score * 100).toFixed(1)}%` : 'N/A'} </td> 
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{activity.character_count?.toLocaleString() ?? '-'}</td> 
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{activity.word_count?.toLocaleString() ?? '-'}</td> 
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{formatDateTime(activity.updated_at)}</td> 
+                                    </td>
+                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeClass(activity.status)}`}>
+                                            {activity.status || 'N/A'}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                        {scoreDisplay} {/* MODIFIED: Use prepared scoreDisplay variable */}
+                                    </td>
+                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                        {activity.character_count?.toLocaleString() ?? 'N/A'}
+                                    </td>
+                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                        {activity.word_count?.toLocaleString() ?? 'N/A'}
+                                    </td>
+                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                        {formatDateTime(activity.updated_at || activity.upload_timestamp)} {/* Prefer updated_at */}
+                                    </td>
                                 </tr>
                             );
-                      }))
-                      : ( <tr> <td colSpan="6" className="px-4 sm:px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No recent activity found.</td> </tr> )}
+                        })
+                    ) : (
+                        <tr>
+                            <td colSpan="6" className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
+                                No recent activity to display.
+                            </td>
+                        </tr>
+                    )}
                   </tbody>
               </table>
           </div>

@@ -466,6 +466,7 @@
   
     "studentsPage_heading": "Students",
     "studentsPage_button_add": "Add New Student",
+    "studentsPage_button_bulkUpload": "Bulk Upload",
     "students_list_empty": "No students found. Click 'Add New Student' to get started.",
     "common_label_name": "Name",
     "common_label_yearGroup": "Year Group",
@@ -480,5 +481,15 @@
     "documentsPage_button_retryOnError": "Retry",
     "documentsPage_text_processing": "Processing...",
     "documentsPage_tooltip_cancelAssessment": "Cancel current assessment",
-    "documentsPage_tooltip_deleteDocument": "Delete this document"
-  }
+    "documentsPage_tooltip_deleteDocument": "Delete this document",
+  
+    "dashboardPage_welcome": "Welcome",
+    "dashboardPage_button_quickStart": "Quick Start",
+    "dashboardPage_chart_heading": "AI Score Distribution",
+    "dashboardPage_noAssessments": "No recent assessments to display.",
+    "dashboard_table_filename": "Filename",
+    "dashboard_table_date": "Date",
+    "dashboard_table_status": "Status",
+    "dashboard_table_ai_score": "AI Score",
+    "dashboard_table_view": "View"
+}

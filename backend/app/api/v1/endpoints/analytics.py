@@ -64,4 +64,51 @@ async def get_usage_statistics(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
         logger.error(f"Unexpected error getting usage stats for {user_kinde_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred while fetching usage statistics.") 
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred while fetching usage statistics.")
+
+@router.get(
+    "/all-time-stats",
+    response_model=UsageStatsResponse, # We can reuse this if it fits, or create a new one
+    summary="Get all-time usage statistics (Protected)",
+    description="Retrieves aggregated document counts, character counts, and word counts for the authenticated teacher across all time."
+)
+async def get_all_time_usage_statistics(
+    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+):
+    user_kinde_id = current_user_payload.get("sub")
+    if not user_kinde_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User Kinde ID not found in token.")
+
+    logger.info(f"User {user_kinde_id} requesting all-time usage stats.")
+
+    try:
+        usage_data = await crud.get_usage_stats_for_period(
+            teacher_id=user_kinde_id
+            # period and target_date are omitted to get all-time stats
+        )
+
+        if usage_data is None:
+            logger.error(f"CRUD function get_usage_stats_for_period returned None for all-time stats for user {user_kinde_id}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve all-time usage statistics due to an internal error.")
+
+        # Ensure the response includes period and target_date as null or a specific string if the model expects them
+        # The `UsageStatsResponse` model has `period`, `target_date`, `start_date`, `end_date` as optional.
+        # The crud function, when fetching all-time, should set these appropriately (e.g. to None or a specific marker).
+        # For now, let's assume the crud function returns them as None for all-time.
+        # If UsageStatsResponse requires these to be non-None, this might need adjustment or a new response model.
+        # From the previous step, period_start_str and period_end_str were set to None in crud for all-time.
+        # The crud.get_usage_stats_for_period returns: 
+        # {"teacher_id": ..., "document_count": ..., etc., "period_start_date": None, "period_end_date": None }
+        # This should be compatible with UsageStatsResponse if period_start_date/end_date are Optional[date].
+        # The `UsageStatsResponse` model in `models/analytics.py` has: 
+        # period: Optional[str] = None
+        # target_date: Optional[date] = None
+        # start_date: Optional[date] = None
+        # end_date: Optional[date] = None
+        # So this is fine. The crud function will return these as None for all-time stats.
+
+        return usage_data
+
+    except Exception as e:
+        logger.error(f"Unexpected error getting all-time usage stats for {user_kinde_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred while fetching all-time usage statistics.") 

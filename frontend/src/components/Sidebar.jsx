@@ -18,6 +18,7 @@ import {
     LogOut
 } from 'lucide-react';
 import AppLogoDark from './Ai_DETECTOR_STRAPLINE_DARK.png'; // Import the logo
+import UpgradeSideImage from '../img/Upgrade-side-image.png'; // Import the new upgrade image
 
 // -> Remove the old PlaceholderIcon, LoginIcon, etc. component definitions
 
@@ -93,6 +94,11 @@ function Sidebar() {
                     <div className="text-center text-sm text-gray-500 p-2">{t('sidebar_auth_loading')}</div>
                 ) : isAuthenticated ? (
                     <>
+                        {/* New Upgrade Image */}
+                        <div className="px-3 py-2">
+                            <img src={UpgradeSideImage} alt="Upgrade Plan" className="w-full h-auto rounded-md" />
+                        </div>
+
                         {/* Integrations Link - Added back here with Puzzle icon */}
                         <Link
                             to="/integrations"

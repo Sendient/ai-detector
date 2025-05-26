@@ -116,8 +116,9 @@ async def get_recent_documents_endpoint(
                 "status": doc.status, # Will use enum value due to model config
                 "created_at": doc.created_at,
                 "updated_at": doc.updated_at,
+                "score": doc.score, # ADDED: Include the score
                 # The frontend AnalyticsPage table needs the AI score, but it's not here.
-                # needs modification later to fetch/include score if required here.
+                # needs modification later to fetch/include score if required here. <- This comment is now outdated
             }
             # Add optional fields only if they exist and needed by frontend
             # <<< START EDIT: Add counts if they exist >>>

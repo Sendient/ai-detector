@@ -77,8 +77,13 @@ function DocumentsPage() {
                     newResults[docId] = data.score;
                     console.log(`[DocumentsPage] Stored score ${data.score} for completed doc ${docId}`);
                 } else {
-                    delete newResults[docId];
-                    console.log(`[DocumentsPage] Result for doc ${docId} status is ${data?.status}, score not stored/updated.`);
+                    if (data?.status === COMPLETED_STATUS) {
+                        newResults[docId] = null;
+                        console.log(`[DocumentsPage] Result for doc ${docId} is COMPLETED but score is not a number (is ${data?.score}). Storing null score.`);
+                    } else {
+                        delete newResults[docId];
+                        console.log(`[DocumentsPage] Result for doc ${docId} status is ${data?.status} (not COMPLETED with a numeric score), score not stored/updated.`);
+                    }
                 }
             } else if (promiseResult.status === 'fulfilled' && promiseResult.value?.status === 'failed') {
                 const { docId } = promiseResult.value;
@@ -488,12 +493,6 @@ function DocumentsPage() {
               ) : (
                 <> <ArrowUpTrayIcon className="h-4 w-4 mr-1" /> {t('common_button_upload')} </>
               )}
-            </button>
-            <button
-              onClick={() => navigate('/bulk-upload')}
-              className="btn btn-secondary shrink-0"
-            >
-              {t('documents_button_bulkUpload', 'Bulk Upload')}
             </button>
           </div>
           {uploadStatus && uploadStatus !== 'Uploading' && (

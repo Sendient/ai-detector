@@ -10,6 +10,7 @@ import {
   XCircleIcon,
   InformationCircleIcon,
   ExclamationTriangleIcon,
+  ArrowUpTrayIcon,
 } from '@heroicons/react/24/outline';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -692,13 +693,22 @@ function StudentsPage() {
             <div className="card-body">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="card-title text-xl">{t('students_list_heading', { defaultValue: 'Student List'})}</h2>
-                <button
-                  onClick={handleShowCreateForm}
-                  className="btn btn-success btn-sm"
-                >
-                  <PlusIcon className="h-5 w-5 mr-1"/>
-                  {t('studentsPage_button_add')}
-                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleShowCreateForm}
+                    className="btn btn-success btn-sm"
+                  >
+                    <PlusIcon className="h-5 w-5 mr-1"/>
+                    {t('studentsPage_button_add')}
+                  </button>
+                  <button
+                    onClick={() => navigate('/bulk-upload')}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <ArrowUpTrayIcon className="h-5 w-5 mr-1" />
+                    {t('studentsPage_button_bulkUpload', 'Bulk Upload')}
+                  </button>
+                </div>
               </div>
               {students.length > 0 ? (
                 <div className="overflow-x-auto">
