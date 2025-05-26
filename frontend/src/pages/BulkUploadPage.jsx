@@ -20,13 +20,13 @@ function BulkUploadPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-semibold text-base-content mb-6">
-        {t('bulkUpload_heading', 'Bulk Document Upload')}
+        {t('bulkUpload_heading', 'Bulk Student Upload')}
       </h1>
 
       <div className="card bg-base-100 shadow-md border border-base-300">
         <div className="card-body items-center">
           <p className="text-base-content/80 mb-6 text-center max-w-md">
-            {t('bulkUpload_description', 'Upload multiple documents at once using a CSV template, or download the template to get started.')}
+            {t('bulkUpload_description', 'Upload multiple students at once using a CSV template, or download the template to get started.')}
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4">

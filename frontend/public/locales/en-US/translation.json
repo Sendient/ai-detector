@@ -54,6 +54,8 @@
     "common_label_academicYear": "Academic Year",
     "common_status_loading": "Loading...",
     "common_status_uploading": "Uploading...",
+    "common_status_uploading_file": "Uploading {{fileName}}...",
+    "common_status_uploading_file_count": "Uploading {{fileName}} ({{current}}/{{total}})...",
     "common_status_assessing": "Assessing...",
     "common_status_saving": "Saving...",
     "common_status_creating": "Creating...",
@@ -181,6 +183,11 @@
     "messages_upload_network_error": "Network error during upload. Please check your connection.",
     "messages_upload_server_error": "Server error during upload. Please try again later.",
     "messages_upload_validation_error": "File validation error: {{detail}}",
+    "messages_upload_failed_for_file": "Upload failed for {{fileName}}: {{detail}}",
+    "messages_upload_error_for_file": "Error uploading {{fileName}}: {{message}}",
+    "messages_bulk_upload_summary_succeeded": "{{count}} file(s) uploaded successfully.",
+    "messages_bulk_upload_summary_failed": "{{count}} file(s) failed to upload.",
+    "messages_bulk_upload_summary_prefix": "Bulk upload summary:",
   
     "messages_assessment_failed": "Assessment failed: {{detail}}",
     "messages_assessment_errorUnknown": "An unknown error occurred during assessment.",
@@ -491,5 +498,11 @@
     "dashboard_table_date": "Date",
     "dashboard_table_status": "Status",
     "dashboard_table_ai_score": "AI Score",
-    "dashboard_table_view": "View"
+    "dashboard_table_view": "View",
+    "documents_button_bulkUpload_alt": "Bulk Upload Files",
+  
+    "bulkUpload_heading": "Bulk Student Upload",
+    "bulkUpload_description": "Upload multiple students at once using a CSV template, or download the template to get started.",
+    "bulkUpload_button_upload": "Bulk Upload Files",
+    "bulkUpload_button_downloadTemplate": "Download Template"
 }

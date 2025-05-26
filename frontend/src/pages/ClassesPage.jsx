@@ -26,6 +26,12 @@ function ClassesPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState(null);
   const [formSuccess, setFormSuccess] = useState(null);
+  const [formData, setFormData] = useState({
+    class_name: '',
+    academic_year: '',
+    school_id: '',
+    teacher_id: ''
+  });
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -89,16 +95,17 @@ function ClassesPage() {
 
   const handleShowCreateForm = async () => {
     resetForms();
-    const schoolId = user?.school_id;
-    if (!user || !schoolId) {
+    if (!user || !user.id) {
       setFormError(t('messages_classes_create_error_missingProfile'));
+      console.warn("User profile or user.id missing for creating class:", user);
       return;
     }
-    setFormData(prev => ({
-      ...prev,
-      school_id: schoolId,
-      teacher_id: user?.id || ''
-    }));
+    setFormData({
+      class_name: '',
+      academic_year: '',
+      school_id: user?.school_id || '',
+      teacher_id: user.id
+    });
     setShowCreateForm(true);
   };
 
@@ -120,12 +127,8 @@ function ClassesPage() {
       setFormError(t('messages_error_loginRequired_form'));
       return;
     }
-    if (!formData.class_name || !formData.academic_year) {
+    if (!formData.class_name.trim()) {
       setFormError(t('messages_classes_form_fieldsRequired'));
-      return;
-    }
-    if (!formData.school_id) {
-      setFormError(t('messages_classes_form_missingSchoolId'));
       return;
     }
 
@@ -138,16 +141,23 @@ function ClassesPage() {
     const url = isEditing ? `${API_BASE_URL}/api/v1/classgroups/${classIdForUrl}` : `${API_BASE_URL}/api/v1/classgroups/`;
     const method = isEditing ? 'PUT' : 'POST';
     const logAction = isEditing ? 'Updating' : 'Creating';
-    const payload = { ...formData };
-
-    if (!isEditing) {
-      delete payload.teacher_id;
-    }
-
-    if (!payload.school_id) {
-      setFormError(t('messages_classes_form_internalMissingSchoolId'));
-      setIsProcessing(false);
-      return;
+    
+    let payload;
+    if (isEditing) {
+      payload = {
+        class_name: formData.class_name.trim(),
+      };
+      if (formData.academic_year && formData.academic_year.trim()) {
+        payload.academic_year = formData.academic_year.trim();
+      }
+    } else {
+      payload = {
+        class_name: formData.class_name.trim(),
+        teacher_id: formData.teacher_id,
+      };
+      if (formData.academic_year && formData.academic_year.trim()) {
+        payload.academic_year = formData.academic_year.trim();
+      }
     }
 
     try {
@@ -248,9 +258,6 @@ function ClassesPage() {
       setIsProcessing(false);
     }
   };
-
-  const initialClassData = { class_name: '', academic_year: '', school_id: '', teacher_id: '' };
-  const [formData, setFormData] = useState(initialClassData);
 
   if (!isAuthenticated && !isAuthLoading) {
     return <div className="alert alert-info shadow-lg">

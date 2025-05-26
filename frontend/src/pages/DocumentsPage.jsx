@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
@@ -41,6 +41,8 @@ function DocumentsPage() {
   const [deleteError, setDeleteError] = useState(null);
   const [deleteSuccess, setDeleteSuccess] = useState(null);
   const [cancellingStatus, setCancellingStatus] = useState({});
+
+  const bulkFileInputRef = useRef(null);
 
   const PROXY_PATH = import.meta.env.VITE_API_PROXY_PATH || '/api/v1';
 
@@ -140,43 +142,128 @@ function DocumentsPage() {
     }
   }, [isAuthenticated, isAuthLoading, getToken, fetchResultsForDocuments, t, COMPLETED_STATUS, assessmentResults]);
 
-  const handleFileChange = (event) => {
-    if (event.target.files && event.target.files[0]) { setSelectedFile(event.target.files[0]); setUploadStatus(''); }
-  };
-
-  const handleUpload = async () => {
-    const uploadingStatusText = 'Uploading';
-    if (!selectedFile) { setUploadStatus(t('messages_upload_selectFile')); return; }
-    if (!isAuthenticated) { setUploadStatus(t('messages_error_loginRequired_upload')); return; }
-    setUploadStatus(uploadingStatusText);
-    setError(null);
+  const performUpload = async (fileToUpload) => {
+    if (!isAuthenticated) {
+      throw new Error(t('messages_error_loginRequired_upload'));
+    }
     const placeholderStudentId = "00000000-0000-0000-0000-000000000001";
     const placeholderAssignmentId = "00000000-0000-0000-0000-000000000002";
 
-    try {
-        const token = await getToken();
-        if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        formData.append('student_id', placeholderStudentId);
-        formData.append('assignment_id', placeholderAssignmentId);
-        const response = await fetch(`${PROXY_PATH}/documents/upload`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
-        if (!response.ok) {
-            let errorDetail = `HTTP error ${response.status}`;
-            try { const errData = await response.json(); console.error('[DocumentsPage] Upload Error Response Body:', errData); errorDetail = errData.detail || errorDetail; } catch (e) { const textError = await response.text(); console.error('[DocumentsPage] Upload Error Response Text:', textError); errorDetail = textError || errorDetail; }
-            throw new Error(t('messages_upload_failed', { detail: errorDetail }));
-        }
-        const result = await response.json();
-        console.log('[DocumentsPage] Upload successful:', result);
-        setUploadStatus(t('messages_upload_success', { id: result.id }));
-        setSelectedFile(null);
-        const fileInput = document.getElementById('document-upload-input');
-        if (fileInput) { fileInput.value = ''; }
-        setTimeout(() => { fetchDocuments(); setUploadStatus(''); }, 1000);
-    } catch (err) {
-        console.error("Error uploading document:", err);
-        setUploadStatus(t('messages_upload_error', { message: err.message }));
+    const token = await getToken();
+    if (!token) {
+      throw new Error(t('messages_error_authTokenMissing'));
     }
+
+    const formData = new FormData();
+    formData.append('file', fileToUpload);
+    formData.append('student_id', placeholderStudentId);
+    formData.append('assignment_id', placeholderAssignmentId);
+
+    const response = await fetch(`${PROXY_PATH}/documents/upload`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorDetail = `HTTP error ${response.status}`;
+      try {
+        const errData = await response.json();
+        errorDetail = errData.detail || errorDetail;
+      } catch (e) {
+        try {
+            const textError = await response.text();
+            errorDetail = textError || errorDetail;
+        } catch (textE) {
+            // keep original errorDetail
+        }
+      }
+      throw new Error(t('messages_upload_failed_for_file', { fileName: fileToUpload.name, detail: errorDetail }));
+    }
+    return response.json();
+  };
+
+  const handleFileChange = (event) => {
+    if (event.target.files && event.target.files[0]) {
+      setSelectedFile(event.target.files[0]);
+      setUploadStatus(''); 
+    }
+  };
+
+  const handleSingleUploadClick = async () => {
+    if (!selectedFile) {
+      setUploadStatus(t('messages_upload_selectFile'));
+      return;
+    }
+    setUploadStatus(t('common_status_uploading_file', {fileName: selectedFile.name}));
+    setError(null);
+
+    try {
+      const result = await performUpload(selectedFile);
+      console.log('[DocumentsPage] Single upload successful:', result);
+      setUploadStatus(t('messages_upload_success', { id: result.id }));
+      setSelectedFile(null); 
+      const fileInput = document.getElementById('document-upload-input');
+      if (fileInput) {
+        fileInput.value = ''; 
+      }
+      setTimeout(() => { fetchDocuments(); setUploadStatus(''); }, 2000); 
+    } catch (err) {
+      console.error("Error uploading document:", err);
+      setUploadStatus(t('messages_upload_error', { message: err.message }));
+    }
+  };
+  
+  const triggerBulkFileSelect = () => {
+    if (bulkFileInputRef.current) {
+      bulkFileInputRef.current.click();
+    }
+  };
+
+  const handleBulkFilesSelected = async (event) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+  
+    let successCount = 0;
+    let errorCount = 0;
+    const totalFiles = files.length;
+  
+    for (let i = 0; i < totalFiles; i++) {
+      const file = files[i];
+      setUploadStatus(t('common_status_uploading_file_count', {fileName: file.name, current: i + 1, total: totalFiles}));
+      try {
+        const result = await performUpload(file);
+        console.log(`[DocumentsPage] Bulk upload successful for ${file.name}:`, result);
+        successCount++;
+      } catch (error) {
+        console.error(`[DocumentsPage] Bulk upload failed for ${file.name}:`, error.message);
+        // Display the error for this specific file, then continue
+        setUploadStatus(t('messages_upload_error_for_file', { fileName: file.name, message: error.message }));
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause to show error
+        errorCount++;
+      }
+    }
+  
+    if (totalFiles > 0) {
+      let summaryMessage = t('messages_bulk_upload_summary_succeeded', {count: successCount});
+      if (errorCount > 0) {
+        summaryMessage += ` ${t('messages_bulk_upload_summary_failed', {count: errorCount})}`;
+      }
+      setUploadStatus(summaryMessage);
+    } else {
+      setUploadStatus(''); 
+    }
+    
+    if (bulkFileInputRef.current) {
+      bulkFileInputRef.current.value = '';
+    }
+    
+    setTimeout(() => {
+      fetchDocuments();
+      // setUploadStatus(''); // Optionally clear summary after a delay
+    }, 3000); 
   };
 
   const handleAssess = async (documentId) => {
@@ -484,18 +571,33 @@ function DocumentsPage() {
               accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
             />
             <button
-              onClick={handleUpload}
-              disabled={!selectedFile || uploadStatus === 'Uploading'}
+              onClick={handleSingleUploadClick}
+              disabled={!selectedFile || uploadStatus.includes(t('common_status_uploading'))}
               className="btn btn-primary shrink-0"
             >
-              {uploadStatus === 'Uploading' ? (
+              {uploadStatus.includes(t('common_status_uploading')) && !uploadStatus.includes(t('messages_bulk_upload_summary_prefix')) ? (
                 <> <span className="loading loading-spinner loading-xs"></span> {t('common_status_uploading')} </>
               ) : (
                 <> <ArrowUpTrayIcon className="h-4 w-4 mr-1" /> {t('common_button_upload')} </>
               )}
             </button>
+            <button
+              onClick={triggerBulkFileSelect}
+              className="btn btn-accent shrink-0 ml-2"
+              disabled={uploadStatus.includes(t('common_status_uploading'))}
+            >
+              <ArrowUpTrayIcon className="h-4 w-4 mr-1" /> {t('documents_button_bulkUpload_alt', 'Bulk Upload Files')}
+            </button>
           </div>
-          {uploadStatus && uploadStatus !== 'Uploading' && (
+          <input 
+            type="file" 
+            multiple 
+            ref={bulkFileInputRef} 
+            onChange={handleBulkFilesSelected} 
+            style={{ display: 'none' }} 
+            accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+          />
+          {uploadStatus && (
             <div className={`alert mt-3 ${uploadStatus.startsWith(t('messages_upload_error_prefix')) ? 'alert-error' : 'alert-success'}`}>
               {uploadStatus.startsWith(t('messages_upload_error_prefix')) ? <XCircleIcon className="h-6 w-6"/> : <CheckCircleIcon className="h-6 w-6"/>}
               <span className="text-sm">{uploadStatus}</span>

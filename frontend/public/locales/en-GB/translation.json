@@ -203,6 +203,11 @@
     "messages_upload_network_error": "Network error during upload. Please check your connection.",
     "messages_upload_server_error": "Server error during upload. Please try again later.",
     "messages_upload_validation_error": "File validation error: {{detail}}",
+    "messages_upload_failed_for_file": "Upload failed for {{fileName}}: {{detail}}",
+    "messages_upload_error_for_file": "Error uploading {{fileName}}: {{message}}",
+    "messages_bulk_upload_summary_succeeded": "{{count}} file(s) uploaded successfully.",
+    "messages_bulk_upload_summary_failed": "{{count}} file(s) failed to upload.",
+    "messages_bulk_upload_summary_prefix": "Bulk upload summary:",
   
     "messages_assessment_failed": "Assessment failed: {{detail}}",
     "messages_assessment_errorUnknown": "An unknown error occurred during assessment.",
@@ -532,5 +537,6 @@
     "common_coming_soon": "Coming Soon!",
 
     "profile_page_title": "Your Profile",
-    "documentsPage_tooltip_deleteDocument": "Delete this document"
+    "documentsPage_tooltip_deleteDocument": "Delete this document",
+    "documents_button_bulkUpload_alt": "Bulk Upload Files"
 }
