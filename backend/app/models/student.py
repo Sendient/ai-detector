@@ -1,6 +1,6 @@
 # app/models/student.py
 from pydantic import BaseModel, Field, EmailStr, constr, ConfigDict # Import ConfigDict for Pydantic V2, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
 # No need to import bool, it's a built-in type
@@ -10,6 +10,7 @@ class StudentBase(BaseModel):
     first_name: str = Field(..., min_length=1, description="Student's first name")
     last_name: str = Field(..., min_length=1, description="Student's last name")
     teacher_id: str = Field(..., description="Kinde User ID of the owning teacher")
+    class_group_ids: Optional[List[uuid.UUID]] = Field(default_factory=list, description="List of class group IDs the student is assigned to")
 
     # --- ADDED email field ---
     email: Optional[EmailStr] = Field(default=None, description="Student's email address (Optional)")
@@ -66,6 +67,7 @@ class StudentInDBBase(StudentBase):
 class Student(StudentInDBBase):
     # Inherits all fields from StudentInDBBase: id, created_at, updated_at,
     # teacher_id, is_deleted, and all fields from StudentBase
+    class_group_ids: Optional[List[uuid.UUID]] = Field(default_factory=list, description="List of class group IDs the student is assigned to")
     pass
 
 # Model for updating - All fields are optional for partial updates
@@ -84,3 +86,15 @@ class StudentUpdate(BaseModel):
 
     # Note: teacher_id and is_deleted are NOT included here.
     # Ownership shouldn't change, and soft delete is a separate action.
+
+# Basic student info for embedding in other models
+class StudentBasicInfo(BaseModel):
+    id: uuid.UUID = Field(..., alias="_id")
+    first_name: str
+    last_name: str
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        arbitrary_types_allowed=True
+    )

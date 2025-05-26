@@ -12,6 +12,7 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   StopCircleIcon,
+  UserPlusIcon,
 } from '@heroicons/react/24/outline';
 
 function DocumentsPage() {
@@ -42,9 +43,21 @@ function DocumentsPage() {
   const [deleteSuccess, setDeleteSuccess] = useState(null);
   const [cancellingStatus, setCancellingStatus] = useState({});
 
+  // State for Assign Student Modal
+  const [showAssignStudentModal, setShowAssignStudentModal] = useState(false);
+  const [assigningDoc, setAssigningDoc] = useState(null);
+  const [studentsForAssignmentList, setStudentsForAssignmentList] = useState([]);
+  const [isLoadingStudentsForAssignment, setIsLoadingStudentsForAssignment] = useState(false);
+  const [selectedStudentIdForAssignment, setSelectedStudentIdForAssignment] = useState('');
+  const [searchTermForStudentAssignment, setSearchTermForStudentAssignment] = useState('');
+  const [assignStudentModalError, setAssignStudentModalError] = useState(null);
+  const [assignStudentModalSuccess, setAssignStudentModalSuccess] = useState(null);
+  const [isAssigningStudent, setIsAssigningStudent] = useState(false);
+
   const bulkFileInputRef = useRef(null);
 
   const PROXY_PATH = import.meta.env.VITE_API_PROXY_PATH || '/api/v1';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''; // Ensure API_BASE_URL is defined if used
 
   // Polling interval in milliseconds
   const POLLING_INTERVAL = 5000; // 5 seconds
@@ -319,6 +332,63 @@ function DocumentsPage() {
   const handleViewText = (documentId) => { navigate(`/documents/${documentId}/text-view`); };
   const handleViewReport = (documentId) => { navigate(`/documents/${documentId}/report`); };
 
+  const handleOpenAssignStudentModal = async (doc) => {
+    setAssigningDoc(doc);
+    setSearchTermForStudentAssignment('');
+    setSelectedStudentIdForAssignment(doc.student_id || ''); // Pre-select if already assigned
+    setAssignStudentModalError(null);
+    setAssignStudentModalSuccess(null);
+    await fetchStudentsForModal(); // We'll create this function next
+    setShowAssignStudentModal(true);
+  };
+
+  const handleCloseAssignStudentModal = () => {
+    setShowAssignStudentModal(false);
+    setAssigningDoc(null);
+    setStudentsForAssignmentList([]);
+    setSelectedStudentIdForAssignment('');
+    setSearchTermForStudentAssignment('');
+    setAssignStudentModalError(null);
+    setAssignStudentModalSuccess(null);
+  };
+
+  const fetchStudentsForModal = useCallback(async () => {
+    if (!isAuthenticated) {
+      setAssignStudentModalError(t('messages_error_loginRequired'));
+      return;
+    }
+    setIsLoadingStudentsForAssignment(true);
+    setAssignStudentModalError(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+      // Use API_BASE_URL here if your proxy setup is different for direct calls
+      // For consistency, if PROXY_PATH is for /api/v1, then student endpoint would be /api/v1/students
+      const response = await fetch(`${PROXY_PATH}/students/`, { // Assuming PROXY_PATH includes /api/v1
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        let errorDetail = `HTTP ${response.status}`;
+        try { const errData = await response.json(); errorDetail = errData.detail || errorDetail; } catch (e) { /* ignore */ }
+        throw new Error(t('messages_students_fetchError', { detail: errorDetail }));
+      }
+      const data = await response.json();
+      const processedStudents = data.map(student => ({ 
+        ...student, 
+        id: student._id || student.id 
+      })).filter(student => student.id);
+      setStudentsForAssignmentList(processedStudents);
+    } catch (err) {
+      console.error("[DocumentsPage] Error fetching students for modal:", err);
+      setAssignStudentModalError(err.message || t('messages_error_unexpected'));
+      setStudentsForAssignmentList([]);
+    } finally {
+      setIsLoadingStudentsForAssignment(false);
+    }
+  }, [getToken, isAuthenticated, t, PROXY_PATH]); // Added PROXY_PATH to dependencies
+
   const handleDeleteClick = (docId) => {
     setDeletingDocId(docId);
     setShowDeleteModal(true);
@@ -413,6 +483,89 @@ function DocumentsPage() {
             return newStatus;
         });
     }
+  };
+
+  const handleConfirmAssignStudent = async () => {
+    if (!assigningDoc || !selectedStudentIdForAssignment) {
+      setAssignStudentModalError(t('messages_error_actionFailed', { action: 'Assign Student', detail: 'Document or student not selected.'}));
+      return;
+    }
+
+    setIsAssigningStudent(true);
+    setAssignStudentModalError(null);
+    setAssignStudentModalSuccess(null);
+
+    console.log(`[DocumentsPage] Attempting to assign student ${selectedStudentIdForAssignment} to doc ${assigningDoc.id}`);
+
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+      const response = await fetch(`${PROXY_PATH}/documents/${assigningDoc.id}/assign-student`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ student_id: selectedStudentIdForAssignment }),
+        }
+      );
+
+      if (!response.ok) {
+        let errorDetail = `HTTP ${response.status}`;
+        try { 
+          const errData = await response.json(); 
+          errorDetail = errData.detail || errorDetail; 
+        } catch (e) { 
+          const textError = await response.text();
+          errorDetail = textError || errorDetail;
+        }
+        throw new Error(t('messages_assignStudent_failed', { detail: errorDetail }));
+      }
+
+      const updatedDocument = await response.json();
+      
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === updatedDocument.id 
+            ? { 
+                ...doc, // Spread existing doc properties
+                student_id: updatedDocument.student_id, // Update student_id from response
+                student_details: studentsForAssignmentList.find(s => s.id === selectedStudentIdForAssignment) // Correctly set student_details
+              }
+            : doc
+        )
+      );
+      // Fetch the student name for the success message, as updatedDocument might not contain it directly
+      const studentName = studentsForAssignmentList.find(s => s.id === selectedStudentIdForAssignment)?.first_name || 'Student';
+      setAssignStudentModalSuccess(t('messages_assignStudent_success', { studentName: studentName, filename: assigningDoc.original_filename }));
+      
+      setTimeout(() => {
+        handleCloseAssignStudentModal();
+      }, 1500);
+
+    } catch (error) {
+      console.error("[DocumentsPage] Error assigning student:", error);
+      setAssignStudentModalError(error.message || t('messages_assignStudent_failed_default'));
+    } finally {
+      setIsAssigningStudent(false);
+    }
+  };
+
+  const getSimplifiedFileType = (mimeType, originalFilename) => {
+    if (!mimeType && originalFilename) {
+        const ext = originalFilename.split('.').pop().toLowerCase();
+        if (ext === 'pdf') return 'PDF';
+        if (ext === 'docx') return 'Word';
+        if (ext === 'txt') return 'Text';
+        if (['png', 'jpg', 'jpeg'].includes(ext)) return 'Image';
+    }
+    if (mimeType === 'application/pdf') return 'PDF';
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'Word';
+    if (mimeType === 'text/plain') return 'Text';
+    if (mimeType === 'image/png' || mimeType === 'image/jpeg') return 'Image';
+    return mimeType || 'Unknown'; // Fallback to full mime type or 'Unknown'
   };
 
   const renderDocumentActions = (doc) => {
@@ -619,14 +772,15 @@ function DocumentsPage() {
               <table className="table w-full">
                 <thead>
                   <tr>
-                    <th className="text-sm font-semibold">{t('common_label_filename')}</th>
-                    <th className="text-sm font-semibold">{t('common_label_type')}</th>
-                    <th className="text-sm font-semibold">Status</th>
+                    <th className="text-sm font-semibold">{t('documents_list_header_filename')}</th>
                     <th className="text-sm font-semibold">{t('common_label_uploaded')}</th>
-                    <th className="text-sm font-semibold">{t('documents_list_label_aiScore')}</th>
-                    <th className="text-sm font-semibold">Characters</th>
-                    <th className="text-sm font-semibold">Words</th>
+                    <th className="text-sm font-semibold">{t('documents_list_header_status')}</th>
                     <th className="text-sm font-semibold">{t('common_label_actions')}</th>
+                    <th className="text-sm font-semibold">{t('documents_list_header_assignedStudent')}</th>
+                    <th className="text-sm font-semibold">{t('documents_list_label_aiScore')}</th>
+                    <th className="text-sm font-semibold">Words</th>
+                    <th className="text-sm font-semibold">Characters</th>
+                    <th className="text-sm font-semibold">{t('documents_list_header_type')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -655,7 +809,7 @@ function DocumentsPage() {
                     return (
                       <tr key={doc.id} className="hover">
                         <td className="text-sm truncate max-w-xs" title={doc.original_filename}>{doc.original_filename}</td>
-                        <td className="text-sm">{doc.file_type}</td>
+                        <td>{new Date(doc.upload_timestamp).toLocaleString()}</td>
                         <td>
                           {statusBadge}
                           {assessmentErrors[doc.id] && (
@@ -664,17 +818,42 @@ function DocumentsPage() {
                               </div>
                           )}
                         </td>
-                        <td>{new Date(doc.upload_timestamp).toLocaleString()}</td>
+                        <td className="space-x-1 whitespace-nowrap">
+                          <button
+                            onClick={() => handleViewReport(doc.id)}
+                            className="btn btn-ghost btn-xs p-1"
+                            title={t('documents_list_button_viewReport_title')}
+                          >
+                            <EyeIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenAssignStudentModal(doc)}
+                            className="btn btn-ghost btn-xs p-1"
+                            title={t('documents_list_button_assignStudent_title')}
+                          >
+                            <UserPlusIcon className="h-5 w-5 text-gray-600 hover:text-gray-800" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteClick(doc.id)}
+                            className="btn btn-ghost btn-xs p-1"
+                            title={t('documentsPage_tooltip_deleteDocument')}
+                          >
+                            <TrashIcon className="h-5 w-5 text-red-500 hover:text-red-700" />
+                          </button>
+                        </td>
+                        <td className="text-sm">
+                          {doc.student_details 
+                            ? `${doc.student_details.first_name} ${doc.student_details.last_name}` 
+                            : '-'}
+                        </td>
                         <td className="text-sm font-semibold">
                           {isCompleted && typeof currentResultScore === 'number' 
                             ? `${(currentResultScore > 1 ? currentResultScore : currentResultScore * 100).toFixed(1)}%` 
                             : '-'}
                         </td>
-                        <td className="text-sm">{doc.character_count?.toLocaleString() ?? '-'}</td>
                         <td className="text-sm">{doc.word_count?.toLocaleString() ?? '-'}</td>
-                        <td className="space-x-1 whitespace-nowrap">
-                          {renderDocumentActions(doc)}
-                        </td>
+                        <td className="text-sm">{doc.character_count?.toLocaleString() ?? '-'}</td>
+                        <td className="text-sm">{getSimplifiedFileType(doc.file_type, doc.original_filename)}</td>
                       </tr>
                     );
                   })}
@@ -723,6 +902,90 @@ function DocumentsPage() {
                 ) : (
                   t('common_button_delete')
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Student Modal */}
+      {showAssignStudentModal && assigningDoc && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-base-100 p-6 rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <h3 className="text-xl font-semibold mb-4 text-base-content">
+              {t('documents_assignModal_heading', { filename: assigningDoc.original_filename })}
+            </h3>
+            
+            {assignStudentModalError && (
+              <div className="alert alert-error mb-4">
+                <XCircleIcon className="h-6 w-6" />
+                <span>{assignStudentModalError}</span>
+              </div>
+            )}
+            {assignStudentModalSuccess && (
+              <div className="alert alert-success mb-4">
+                <CheckCircleIcon className="h-6 w-6" />
+                <span>{assignStudentModalSuccess}</span>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <input 
+                type="text"
+                placeholder={t('documents_assignModal_searchPlaceholder', "Search students by name or email...")}
+                value={searchTermForStudentAssignment}
+                onChange={(e) => setSearchTermForStudentAssignment(e.target.value)}
+                className="input input-bordered w-full input-sm"
+              />
+            </div>
+
+            <div className="overflow-y-auto flex-grow mb-4 border border-base-300 rounded-md min-h-[200px]">
+              {isLoadingStudentsForAssignment ? (
+                <div className="flex justify-center items-center h-full">
+                  <span className="loading loading-spinner loading-md"></span>
+                </div>
+              ) : studentsForAssignmentList.length === 0 ? (
+                <p className="text-center p-4 text-base-content/70">
+                  {t('documents_assignModal_noStudents', 'No students found.')}
+                </p>
+              ) : (
+                <ul className="divide-y divide-base-200">
+                  {studentsForAssignmentList
+                    .filter(student => 
+                      `${student.first_name} ${student.last_name} ${student.email || ''}`
+                        .toLowerCase()
+                        .includes(searchTermForStudentAssignment.toLowerCase())
+                    )
+                    .map(student => (
+                      <li key={student.id} 
+                          className={`p-3 hover:bg-base-200 cursor-pointer ${selectedStudentIdForAssignment === student.id ? 'bg-primary text-primary-content' : ''}`}
+                          onClick={() => setSelectedStudentIdForAssignment(student.id)}
+                      >
+                        <div className="font-medium">{student.first_name} {student.last_name}</div>
+                        <div className="text-xs opacity-70">{student.email || t('common_text_notApplicable')}</div>
+                      </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t border-base-300">
+              <button
+                type="button"
+                onClick={handleCloseAssignStudentModal}
+                className="btn btn-ghost btn-sm"
+                disabled={isAssigningStudent}
+              >
+                {t('common_button_cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAssignStudent}
+                className="btn btn-primary btn-sm"
+                disabled={!selectedStudentIdForAssignment || isAssigningStudent}
+              >
+                {isAssigningStudent ? <span className="loading loading-spinner loading-xs"></span> : null}
+                {t('documents_assignModal_button_assign', 'Assign Student')}
               </button>
             </div>
           </div>

@@ -15,8 +15,6 @@ export default defineConfig({
       ],
     },
   },
-
-  // Add this server configuration block
   server: {
     port: 5173, // Keep the frontend running on 5173 (or your preferred port)
     proxy: {

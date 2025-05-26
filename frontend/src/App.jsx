@@ -24,6 +24,7 @@ import BulkUploadPage from './pages/BulkUploadPage';
 import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import PaymentCancelPage from './pages/PaymentCancelPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
+import ClassViewPage from './pages/ClassViewPage';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
@@ -57,6 +58,7 @@ function App() {
         <Route path="/documents/:documentId/report" element={<AIDetectionReportPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/classes" element={<ClassesPage />} />
+        <Route path="/classes/view/:classId" element={<ClassViewPage />} />
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/assess/:documentId" element={<AssessmentPage />} />
         <Route path="/profile" element={<ProfilePage />} />

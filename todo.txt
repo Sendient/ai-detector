@@ -18,3 +18,4 @@
 
 ## Other Todos (Placeholder for future tasks)
 - [ ] ... 
+You're right, using _id on the frontend is a workaround. The more robust, long-term solution is to ensure your backend Pydantic models consistently serialize MongoDB's _id as id in API responses. This makes the API more conventional. We can address that refinement later if you wish. For now, let's get the functionality restored.

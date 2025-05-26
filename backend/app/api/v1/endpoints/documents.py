@@ -15,7 +15,7 @@ import asyncio # Added for asyncio.to_thread
 import string # Added for string.punctuation
 
 # Import models
-from ....models.document import Document, DocumentCreate, DocumentUpdate
+from ....models.document import Document, DocumentCreate, DocumentUpdate, DocumentAssignStudentRequest
 from ....models.result import Result, ResultCreate, ResultUpdate, ParagraphResult
 from ....models.enums import DocumentStatus, ResultStatus, FileType, BatchPriority, BatchStatus, SubscriptionPlan
 from ....models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
@@ -441,13 +441,22 @@ async def read_documents(
         sort_order=sort_order_int
     )
     docs_to_log = []
-    for doc in documents:
+    for i, doc in enumerate(documents):
         try:
             docs_to_log.append(doc.model_dump(mode='json')) 
         except Exception as log_e:
-            logger.warning(f"Could not serialize document {getattr(doc, 'id', 'N/A')} for logging: {log_e}")
-            docs_to_log.append({"id": str(getattr(doc, 'id', 'N/A')), "error": "Serialization failed for log"})
-    logger.debug(f"Returning documents for GET /documents endpoint: {docs_to_log}")
+            logger.error(f"Could not serialize document at index {i} for logging. Doc ID: {getattr(doc, 'id', 'N/A')}, Type: {type(doc)}. Error: {log_e}", exc_info=True)
+            # Try a more basic representation if model_dump fails
+            doc_repr = {}
+            try:
+                doc_repr['id'] = str(doc.id) if hasattr(doc, 'id') else 'N/A'
+                doc_repr['original_filename'] = doc.original_filename if hasattr(doc, 'original_filename') else 'N/A'
+                doc_repr['status'] = str(doc.status) if hasattr(doc, 'status') else 'N/A'
+                doc_repr['error_detail'] = f"Serialization failed: {log_e}"
+            except Exception as repr_e:
+                doc_repr['critical_error'] = f"Failed to even create basic repr: {repr_e}"
+            docs_to_log.append(doc_repr)
+    logger.debug(f"Returning documents for GET /documents endpoint. Processed for logging: {docs_to_log}")
     return documents
 
 @router.put(
@@ -1104,6 +1113,56 @@ async def cancel_assessment_status_endpoint( # Renamed
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail=f"Cancellation for document {document.id} did not result in status changes despite being in a potentially cancellable state. Check logs."
         )
+
+@router.put(
+    "/{document_id}/assign-student",
+    response_model=Document,
+    status_code=status.HTTP_200_OK,
+    summary="Assign a student to a document (Protected)",
+    description="Updates the student_id for a given document. Requires authentication."
+)
+async def assign_student_to_document(
+    document_id: uuid.UUID,
+    request_body: DocumentAssignStudentRequest,
+    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+):
+    user_kinde_id = current_user_payload.get("sub")
+    logger.info(f"User {user_kinde_id} attempting to assign student {request_body.student_id} to document {document_id}")
+
+    # Verify the document exists and belongs to the current user (teacher)
+    document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id)
+    if not document:
+        logger.warning(f"User {user_kinde_id} failed assign student: Document {document_id} not found or not accessible.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document {document_id} not found or not accessible."
+        )
+
+    # Verify the student exists (optional, but good practice)
+    # student = await crud.get_student_by_id(student_id=request_body.student_id, teacher_kinde_id=user_kinde_id)
+    # if not student:
+    #     logger.warning(f"User {user_kinde_id} failed assign student: Student {request_body.student_id} not found or not accessible.")
+    #     raise HTTPException(
+    #         status_code=status.HTTP_404_NOT_FOUND,
+    #         detail=f"Student {request_body.student_id} not found or not accessible to this teacher."
+    #     )
+    
+    # Update the document
+    updated_document = await crud.update_document_student_id(
+        document_id=document_id,
+        student_id=request_body.student_id,
+        teacher_id=user_kinde_id
+    )
+
+    if not updated_document:
+        logger.error(f"Failed to update student_id for document {document_id} for user {user_kinde_id}.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to assign student to document."
+        )
+    
+    logger.info(f"Successfully assigned student {request_body.student_id} to document {document_id} for user {user_kinde_id}.")
+    return updated_document
 
 # === Helper function to check Recaptcha (if ever needed) ===
 # async def verify_recaptcha(token: str) -> bool:

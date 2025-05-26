@@ -478,22 +478,22 @@ async def update_teacher_by_stripe_customer_id(
         return None
 
 # --- ClassGroup CRUD Functions ---
-# --- REMOVED @with_transaction from create_class_group ---
+# --- REMOVED @with_transaction from create_class_group --- NO, it was already removed.
 async def create_class_group(
-    class_group_in: ClassGroupCreate,
-    teacher_id: str, # MODIFIED: Changed type from uuid.UUID to str
+    class_group_in: ClassGroupCreate, # teacher_id (UUID) is now correctly in this model
+    # teacher_id: str, # MODIFIED: REMOVED - No longer needed as it's in class_group_in as UUID
     session=None
 ) -> Optional[ClassGroup]:
-    """Creates a class group record using data and the provided teacher ID."""
+    """Creates a class group record using data. teacher_id (internal UUID) is in class_group_in."""
     collection = _get_collection(CLASSGROUP_COLLECTION); now = datetime.now(timezone.utc)
     if collection is None: return None
     new_id = uuid.uuid4()
-    doc = class_group_in.model_dump();
+    doc = class_group_in.model_dump(); # teacher_id (UUID) from class_group_in will be used
     doc["_id"] = new_id;
-    doc["teacher_id"] = teacher_id # ADD the passed teacher_id to the document
+    # doc["teacher_id"] = teacher_id # REMOVED - No longer needed, taken from class_group_in.teacher_id
     doc.setdefault("student_ids", [])
     doc["created_at"] = now; doc["updated_at"] = now; doc["is_deleted"] = False
-    logger.info(f"Inserting class group: {doc['_id']} for teacher: {teacher_id}")
+    logger.info(f"Inserting class group: {doc['_id']} for teacher (internal UUID): {doc['teacher_id']}") # Updated log message
     try: inserted_result = await collection.insert_one(doc, session=session) # Pass session if provided
     except Exception as e: logger.error(f"Error inserting class group: {e}", exc_info=True); return None
     if inserted_result.acknowledged: created_doc = await collection.find_one({"_id": new_id}, session=session)
@@ -530,8 +530,55 @@ async def get_all_class_groups( teacher_id: Optional[uuid.UUID] = None, school_i
     except Exception as e: logger.error(f"Error getting all class groups: {e}", exc_info=True)
     return items_list
 
+async def get_class_group_by_name_year_and_teacher(
+    class_name: str, 
+    teacher_id: uuid.UUID, # MODIFIED: Changed from teacher_kinde_id: str to teacher_id: uuid.UUID
+    academic_year: Optional[str], 
+    session=None
+) -> Optional[ClassGroup]:
+    """
+    Retrieves a class group by its name, academic year (optional), and the teacher's internal UUID.
+    If academic_year is None, it specifically looks for class groups where academic_year is not set.
+    """
+    collection = _get_collection(CLASSGROUP_COLLECTION)
+    if collection is None: 
+        logger.error("Classgroup collection not available for get_class_group_by_name_year_and_teacher")
+        return None
+
+    # The teacher_id provided is now the internal UUID, so no further lookup is needed here.
+    # If teacher_id were still Kinde ID, we'd do:
+    # teacher_record = await get_teacher_by_kinde_id(kinde_id=teacher_kinde_id, session=session)
+    # if not teacher_record or not teacher_record.id:
+    #     logger.warning(f"Teacher not found for Kinde ID {teacher_kinde_id} when searching for class group.")
+    #     return None
+    # internal_teacher_uuid = teacher_record.id
+
+    query = {
+        "class_name": class_name,
+        "teacher_id": teacher_id, # Use the direct internal UUID
+        # "academic_year": academic_year # Original simple query for academic_year
+    }
+    # Handle academic_year: if None is passed, explicitly query for null or not exists.
+    # If a string is passed, query for that string.
+    if academic_year is None:
+        query["academic_year"] = None # or query["academic_year"] = {"$exists": False} if that's preferred for unset fields
+    else:
+        query["academic_year"] = academic_year
+
+    query.update(soft_delete_filter(include_deleted=False)) # Always exclude deleted for this check
+
+    logger.debug(f"Querying for class group: {query}")
+    try:
+        class_group_doc = await collection.find_one(query, session=session)
+        if class_group_doc:
+            return ClassGroup(**class_group_doc)
+        return None
+    except Exception as e:
+        logger.error(f"Error in get_class_group_by_name_year_and_teacher: {e}", exc_info=True)
+        return None
+
 @with_transaction
-async def update_class_group(class_group_id: uuid.UUID, teacher_id: str, class_group_in: ClassGroupUpdate, session=None) -> Optional[ClassGroup]:
+async def update_class_group(class_group_id: uuid.UUID, teacher_id: uuid.UUID, class_group_in: ClassGroupUpdate, session=None) -> Optional[ClassGroup]:
     collection = _get_collection(CLASSGROUP_COLLECTION); now = datetime.now(timezone.utc)
     if collection is None: return None
     update_data = class_group_in.model_dump(exclude_unset=True)
@@ -544,22 +591,29 @@ async def update_class_group(class_group_id: uuid.UUID, teacher_id: str, class_g
         logger.warning(f"No update data for class group {class_group_id}")
         # Need to fetch class_group by id and teacher_id if we are to implement RBAC here
         # For now, just getting by id, assuming teacher_id check is for the update operation itself.
-        return await get_class_group_by_id(class_group_id, include_deleted=False, session=session)
-    update_data["updated_at"] = now; logger.info(f"Updating class group {class_group_id} for teacher {teacher_id}")
-    query_filter = {"_id": class_group_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}}
+        # The get_class_group_by_id doesn't perform RBAC by teacher_id, so this path might need review
+        # if called with a teacher_id that doesn't own the class_group_id.
+        # However, the query_filter below *does* check ownership.
+        cg = await get_class_group_by_id(class_group_id, include_deleted=False, session=session)
+        if cg and cg.teacher_id == teacher_id: # Add check here
+             return cg
+        return None # If not owned or not found
+
+    update_data["updated_at"] = now; logger.info(f"Updating class group {class_group_id} for teacher (internal UUID): {teacher_id}")
+    query_filter = {"_id": class_group_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}} # teacher_id is now UUID
     try:
         updated_doc = await collection.find_one_and_update( query_filter, {"$set": update_data}, return_document=ReturnDocument.AFTER, session=session)
         if updated_doc: return ClassGroup(**updated_doc) # Assumes schema handles alias
-        else: logger.warning(f"Class group {class_group_id} not found or already deleted for update."); return None
+        else: logger.warning(f"Class group {class_group_id} not found or already deleted for update, or not owned by teacher {teacher_id}."); return None
     except Exception as e: logger.error(f"Error during class group update operation: {e}", exc_info=True); return None
 
 @with_transaction
-async def delete_class_group(class_group_id: uuid.UUID, teacher_id: str, hard_delete: bool = False, session=None) -> bool:
+async def delete_class_group(class_group_id: uuid.UUID, teacher_id: uuid.UUID, hard_delete: bool = False, session=None) -> bool:
     collection = _get_collection(CLASSGROUP_COLLECTION)
     if collection is None: return False
-    logger.info(f"{'Hard' if hard_delete else 'Soft'} deleting class group {class_group_id} for teacher {teacher_id}")
+    logger.info(f"{'Hard' if hard_delete else 'Soft'} deleting class group {class_group_id} for teacher (internal UUID): {teacher_id}")
     count = 0
-    query_base = {"_id": class_group_id, "teacher_id": teacher_id}
+    query_base = {"_id": class_group_id, "teacher_id": teacher_id} # teacher_id is now UUID
     try:
         if hard_delete: 
             result = await collection.delete_one(query_base, session=session)
@@ -763,42 +817,144 @@ async def get_student_by_id(
         logger.error(f"Error getting student: {e}", exc_info=True); return None
 
 async def get_all_students(
-    teacher_id: str, # <<< ADDED: Make teacher_id mandatory
+    teacher_id: str, 
     external_student_id: Optional[str] = None,
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
     year_group: Optional[str] = None,
+    class_id: Optional[uuid.UUID] = None, # ADDED class_id
     skip: int = 0,
     limit: int = 100,
     include_deleted: bool = False,
     session=None
 ) -> List[Student]:
-    collection = _get_collection(STUDENT_COLLECTION); students_list: List[Student] = []
-    if collection is None: return students_list
-    filter_query = soft_delete_filter(include_deleted)
-    filter_query["teacher_id"] = teacher_id # <<< ADDED: Filter by teacher_id
-    if external_student_id is not None: filter_query["external_student_id"] = external_student_id
-    if first_name is not None: filter_query["first_name"] = {"$regex": f"^{re.escape(first_name)}$", "$options": "i"}
-    if last_name is not None: filter_query["last_name"] = {"$regex": f"^{re.escape(last_name)}$", "$options": "i"}
-    if year_group is not None: filter_query["year_group"] = year_group
-    logger.info(f"Getting all students filter={filter_query} skip={skip} limit={limit}")
+    collection = _get_collection(STUDENT_COLLECTION)
+    students_list: List[Student] = []
+    if collection is None:
+        return students_list
+
+    query: Dict[str, Any] = {}
+    query.update(soft_delete_filter(include_deleted))
+
+    # Apply teacher_id filter - assuming students are scoped to a teacher.
+    # This might need adjustment based on your exact multi-tenancy model.
+    # For now, we assume a teacher can only see students they are associated with
+    # or students in a class they own.
+    # If class_id is provided, the teacher_id check should ideally be on the class group.
+    
+    # If class_id is provided, prioritize fetching students from that class
+    if class_id:
+        logger.info(f"Filtering students by class_id: {class_id} for teacher_kinde_id: {teacher_id}")
+        # Fetch the class group to get its student_ids
+        # Note: get_class_group_by_id does not directly take teacher_id for auth,
+        # Auth should happen at the API layer before calling this.
+        # However, we need to ensure the requesting teacher CAN see these students.
+        # The API layer already fetched the class group and authorized the teacher for it.
+        class_group_doc = await get_class_group_by_id(class_group_id=class_id, session=session) # Renamed to avoid conflict
+        if not class_group_doc or not class_group_doc.student_ids:
+            logger.info(f"Class group {class_id} not found or has no students.")
+            return [] # Return empty list if class not found or no students in it
+        
+        # Filter students whose _id is in the class_group's student_ids list
+        query["_id"] = {"$in": class_group_doc.student_ids}
+        # When filtering by class_id, the teacher_id constraint is implicitly handled 
+        # by the API layer ensuring the teacher owns the class. We are fetching students
+        # based on the class's student list.
+        # We also need to ensure these students actually belong to the teacher if student_ids can be manipulated
+        # or if a student can be in a class but not belong to the teacher who owns the class.
+        # However, Student.teacher_id is Kinde ID. The current teacher_id param is Kinde ID.
+        # So adding this ensures students are from the class AND directly tied to this teacher.
+        query["teacher_id"] = teacher_id
+
+        logger.debug(f"Query for students by class_id {class_id}: {query}")
+
+    else:
+        # Original filters if no class_id is provided
+        # This part needs careful consideration of how students are linked to teachers
+        # if not through a class. If students always belong to a teacher via their classes,
+        # listing students without a class_id might require iterating all teacher's classes.
+        # For now, let's assume a direct 'teacher_id' field on student for non-class specific queries
+        # or that the current 'teacher_id' param is a Kinde ID and students need to be linked.
+        # This part is complex and depends on your data model.
+        # THE PREVIOUS IMPLEMENTATION OF get_all_students ADDED teacher_id as a MANDATORY PARAM
+        # but it was used as `teacher_kinde_id`. We need to be clear on how students are
+        # associated with teachers if not directly by class_id.
+        # For now, if no class_id, we fall back to other filters.
+        # A direct `students.teacher_id == teacher_kinde_id` might not exist.
+
+        logger.info(f"Filtering students for teacher_kinde_id: {teacher_id} (no class_id provided)")
+        # ADD THIS LINE TO FILTER BY THE TEACHER'S KINDE ID
+        query["teacher_id"] = teacher_id
+
+        # Fallback to existing filters if no class_id
+        if external_student_id:
+            query["external_student_id"] = external_student_id
+        if first_name:
+            # Using regex for case-insensitive partial match
+            query["first_name"] = {"$regex": f"^{re.escape(first_name)}", "$options": "i"}
+        if last_name:
+            query["last_name"] = {"$regex": f"^{re.escape(last_name)}", "$options": "i"}
+        if year_group: # Assuming year_group is stored directly on the student
+            query["year_group"] = year_group
+        
+        # If querying without class_id, we need a way to scope to the teacher.
+        # This is a placeholder, as the 'teacher_id' field might not exist directly on the Student model
+        # or might mean something else (like the Kinde ID of the teacher who created them).
+        # This needs to be resolved based on how students are associated with teachers.
+        # For now, if no other filters narrow it down, this query might be too broad or incorrect.
+        # query["created_by_teacher_kinde_id"] = teacher_id # Example, if such a field exists
+
+
+    logger.debug(f"Final student query: {query}")
+    
+    student_docs_from_db = []
     try:
-        cursor = collection.find(filter_query, session=session).skip(skip).limit(limit)
+        cursor = collection.find(query, session=session).skip(skip).limit(limit)
         async for doc in cursor:
-            try:
-                mapped_data = {**doc}
-                if "_id" in mapped_data:
-                    mapped_data["id"] = mapped_data.pop("_id", None) # Rename key
-                else:
-                    logger.warning(f"Student document missing '_id': {doc}")
-                    continue # Skip this document if it has no _id
-                student_instance = Student(**mapped_data)
-                students_list.append(student_instance)
-            except Exception as validation_err:
-                doc_id_for_log = doc.get('_id', 'UNKNOWN_ID') # Use original doc for logging ID
-                logger.error(f"Pydantic validation failed for student doc {doc_id_for_log}: {validation_err}", exc_info=True) # Add traceback for validation errors
+            student_docs_from_db.append(doc)
     except Exception as e:
-        logger.error(f"Error getting all students during DB query: {e}", exc_info=True)
+        logger.error(f"Error fetching student documents: {e}", exc_info=True)
+        return [] # Return empty if fetch fails
+
+    # Fetch all class groups for the current teacher to cross-reference
+    # This requires teacher_id (Kinde ID) to be resolved to an internal teacher UUID first
+    # then use that internal UUID to fetch class groups.
+    teacher_record = await get_teacher_by_kinde_id(kinde_id=teacher_id, session=session)
+    teachers_class_groups: List[ClassGroup] = []
+    if teacher_record and teacher_record.id:
+        teachers_class_groups = await get_all_class_groups(
+            teacher_id=teacher_record.id, # Pass internal teacher UUID
+            include_deleted=False, 
+            limit=1000, # Assuming a teacher won't have more than 1000 active classes
+            session=session
+        )
+    else:
+        logger.warning(f"Could not find teacher record for Kinde ID {teacher_id} when trying to populate student class_group_ids.")
+
+    for doc in student_docs_from_db:
+        try:
+            mapped_doc = doc.copy()
+            if "_id" in mapped_doc and "id" not in mapped_doc:
+                mapped_doc["id"] = mapped_doc["_id"]
+            
+            student_actual_id = mapped_doc.get("id") # Should be UUID
+            assigned_class_group_ids = []
+            if student_actual_id and teachers_class_groups: # student_actual_id needs to be UUID
+                for cg in teachers_class_groups:
+                    if cg.student_ids and student_actual_id in cg.student_ids: # cg.student_ids contains UUIDs
+                        if cg.id: # cg.id is also UUID
+                            assigned_class_group_ids.append(cg.id)
+            
+            mapped_doc["class_group_ids"] = assigned_class_group_ids
+            
+            students_list.append(Student(**mapped_doc))
+        except ValidationError as e:
+            logger.error(f"Pydantic validation error for student document {doc.get('_id')}: {e.errors()}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Error processing student document {doc.get('_id')} after fetch: {e}", exc_info=True)
+            
+    logger.info(f"Processed {len(students_list)} students with class group ID population.")
+    
     return students_list
 
 @with_transaction
@@ -899,7 +1055,7 @@ async def get_document_by_id(
     else: logger.warning(f"Document {document_id} not found."); return None
 
 async def get_all_documents(
-    teacher_id: str, # <<< ADDED: Make teacher_id mandatory
+    teacher_id: str, # <<< This is the Kinde ID
     student_id: Optional[uuid.UUID] = None,
     assignment_id: Optional[uuid.UUID] = None,
     status: Optional[DocumentStatus] = None,
@@ -911,39 +1067,89 @@ async def get_all_documents(
     session=None
 ) -> List[Document]:
     collection = _get_collection(DOCUMENT_COLLECTION)
+    student_collection = _get_collection(STUDENT_COLLECTION) # Added for student details
+    # teacher_collection = _get_collection(TEACHER_COLLECTION) # For fetching teacher's internal ID
+
     documents_list: List[Document] = []
-    if collection is None: return documents_list
+    if collection is None or student_collection is None: # Check both collections
+        logger.error("Document or Student collection not found for get_all_documents.")
+        return documents_list
 
-    filter_query = soft_delete_filter(include_deleted)
-    filter_query["teacher_id"] = teacher_id # <<< ADDED: Filter by teacher_id
-    if student_id: filter_query["student_id"] = student_id
-    if assignment_id: filter_query["assignment_id"] = assignment_id
-    if status: filter_query["status"] = status.value # Filter DB by enum value
+    # Get the teacher's internal UUID from their Kinde ID
+    teacher_internal_uuid: Optional[uuid.UUID] = None
+    teacher_record = await get_teacher_by_kinde_id(kinde_id=teacher_id, session=session) # session might be None
+    if teacher_record:
+        teacher_internal_uuid = teacher_record.id
+    else:
+        logger.warning(f"Teacher with Kinde ID {teacher_id} not found. Cannot reliably fetch student details by teacher ownership.")
+        # Decide if we should return empty or proceed without teacher-based student filtering.
+        # For now, proceed, but student_details might be inaccurate if student's teacher_id isn't the Kinde ID.
 
-    logger.info(f"Getting all documents filter={filter_query} sort_by={sort_by} sort_order={sort_order} skip={skip} limit={limit}")
 
+    query: Dict[str, Any] = {"teacher_id": teacher_id} # Document's teacher_id is Kinde ID
+    query.update(soft_delete_filter(include_deleted))
+
+    if student_id: query["student_id"] = student_id
+    if assignment_id: query["assignment_id"] = assignment_id
+    if status: query["status"] = status.value # Use .value for Enum comparison
+
+    logger.info(f"Getting all documents for teacher {teacher_id} with filters: student_id={student_id}, assignment_id={assignment_id}, status={status}, deleted={include_deleted}, skip={skip}, limit={limit}, sort_by={sort_by}, sort_order={sort_order}")
+    
     try:
-        cursor = collection.find(filter_query, session=session)
-
-        # --- NEW: Apply Sorting ---
+        cursor = collection.find(query, session=session)
         if sort_by:
-            # Map 'id' to '_id' for sorting if necessary
-            db_sort_field = "_id" if sort_by == "id" else sort_by
-            sort_criteria = [(db_sort_field, sort_order)]
-            logger.debug(f"Applying sort criteria: {sort_criteria}")
-            cursor = cursor.sort(sort_criteria)
-        # --- END NEW Sorting ---
-
-        cursor = cursor.skip(skip).limit(limit) # Apply skip/limit after sorting
-
-        async for doc in cursor:
+            cursor = cursor.sort(sort_by, sort_order)
+        cursor = cursor.skip(skip).limit(limit)
+        
+        async for doc_data in cursor:
             try:
-                mapped_data = {**doc}
-                if "_id" in mapped_data: mapped_data["id"] = mapped_data.pop("_id")
-                else: logger.warning(f"Document doc missing '_id': {doc}"); continue
-                documents_list.append(Document(**mapped_data))
-            except Exception as validation_err: logger.error(f"Pydantic validation failed for document doc {doc.get('_id', 'UNKNOWN')}: {validation_err}")
-    except Exception as e: logger.error(f"Error getting all documents: {e}", exc_info=True)
+                # --- Populate student_details ---
+                student_details_data = None
+                if doc_data.get("student_id"):
+                    # Student.teacher_id is Kinde ID (based on create_student)
+                    # So, we query student_collection using the teacher_id (Kinde ID) from the function arguments.
+                    student_query: Dict[str, Any] = {
+                        "_id": doc_data["student_id"], 
+                        "teacher_id": teacher_id, # Use the Kinde ID of the current teacher
+                        "is_deleted": {"$ne": True}
+                    }
+                    
+                    # logger.warning(f"Cannot verify student ownership for student_id {doc_data['student_id']} as teacher internal UUID is unknown.") # No longer relevant with direct Kinde ID usage
+
+                    student_doc = await student_collection.find_one(
+                        student_query,
+                        session=session
+                    )
+                    if student_doc:
+                        try:
+                            # Map _id to id for StudentBasicInfo
+                            student_details_data = {"id": student_doc["_id"], "first_name": student_doc["first_name"], "last_name": student_doc["last_name"]}
+                        except KeyError as ke:
+                            logger.error(f"Missing expected field in student_doc for student_id {doc_data['student_id']}: {ke}")
+                            student_details_data = None # Reset if mapping fails
+                    else:
+                        logger.warning(f"Student details not found for student_id {doc_data['student_id']} linked to doc {doc_data.get('_id')} (queried with teacher Kinde ID: {teacher_id}).")
+                
+                # --- End Populate student_details ---
+
+                # Prepare document data for Pydantic model, including student_details
+                # Ensure Document model is instantiated with student_details
+                # doc_data is a dict from MongoDB. We need to pass student_details to the Document constructor.
+                
+                # Manually construct the dictionary for the Document model
+                final_doc_dict_for_model = {**doc_data}
+                if student_details_data:
+                    final_doc_dict_for_model["student_details"] = student_details_data
+                
+                documents_list.append(Document(**final_doc_dict_for_model))
+            except ValidationError as e_val:
+                logger.error(f"Pydantic validation error for document {doc_data.get('_id', 'N/A')}: {e_val}", exc_info=True)
+            except Exception as e_doc:
+                logger.error(f"Error processing individual document {doc_data.get('_id', 'N/A')} in get_all_documents: {e_doc}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error querying documents in get_all_documents: {e}", exc_info=True)
+    
+    logger.debug(f"get_all_documents returning {len(documents_list)} documents.")
     return documents_list
 
 @with_transaction
@@ -1033,274 +1239,145 @@ async def update_document_counts(
 
 @with_transaction
 async def delete_document(document_id: uuid.UUID, teacher_id: str, session=None) -> bool: # ADDED teacher_id
-    """
-    Performs deletion of a document and its associated data (blob, result).
-    Checks ownership using teacher_id before proceeding.
-    Performs a SOFT delete on the document record itself.
+    collection = _get_collection(DOCUMENT_COLLECTION)
+    result_collection = _get_collection(RESULT_COLLECTION)
+    if collection is None or result_collection is None:
+        logger.error(f"Collections not found for deleting document {document_id}")
+        return False
 
-    Args:
-        document_id: UUID of the document to delete.
-        teacher_id: Kinde ID of the user attempting deletion (for authorization).
-        session: Optional database session for transactions (REMOVED - no longer used here).
+    logger.info(f"Attempting to soft-delete document {document_id} by teacher {teacher_id}")
 
-    Returns:
-        True if deletion (including soft delete of document) was successful, False otherwise.
-    """
+    # 1. Fetch the document to get blob_path and verify ownership
+    doc_to_delete = await collection.find_one(
+        {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}},
+        session=session
+    )
+
+    if not doc_to_delete:
+        logger.warning(f"Document {document_id} not found or not owned by teacher {teacher_id}, or already deleted.")
+        return False # Or raise HTTPException(404, "Document not found or access denied")
+
+    # 2. Soft-delete the Document record
+    now = datetime.now(timezone.utc)
+    update_result = await collection.update_one(
+        {"_id": document_id, "teacher_id": teacher_id},
+        {"$set": {"is_deleted": True, "updated_at": now, "status": DocumentStatus.DELETED}},
+        session=session
+    )
+
+    if update_result.modified_count == 0:
+        logger.warning(f"Soft-delete failed for document {document_id}. It might have been deleted by another process or ownership changed.")
+        # Don't return False yet, try to delete other related data if doc was already marked deleted.
+        # If doc_to_delete was found, it implies it wasn't marked as deleted by *this* query.
+        # This path could be hit if is_deleted was set to True between find_one and update_one.
+
+    # 3. Soft-delete associated Result record (if any)
+    # We delete the result regardless of whether the document update itself modified a count, as long as the doc was initially found.
+    result_update = await result_collection.update_one(
+        {"document_id": document_id, "teacher_id": teacher_id}, # Ensure teacher_id matches for the result too
+        {"$set": {"is_deleted": True, "updated_at": now, "status": ResultStatus.DELETED}},
+        session=session
+    )
+    if result_update.modified_count > 0:
+        logger.info(f"Soft-deleted result associated with document {document_id}.")
+    else:
+        logger.info(f"No active result found to soft-delete for document {document_id}, or it was already deleted.")
+
+    # 4. Delete the file from Blob Storage
+    blob_path = doc_to_delete.get("storage_blob_path")
+    if blob_path:
+        try:
+            logger.info(f"Attempting to delete blob: {blob_path} for document {document_id}")
+            # Assuming service_delete_blob is an async function or can be run in a thread
+            # If service_delete_blob is synchronous, use asyncio.to_thread
+            if asyncio.iscoroutinefunction(service_delete_blob):
+                await service_delete_blob(blob_path)
+            else:
+                await asyncio.to_thread(service_delete_blob, blob_path)
+            logger.info(f"Successfully deleted blob: {blob_path} for document {document_id}")
+        except ResourceNotFoundError:
+            logger.warning(f"Blob {blob_path} not found during deletion for document {document_id}. It might have been already deleted.")
+        except Exception as e:
+            logger.error(f"Error deleting blob {blob_path} for document {document_id}: {e}", exc_info=True)
+            # Decide if this should cause the whole operation to fail. 
+            # For now, we'll consider the DB soft-delete successful even if blob deletion fails.
+    else:
+        logger.warning(f"No storage_blob_path found for document {document_id}. Cannot delete from blob storage.")
+
+    # If the initial document was found and we attempted deletion, consider it a success from CRUD perspective
+    # The API endpoint will return 204 if this function returns True.
+    logger.info(f"Soft-delete process completed for document {document_id}.")
+    return True
+
+@with_transaction
+async def update_document_student_id(
+    document_id: uuid.UUID,
+    student_id: uuid.UUID,
+    teacher_id: str, # For RBAC, ensuring the teacher owns the document
+    session=None
+) -> Optional[Document]:
     collection = _get_collection(DOCUMENT_COLLECTION)
     if collection is None:
-        return False
+        logger.error(f"Document collection not found while trying to update student_id for doc {document_id}")
+        return None
+
     now = datetime.now(timezone.utc)
+    update_data = {
+        "student_id": student_id,
+        "updated_at": now
+    }
 
-    # Fetch document first to check ownership and get blob path, even if soft-deleted
-    document = await get_document_by_id(
-        document_id=document_id,
-        teacher_id=teacher_id,
-        include_deleted=True, # Fetch even if already soft-deleted
-        session=None # REMOVED session
-    )
-    if not document:
-        logger.warning(f"Document {document_id} not found or not owned by teacher {teacher_id} during delete attempt.")
-        return False # Not found or not authorized
+    logger.info(f"Attempting to update student_id to {student_id} for document {document_id} by teacher {teacher_id}")
 
-    # If already soft-deleted, log and return True (idempotency)
-    if document.is_deleted: # CHANGED check from deleted_at to is_deleted
-        logger.info(f"Document {document_id} is already soft-deleted (is_deleted=True). Delete operation considered successful.") # Updated log
-        return True
+    # Ensure the document exists, is not deleted, and belongs to the teacher
+    query_filter = {
+        "_id": document_id,
+        "teacher_id": teacher_id,
+        "is_deleted": {"$ne": True}
+    }
 
-    blob_path_to_delete = document.storage_blob_path
-    result_to_delete = await get_result_by_document_id(
-        document_id=document_id,
-        teacher_id=teacher_id, # Pass teacher_id here
-        include_deleted=True, # Also fetch associated result even if soft-deleted
-        session=None # REMOVED session
-    )
-
-    logger.info(f"Attempting delete for document {document_id} owned by {teacher_id}. Blob: {blob_path_to_delete}. Result ID: {getattr(result_to_delete, 'id', 'None')}.")
-
-    # --- REMOVED internal try...except block --- 
-
-    # --- Delete Blob (Propagate errors) ---
-    if blob_path_to_delete:
-        blob_deleted = await service_delete_blob(blob_path_to_delete)
-        if not blob_deleted:
-            logger.error(f"service_delete_blob failed for {blob_path_to_delete}. This might indicate an issue but delete process continues.")
-            # Allow continuing, but log clearly
-        else:
-            logger.info(f"Successfully deleted blob {blob_path_to_delete} for document {document_id}.")
-    else:
-        logger.warning(f"No storage_blob_path found for document {document_id}. Skipping blob deletion.")
-
-    # --- Delete Result (Propagate errors) ---
-    if result_to_delete:
-        result_deleted = await delete_result(result_id=result_to_delete.id, session=None)
-        if not result_deleted:
-            logger.error(f"delete_result failed for {result_to_delete.id}. This might indicate an issue but delete process continues.")
-            # Allow continuing, but log clearly
-        else:
-            logger.info(f"Successfully deleted result {result_to_delete.id} for document {document_id}.")
-
-    # --- Soft Delete Document (Propagate errors) ---
-    result = await collection.update_one(
-        # OLD Filter: {"_id": document_id, "is_deleted": False},
-        # NEW Filter: Match if is_deleted is not True (handles False, null, missing)
-        {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}}, 
-        {"$set": {"is_deleted": True, "updated_at": now}},
-        session=session # Pass session to the update_one call
-    )
-    count = result.modified_count
-
-    if count == 1:
-        logger.info(f"Successfully soft-deleted document {document_id} (set is_deleted=True)")
-        delete_success = True
-    else: # count == 0
-        logger.warning(
-            f"Document {document_id} soft-delete update modified 0 records. "
-            f"Assuming already deleted or gone (idempotent success)."
+    try:
+        updated_doc = await collection.find_one_and_update(
+            query_filter,
+            {"$set": update_data},
+            return_document=ReturnDocument.AFTER,
+            session=session
         )
-        delete_success = True # Treat as success for idempotency
+        if updated_doc:
+            logger.info(f"Successfully updated student_id for document {document_id} to {student_id}.")
+            return Document(**updated_doc)
+        else:
+            logger.warning(f"Document {document_id} not found, not owned by teacher {teacher_id}, or already deleted. Could not update student_id.")
+            return None
+    except Exception as e:
+        logger.error(f"Error updating student_id for document {document_id}: {e}", exc_info=True)
+        return None
 
-    # Log final intended return value (still useful)
-    logger.critical(f"!!! FINAL INTENDED RETURN VALUE for delete_document({document_id}): {delete_success} (Type: {type(delete_success)}) ")
-    return delete_success # Let any exceptions from await calls above propagate
 
-# --- Optional: Add logging to get_result_by_document_id ---
+# --- Result CRUD Functions ---
 async def get_result_by_document_id(document_id: uuid.UUID, teacher_id: Optional[str] = None, include_deleted: bool = False, session=None) -> Optional[Result]:
     collection = _get_collection(RESULT_COLLECTION)
-    if collection is None:
-        return None
-    
+    if collection is None: return None
+
     query = {"document_id": document_id}
     if teacher_id:
         query["teacher_id"] = teacher_id
         logger.info(f"Getting result for document: {document_id} and teacher: {teacher_id}")
     else:
         logger.info(f"Getting result for document: {document_id}")
-        
-    query.update(soft_delete_filter(include_deleted))
     
-    # Add logging to show the actual query being made
-    logger.debug(f"Executing find_one for result with query: {query}")
-
+    query.update(soft_delete_filter(include_deleted))
+    logger.debug(f"Executing find_one for result by document_id with query: {query}")
     try:
         result_doc = await collection.find_one(query, session=session)
+        if result_doc:
+            logger.debug(f"Raw result doc from DB by document_id: {result_doc}")
+            return Result(**result_doc)
+        else:
+            logger.warning(f"Result not found for document: {document_id} with current filters.")
+            return None
     except Exception as e:
         logger.error(f"Error getting result by document_id {document_id}: {e}", exc_info=True)
-        return None
-
-    if result_doc:
-        # Add detailed logging for the fetched document before parsing
-        logger.debug(f"Raw data fetched from DB for doc {document_id}: {result_doc}")
-        try:
-            # Map Pydantic field names (like id) from DB field names (_id)
-            # This explicit mapping is safer if aliases are not universally working or understood
-            mapped_data = {**result_doc}
-            if "_id" in mapped_data:
-                mapped_data["id"] = mapped_data.pop("_id")
-            
-            # Log the data being passed to the Pydantic model
-            logger.debug(f"Data being passed to Result model for doc {document_id}: {mapped_data}")
-            
-            return Result(**mapped_data)
-        except ValidationError as ve:
-            logger.error(f"Pydantic validation error for result of document {document_id}: {ve}", exc_info=True)
-            return None
-        except Exception as model_ex: # Catch any other model instantiation errors
-            logger.error(f"Error creating Result model instance for doc {document_id}: {model_ex}", exc_info=True)
-            return None
-    else:
-        logger.warning(f"Result not found for document: {document_id} with current filters.")
-        return None
-
-# --- Result Create, Update, Delete ---
-# @with_transaction # MODIFIED: Removed decorator
-async def create_result(result_in: ResultCreate, session=None) -> Optional[Result]:
-    """
-    Creates a new result record in the database, typically with a PENDING status.
-
-    Args:
-        result_in: Pydantic model containing result data to create.
-        session: Optional Motor session for transaction management.
-
-    Returns:
-        The created Result object or None if creation failed.
-    """
-    collection = _get_collection(RESULT_COLLECTION)
-    if collection is None:
-        logger.error("Failed to get results collection for create_result")
-        return None
-
-    now = datetime.now(timezone.utc)
-    new_result_id = uuid.uuid4()
-
-    # Prepare the document dictionary from the input model
-    result_doc = result_in.model_dump(exclude_unset=True) # Start with provided data
-
-    # Set mandatory fields
-    result_doc["_id"] = new_result_id
-    result_doc["created_at"] = now
-    result_doc["updated_at"] = now
-    result_doc["is_deleted"] = False # Ensure soft delete field is initialized
-
-    # Set default status if not provided in result_in (should usually be PENDING)
-    if "status" not in result_doc:
-        result_doc["status"] = ResultStatus.PENDING.value
-    elif isinstance(result_doc["status"], ResultStatus): # Convert Enum to value if passed
-        result_doc["status"] = result_doc["status"].value
-
-    # Ensure other fields expected by Result model have defaults if not in ResultCreate
-    # (e.g., score, label, ai_generated, human_generated, paragraph_results might be None initially)
-    result_doc.setdefault("score", None)
-    result_doc.setdefault("label", None)
-    result_doc.setdefault("ai_generated", None)
-    result_doc.setdefault("human_generated", None)
-    result_doc.setdefault("paragraph_results", None)
-
-
-    logger.info(f"Attempting to insert result with internal ID: {new_result_id} for document: {result_doc.get('document_id')}")
-
-    try:
-        inserted_result = await collection.insert_one(result_doc, session=session)
-        if inserted_result.acknowledged:
-            # Fetch the newly created document to return the full Result model
-            created_doc = await collection.find_one({"_id": new_result_id}, session=session)
-            if created_doc:
-                return Result(**created_doc) # Validate and return the full model
-            else:
-                logger.error(f"Failed to retrieve result post-insert: {new_result_id}")
-                return None
-        else:
-            logger.error(f"Insert result not acknowledged: {new_result_id}")
-            return None
-    except Exception as e:
-        logger.error(f"Error inserting result for document {result_doc.get('document_id')}: {e}", exc_info=True)
-        return None
-
-@with_transaction
-async def update_result(
-    result_id: uuid.UUID,
-    update_data: Dict[str, Any], # Pass update data as a dictionary
-    teacher_id: Optional[str] = None, # Add optional teacher_id for authorization
-    session=None
-) -> Optional[Result]:
-    """
-    Updates an existing result record by its ID.
-    Optionally checks teacher_id if provided.
-    """
-    collection = _get_collection(RESULT_COLLECTION)
-    now = datetime.now(timezone.utc)
-    if collection is None:
-        logger.error("Result collection not found during update.")
-        return None
-
-    # Ensure _id is not in update data and add updated_at timestamp
-    update_data.pop("_id", None)
-    update_data.pop("id", None)
-    update_data.pop("created_at", None) # Don't allow updating creation time
-    update_data.pop("document_id", None) # Don't allow changing the linked document
-    
-    # IMPORTANT: Do not pop teacher_id from update_data if it's part of the Result model's updatable fields
-    # If teacher_id is only for auth here, it's not part of $set.
-    # For now, let's assume teacher_id in Result model is not meant to be updated via this general function,
-    # and the teacher_id param is for query authorization.
-
-    # Convert enums to their values if necessary (e.g., ResultStatus)
-    if "status" in update_data and isinstance(update_data["status"], ResultStatus):
-        update_data["status"] = update_data["status"].value
-
-    if not update_data:
-        logger.warning(f"No valid update data provided for result {result_id}. Fetching current.")
-        # If no fields left to update, maybe just return the current object
-        # This call needs to be adapted if get_result_by_id also requires teacher_id for auth
-        return await get_result_by_id(result_id=result_id, teacher_id=teacher_id, session=session) 
-
-    update_data["updated_at"] = now
-
-    # Build the query filter
-    query_filter = {"_id": result_id, "is_deleted": {"$ne": True}}
-    if teacher_id:
-        query_filter["teacher_id"] = teacher_id
-        logger.info(f"Attempting to update result {result_id} for teacher {teacher_id} with data: {update_data}")
-    else:
-        logger.info(f"Attempting to update result {result_id} with data: {update_data} (no teacher_id specified for auth)")
-    
-    update_operation = {"$set": update_data}
-    logger.debug(f"Executing find_one_and_update for result with query: {query_filter}, operation: {update_operation}")
-
-    try:
-        updated_doc = await collection.find_one_and_update(
-            query_filter,
-            update_operation,
-            return_document=ReturnDocument.AFTER,
-            session=session
-        )
-        if updated_doc:
-            logger.debug(f"Raw updated result doc from DB: {updated_doc}")
-            return Result(**updated_doc)
-        else:
-            logger.warning(f"Result {result_id} not found for update, or teacher_id mismatch if provided.")
-            return None
-    except Exception as e:
-        logger.error(f"Error updating result {result_id}: {e}", exc_info=True)
         return None
 
 async def get_dashboard_stats(current_user_payload: Dict[str, Any]) -> Dict[str, Any]:

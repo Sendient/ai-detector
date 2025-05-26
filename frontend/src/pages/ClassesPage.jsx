@@ -1,459 +1,384 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
-import {
-  ArrowPathIcon,
-  PencilSquareIcon,
-  TrashIcon,
-  PlusIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  InformationCircleIcon,
-  ExclamationTriangleIcon,
-} from '@heroicons/react/24/outline';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+// import { toast } from 'sonner'; // Removed sonner
+import {
+    PencilSquareIcon,
+    TrashIcon,
+    EyeIcon,
+    ArrowPathIcon // Assuming this is for the refresh button, keep if used elsewhere
+} from '@heroicons/react/24/outline';
 
 function ClassesPage() {
-  const { t } = useTranslation();
-  const { user, isAuthenticated, isLoading: isAuthLoading, getToken } = useKindeAuth();
-  const navigate = useNavigate();
-  const [classGroups, setClassGroups] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showEditForm, setShowEditForm] = useState(false);
-  const [editingClassGroup, setEditingClassGroup] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [formError, setFormError] = useState(null);
-  const [formSuccess, setFormSuccess] = useState(null);
-  const [formData, setFormData] = useState({
-    class_name: '',
-    academic_year: '',
-    school_id: '',
-    teacher_id: ''
-  });
+    const { t } = useTranslation();
+    const navigate = useNavigate();
+    const { user, isAuthenticated, isLoading: authLoading, getToken } = useKindeAuth();
+    const [classGroups, setClassGroups] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingInitial, setIsLoadingInitial] = useState(true);
+    const [error, setError] = useState(null); // For general fetch errors
+    const [pageMessage, setPageMessage] = useState({ text: '', type: '' }); // For success/error messages
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [editingClassGroup, setEditingClassGroup] = useState(null);
+    const [formData, setFormData] = useState({ class_name: '', academic_year: '' });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [selectedClassForView, setSelectedClassForView] = useState(null); 
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-  const fetchClassGroups = useCallback(async () => {
-    if (isAuthenticated) {
-      setError(null);
-      setIsLoading(true);
-      try {
-        const token = await getToken();
-        if (!token) throw new Error(t('messages_error_authTokenMissing'));
-        const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!response.ok) {
-          let errorDetail = `HTTP error ${response.status}`;
-          try {
-            const errData = await response.json();
-            errorDetail = errData.detail || errorDetail;
-          } catch (e) { /* Ignore */ }
-          throw new Error(errorDetail);
+    const clearPageMessage = () => setTimeout(() => setPageMessage({ text: '', type: '' }), 5000);
+
+    const fetchClassGroups = useCallback(async () => {
+        if (!isAuthenticated) {
+            if (!authLoading) {
+                setError(t('messages_error_loginRequired_viewClasses'));
+                setPageMessage({ text: t('messages_error_loginRequired_viewClasses'), type: 'error' });
+                clearPageMessage();
+            }
+            setIsLoadingInitial(false);
+            return;
         }
-        const data = await response.json();
-        const mappedData = data.map(cg => ({ ...cg, id: cg._id || cg.id })).filter(cg => cg.id);
-        setClassGroups(mappedData);
-      } catch (err) {
-        console.error("Error fetching class groups:", err);
-        setError(t('messages_classes_fetchError', { message: err.message || t('messages_error_unexpected')}));
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      setClassGroups([]);
-      setIsLoading(false);
-      if (!isAuthLoading) {
-        setError(t('messages_error_loginRequired_viewClasses'));
-      }
-    }
-  }, [isAuthenticated, isAuthLoading, getToken, t]);
-
-  useEffect(() => {
-    if (isAuthenticated && !isAuthLoading) {
-      fetchClassGroups();
-    }
-  }, [isAuthenticated, isAuthLoading, fetchClassGroups]);
-
-  const resetForms = () => {
-    setShowCreateForm(false);
-    setShowEditForm(false);
-    setEditingClassGroup(null);
-    setFormError(null);
-    setFormSuccess(null);
-    setIsProcessing(false);
-  };
-
-  const handleInputChange = (event) => {
-    const { name, value } = event.target;
-    setFormData(prevData => ({ ...prevData, [name]: value }));
-    setFormError(null);
-    setFormSuccess(null);
-  };
-
-  const handleShowCreateForm = async () => {
-    resetForms();
-    if (!user || !user.id) {
-      setFormError(t('messages_classes_create_error_missingProfile'));
-      console.warn("User profile or user.id missing for creating class:", user);
-      return;
-    }
-    setFormData({
-      class_name: '',
-      academic_year: '',
-      school_id: user?.school_id || '',
-      teacher_id: user.id
-    });
-    setShowCreateForm(true);
-  };
-
-  const handleShowEditForm = (classGroupToEdit) => {
-    resetForms();
-    setEditingClassGroup(classGroupToEdit);
-    setFormData({
-      class_name: classGroupToEdit.class_name || '',
-      academic_year: classGroupToEdit.academic_year || '',
-      school_id: classGroupToEdit.school_id,
-      teacher_id: classGroupToEdit.teacher_id,
-    });
-    setShowEditForm(true);
-  };
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (!isAuthenticated) {
-      setFormError(t('messages_error_loginRequired_form'));
-      return;
-    }
-    if (!formData.class_name.trim()) {
-      setFormError(t('messages_classes_form_fieldsRequired'));
-      return;
-    }
-
-    setIsProcessing(true);
-    setFormError(null);
-    setFormSuccess(null);
-
-    const isEditing = !!editingClassGroup;
-    const classIdForUrl = isEditing ? editingClassGroup?.id : null;
-    const url = isEditing ? `${API_BASE_URL}/api/v1/classgroups/${classIdForUrl}` : `${API_BASE_URL}/api/v1/classgroups/`;
-    const method = isEditing ? 'PUT' : 'POST';
-    const logAction = isEditing ? 'Updating' : 'Creating';
-    
-    let payload;
-    if (isEditing) {
-      payload = {
-        class_name: formData.class_name.trim(),
-      };
-      if (formData.academic_year && formData.academic_year.trim()) {
-        payload.academic_year = formData.academic_year.trim();
-      }
-    } else {
-      payload = {
-        class_name: formData.class_name.trim(),
-        teacher_id: formData.teacher_id,
-      };
-      if (formData.academic_year && formData.academic_year.trim()) {
-        payload.academic_year = formData.academic_year.trim();
-      }
-    }
-
-    try {
-      if (isEditing && !classIdForUrl) {
-        throw new Error(t('messages_classes_form_missingClassId'));
-      }
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
-
-      const response = await fetch(url, {
-        method: method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        let errorDetail = `HTTP error ${response.status}`;
+        setIsLoading(true);
+        setPageMessage({ text: '', type: '' }); // Clear previous messages
         try {
-          const errData = await response.json();
-          if (typeof errData.detail === 'string') {
-            errorDetail = errData.detail;
-          } else if (Array.isArray(errData.detail)) {
-            errorDetail = errData.detail.map(e => `${e.loc.join('.')} - ${e.msg}`).join('; ');
-          } else {
-            errorDetail = `Server error: ${JSON.stringify(errData.detail || errData)}`;
-          }
-        } catch (e) {
-          const textError = await response.text();
-          errorDetail = textError || errorDetail;
+            const token = await getToken();
+            if (!token) {
+                const msg = t('messages_error_authTokenMissing');
+                setError(msg);
+                setPageMessage({ text: msg, type: 'error' });
+                clearPageMessage();
+                setIsLoading(false);
+                setIsLoadingInitial(false);
+                return;
+            }
+            const response = await fetch(`${API_URL}/api/v1/classgroups/`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+                const msg = errorData.detail || t('messages_classes_fetchError', { message: response.statusText });
+                throw new Error(msg);
+            }
+            const data = await response.json();
+            console.log("Fetched Class Groups Data:", JSON.stringify(data, null, 2)); // Log fetched data
+            setClassGroups(data || []);
+            setError(null); // Clear general error on success
+        } catch (err) {
+            setError(err.message);
+            setPageMessage({ text: err.message, type: 'error' });
+            clearPageMessage();
+            setClassGroups([]);
+        } finally {
+            setIsLoading(false);
+            setIsLoadingInitial(false);
         }
-        if (response.status === 404 && isEditing) errorDetail = t('messages_error_notFound', { item: 'Class group' });
-        if (response.status === 422) errorDetail = t('messages_error_validation', { detail: errorDetail });
-        throw new Error(errorDetail);
-      }
+    }, [API_URL, getToken, isAuthenticated, authLoading, t]);
 
-      const resultData = await response.json();
-      console.log(`[ClassesPage] Class group ${logAction} successful:`, resultData);
-      setFormSuccess(isEditing ? t('messages_classes_form_updateSuccess') : t('messages_classes_form_createSuccess'));
-      resetForms();
-      fetchClassGroups();
-      setTimeout(() => setFormSuccess(null), 3000);
-    } catch (err) {
-      console.error(`Error ${logAction.toLowerCase()} class group:`, err);
-      setFormError(err.message || t('messages_error_actionFailed', {
-        action: logAction.toLowerCase(),
-        detail: t('messages_error_unexpected')
-      }));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleDelete = async (classId, className) => {
-    if (!isAuthenticated) {
-      setError(t('messages_classes_delete_error_loginRequired'));
-      return;
-    }
-    if (!window.confirm(t('messages_classes_delete_confirm', { className: className, classId: classId }))) {
-      return;
-    }
-    setIsProcessing(true);
-    setError(null);
-    setFormSuccess(null);
-
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
-
-      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/${classId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (response.ok || response.status === 204) {
-        setFormSuccess(t('messages_classes_delete_success'));
+    useEffect(() => {
         fetchClassGroups();
-        setTimeout(() => setFormSuccess(null), 3000);
-      } else {
-        let errorDetail = `HTTP error ${response.status}`;
-        try {
-          const errData = await response.json();
-          errorDetail = errData.detail || errorDetail;
-        } catch (e) {
-          const textError = await response.text();
-          errorDetail = textError || errorDetail;
+    }, [fetchClassGroups]);
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleShowCreateForm = () => {
+        if (!user || !user.id) {
+            const msg = t('messages_classes_modal_create_error_missingProfile');
+            setPageMessage({ text: msg, type: 'error' });
+            clearPageMessage();
+            return;
         }
-        if (response.status === 404) errorDetail = t('messages_error_notFound', { item: 'Class group' });
-        throw new Error(t('messages_classes_delete_failed', { message: errorDetail }));
-      }
-    } catch (err) {
-      console.error(`Error deleting class group ${classId}:`, err);
-      setError(t('messages_classes_delete_failed', { message: err.message }));
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setIsProcessing(false);
+        setFormData({ class_name: '', academic_year: '' });
+        setEditingClassGroup(null);
+        setShowCreateModal(true);
+        setPageMessage({ text: '', type: '' }); // Clear message when opening modal
+    };
+
+    const handleShowEditForm = (classGroup) => {
+        setEditingClassGroup(classGroup);
+        setFormData({ class_name: classGroup.class_name, academic_year: classGroup.academic_year || '' });
+        setShowEditModal(true);
+        setPageMessage({ text: '', type: '' }); // Clear message when opening modal
+    };
+    
+    const handleShowView = (classGroup) => {
+        console.log("handleShowView called with classGroup._id:", classGroup._id, "Type:", typeof classGroup._id);
+        if (!classGroup || !classGroup._id || classGroup._id === "undefined") {
+            console.error("Attempted to view class with invalid ID:", classGroup._id);
+            setPageMessage({ text: t('messages_error_invalidId', {item: t('common_label_class')}), type: 'error' });
+            clearPageMessage();
+            return;
+        }
+        navigate(`/classes/view/${classGroup._id}`);
+    };
+
+    const handleCloseModals = () => {
+        setShowCreateModal(false);
+        setShowEditModal(false);
+        setEditingClassGroup(null);
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!formData.class_name) {
+            const msg = t('classes_form_label_className') + " " + t('common_required_indicator');
+            setPageMessage({ text: msg, type: 'error' });
+            clearPageMessage();
+            return;
+        }
+
+        setIsSubmitting(true);
+        setPageMessage({ text: '', type: '' });
+        const method = editingClassGroup ? 'PUT' : 'POST';
+        const url = editingClassGroup
+            ? `${API_URL}/api/v1/class-groups/${editingClassGroup.id}`
+            : `${API_URL}/api/v1/class-groups/`;
+
+        const payload = {
+            class_name: formData.class_name,
+            academic_year: formData.academic_year || null,
+        };
+
+        try {
+            const token = await getToken();
+            if (!token) throw new Error(t('messages_error_authTokenMissing'));
+            const response = await fetch(url, {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify(payload),
+            });
+
+            const resData = await response.json().catch(() => null); 
+
+            if (!response.ok) {
+                const errorDetail = resData?.detail || response.statusText;
+                throw new Error(
+                    editingClassGroup 
+                        ? t('messages_error_actionFailed', { action: t('common_button_update'), detail: errorDetail })
+                        : t('messages_classes_modal_create_error_failed', { detail: errorDetail })
+                );
+            }
+            
+            const successMsg = editingClassGroup ? t('messages_classes_form_updateSuccess') : t('messages_classes_form_createSuccess');
+            setPageMessage({ text: successMsg, type: 'success' });
+            clearPageMessage();
+            fetchClassGroups();
+            handleCloseModals();
+        } catch (err) {
+            setError(err.message); // Keep general error for top display if needed
+            setPageMessage({ text: err.message, type: 'error' });
+            clearPageMessage();
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDelete = async (classId, className) => {
+        if (!window.confirm(t('messages_classes_delete_confirm', { className, classId }))) {
+            return;
+        }
+        setIsSubmitting(true);
+        setPageMessage({ text: '', type: '' });
+        try {
+            const token = await getToken();
+            if (!token) throw new Error(t('messages_error_authTokenMissing'));
+            const response = await fetch(`${API_URL}/api/v1/class-groups/${classId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+                const msg = t('messages_classes_delete_failed', { message: errorData.detail || response.statusText });
+                throw new Error(msg);
+            }
+            setPageMessage({ text: t('messages_classes_delete_success'), type: 'success' });
+            clearPageMessage();
+            fetchClassGroups();
+        } catch (err) {
+            setError(err.message); // Keep general error for top display if needed
+            setPageMessage({ text: err.message, type: 'error' });
+            clearPageMessage();
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    if (authLoading || isLoadingInitial) {
+        return <div className="p-4 flex justify-center items-center min-h-screen"><span className="loading loading-spinner loading-lg"></span></div>;
     }
-  };
 
-  if (!isAuthenticated && !isAuthLoading) {
-    return <div className="alert alert-info shadow-lg">
-      <div>
-        <InformationCircleIcon className="h-6 w-6 stroke-current shrink-0"/>
-        <span>Please log in to view classes.</span>
-      </div>
-    </div>;
-  }
+    // if (!isAuthenticated) { // This is handled by fetchClassGroups setting an error message
+    //     return <div className="p-4">{t('messages_error_loginRequired_viewClasses')}</div>;
+    // }
 
-  if (isLoading || isAuthLoading) {
-    return <div className="flex items-center justify-center min-h-screen">
-      <div className="loading loading-spinner loading-lg"></div>
-    </div>;
-  }
+    return (
+        <div className="container mx-auto p-4">
+            <h1 className="text-2xl font-semibold mb-6">{t('classes_heading')}</h1>
 
-  if (error) {
-    return <div className="alert alert-error shadow-lg">
-      <div>
-        <ExclamationTriangleIcon className="h-6 w-6 stroke-current shrink-0"/>
-        <span>{error}</span>
-      </div>
-    </div>;
-  }
-
-  return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-semibold text-base-content">{t('classes_heading')}</h1>
-
-      <div className="card bg-base-100 shadow-md border border-base-300">
-        <div className="card-body">
-          <div className="card-actions justify-between items-center mb-4">
-            <h2 className="text-xl font-medium">{t('classes_list_heading')}</h2>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={fetchClassGroups}
-                disabled={isLoading || isProcessing}
-                className="btn btn-ghost btn-square btn-sm"
-                title={t('common_button_refreshList_title')}
-              >
-                <ArrowPathIcon className="h-5 w-5"/>
-              </button>
-              {!showCreateForm && !showEditForm && (
-                <button
-                  onClick={handleShowCreateForm}
-                  disabled={isProcessing}
-                  className="btn btn-success btn-sm"
-                >
-                  <PlusIcon className="h-4 w-4 mr-1"/> {t('classes_button_addNewClass')}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {formSuccess && (
-            <div className="alert alert-success mb-4">
-              <CheckCircleIcon className="h-6 w-6"/>
-              <span>{formSuccess}</span>
-            </div>
-          )}
-
-          {formError && (showCreateForm || showEditForm) && (
-            <div className="alert alert-error mb-4">
-              <XCircleIcon className="h-6 w-6"/>
-              <span>{t('common_error_prefix')} {formError}</span>
-            </div>
-          )}
-
-          {(showCreateForm || showEditForm) && (
-            <div className="mb-6 p-4 border border-base-300 rounded-md bg-base-200">
-              <h3 className="text-lg font-medium mb-3">
-                {showEditForm
-                  ? `${t('classes_form_heading_editPrefix')} ${editingClassGroup?.class_name}`
-                  : t('classes_form_heading_create')}
-              </h3>
-              <form onSubmit={handleSubmit} className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="form-control w-full">
-                    <label className="label" htmlFor="class_name">
-                      <span className="label-text text-sm">
-                        {t('classes_form_label_className')} <span className="text-error">{t('common_required_indicator')}</span>
-                      </span>
-                    </label>
-                    <input
-                      type="text"
-                      name="class_name"
-                      id="class_name"
-                      required
-                      value={formData.class_name}
-                      onChange={handleInputChange}
-                      className="input input-bordered w-full"
-                    />
-                  </div>
-                  <div className="form-control w-full">
-                    <label className="label" htmlFor="academic_year">
-                      <span className="label-text text-sm">
-                        {t('classes_form_label_academicYear')} <span className="text-error">{t('common_required_indicator')}</span>
-                      </span>
-                    </label>
-                    <input
-                      type="text"
-                      name="academic_year"
-                      id="academic_year"
-                      required
-                      value={formData.academic_year}
-                      onChange={handleInputChange}
-                      placeholder={t('classes_form_placeholder_academicYear')}
-                      className="input input-bordered w-full"
-                    />
-                  </div>
+            {/* Display Page Messages */}
+            {pageMessage.text && (
+                <div role="alert" className={`alert ${pageMessage.type === 'success' ? 'alert-success' : 'alert-error'} mb-4 shadow-lg`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                        {pageMessage.type === 'success' ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        )}
+                    </svg>
+                    <span>{pageMessage.text}</span>
                 </div>
-                <div className="text-xs text-base-content/70 mt-2">
-                  {t('classes_form_label_schoolId')} {formData.school_id || t('common_text_notApplicable')} |{' '}
-                  {t('classes_form_label_teacherId')} {formData.teacher_id || t('common_text_notApplicable')}
-                  {showEditForm && ` (${t('classes_form_label_notEditable')})`}
+            )}
+            
+            {/* General error for initial load if not authenticated, distinct from pageMessage */}
+            {error && !isLoading && !classGroups.length && (
+                 <div role="alert" className="alert alert-error mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <span>{error}</span>
                 </div>
-                <div className="flex justify-end space-x-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={resetForms}
-                    disabled={isProcessing}
-                    className="btn btn-ghost btn-sm"
-                  >
-                    {t('common_button_cancel')}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="btn btn-primary btn-sm"
-                  >
-                    {isProcessing ? (
-                      <><span className="loading loading-spinner loading-xs"></span>{t('common_status_saving')}</>
-                    ) : (
-                      showEditForm ? t('classes_form_button_update') : t('classes_form_button_save')
+            )}
+
+            <div className="card bg-base-100 shadow-xl mb-6">
+                <div className="card-body">
+                    <div className="flex flex-col sm:flex-row items-center justify-between mb-4">
+                        <h2 className="card-title text-xl mb-3 sm:mb-0">{t('classes_list_heading')}</h2>
+                        <div className="flex items-center">
+                            <button onClick={fetchClassGroups} className="btn btn-ghost btn-square btn-sm me-2" title={t('common_button_refreshList_title')} disabled={isLoading || isSubmitting}>
+                                <ArrowPathIcon className="w-5 h-5" />
+                            </button>
+                            <button onClick={handleShowCreateForm} className="btn btn-primary btn-sm" disabled={isSubmitting}>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 me-2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                </svg>
+                                {t('classes_button_addNewClass')}
+                            </button>
+                        </div>
+                    </div>
+
+                    {isLoading && !isLoadingInitial && <div className="flex justify-center"><span className="loading loading-spinner loading-md"></span></div>}
+                    {!isLoading && !error && classGroups.length === 0 && (
+                        <p className="text-center py-4">{t('classes_list_status_noClassGroups')}</p>
                     )}
-                  </button>
+                    {!isLoading && !error && classGroups.length > 0 && (
+                        <div className="overflow-x-auto">
+                            <table className="table w-full">
+                                <thead className="bg-base-200">
+                                    <tr>
+                                        <th>{t('common_label_className')}</th>
+                                        <th>{t('common_label_academicYear')}</th>
+                                        <th>{t('common_label_studentsCount')}</th>
+                                        <th>{t('common_label_actions')}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {classGroups.map(cg => {
+                                        console.log(`Rendering row for class: ${cg.class_name}, ID: ${cg._id}, Type: ${typeof cg._id}`); 
+                                        return (
+                                            <tr key={cg._id} className="hover">
+                                                <td>{cg.class_name}</td>
+                                                <td>{cg.academic_year || t('common_text_notApplicable')}</td>
+                                                <td>{cg.student_ids ? cg.student_ids.length : (cg.student_count !== undefined ? cg.student_count : t('common_text_notApplicable' ))}</td>
+                                                <td className="text-right">
+                                                    <div className="flex justify-end space-x-1">
+                                                        <button 
+                                                            onClick={() => handleShowEditForm(cg)}
+                                                            title={t('classes_list_button_edit_title')}
+                                                            disabled={isSubmitting}
+                                                            className="btn btn-ghost btn-xs p-1"
+                                                        >
+                                                            <PencilSquareIcon className="w-5 h-5" />
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDelete(cg._id, cg.class_name)}
+                                                            title={t('classes_list_button_delete_title')}
+                                                            disabled={isSubmitting}
+                                                            className="btn btn-ghost btn-xs p-1"
+                                                        >
+                                                            <TrashIcon className="w-5 h-5 text-red-500 hover:text-red-700" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleShowView(cg)}
+                                                            title={t('classes_list_button_view_title')}
+                                                            disabled={isSubmitting}
+                                                            className="btn btn-ghost btn-xs p-1"
+                                                        >
+                                                            <EyeIcon className="w-5 h-5 text-blue-600 hover:text-blue-800" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
-              </form>
             </div>
-          )}
 
-          <div className="mt-4">
-            {isLoading && (
-              <div className="flex items-center justify-center py-4">
-                <span className="loading loading-lg loading-spinner text-primary"></span>
-              </div>
+            {(showCreateModal || showEditModal) && (
+                <dialog id="class_modal" className={`modal ${showCreateModal || showEditModal ? 'modal-open' : ''}`}>
+                    <div className="modal-box w-11/12 max-w-lg">
+                        <h3 className="font-bold text-lg mb-4">
+                            {editingClassGroup 
+                                ? `${t('classes_form_heading_editPrefix')} ${editingClassGroup.class_name}`
+                                : t('classes_form_heading_create')}
+                        </h3>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label htmlFor="class_name" className="label">
+                                    <span className="label-text">{t('classes_form_label_className')} <span className="text-error">{t('common_required_indicator')}</span></span>
+                                </label>
+                                <input 
+                                    type="text" 
+                                    id="class_name" 
+                                    name="class_name" 
+                                    value={formData.class_name} 
+                                    onChange={handleInputChange} 
+                                    required 
+                                    disabled={isSubmitting}
+                                    className="input input-bordered w-full"
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="academic_year" className="label">
+                                   <span className="label-text">{t('classes_form_label_academicYear')}</span>
+                                </label>
+                                <input 
+                                    type="text" 
+                                    id="academic_year" 
+                                    name="academic_year" 
+                                    value={formData.academic_year} 
+                                    onChange={handleInputChange} 
+                                    placeholder={t('classes_form_placeholder_academicYear')} 
+                                    disabled={isSubmitting}
+                                    className="input input-bordered w-full"
+                                />
+                            </div>
+                            
+                            <div className="modal-action mt-6">
+                                <button type="button" className="btn btn-ghost me-2" onClick={handleCloseModals} disabled={isSubmitting}>{t('common_button_cancel')}</button>
+                                <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                                    {isSubmitting 
+                                        ? <span className="loading loading-spinner loading-xs"></span>
+                                        : (editingClassGroup ? t('classes_form_button_update') : t('classes_form_button_save'))}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                    <form method="dialog" className="modal-backdrop">
+                        <button onClick={handleCloseModals}>close</button>
+                    </form>
+                </dialog>
             )}
-            {!isLoading && !error && classGroups.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="table w-full">
-                  <thead>
-                    <tr>
-                      <th className="text-sm font-semibold">{t('common_label_className')}</th>
-                      <th className="text-sm font-semibold">{t('common_label_academicYear')}</th>
-                      <th className="text-sm font-semibold">{t('common_label_studentsCount')}</th>
-                      <th className="text-sm font-semibold">{t('common_label_actions')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {classGroups.map((cg) => (
-                      <tr key={cg.id} className="hover">
-                        <td className="text-sm font-medium">{cg.class_name}</td>
-                        <td className="text-sm">{cg.academic_year || t('common_text_notApplicable')}</td>
-                        <td className="text-sm">{cg.student_ids?.length ?? 0}</td>
-                        <td className="space-x-1">
-                          <button
-                            onClick={() => handleShowEditForm(cg)}
-                            disabled={isProcessing || showCreateForm || showEditForm}
-                            title={t('classes_list_button_edit_title')}
-                            className="btn btn-ghost btn-xs text-info"
-                          >
-                            <PencilSquareIcon className="h-4 w-4 mr-1"/> {t('common_button_edit')}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(cg.id, cg.class_name)}
-                            disabled={isProcessing || showCreateForm || showEditForm}
-                            title={t('classes_list_button_delete_title')}
-                            className="btn btn-ghost btn-xs text-error"
-                          >
-                            <TrashIcon className="h-4 w-4 mr-1"/> {t('common_button_delete')}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {!isLoading && !error && classGroups.length === 0 && (
-              <p className="text-base-content/70 text-center py-4">{t('classes_list_status_noClassGroups')}</p>
-            )}
-          </div>
         </div>
-      </div>
-    </div>
-  );
+    );
 }
 
 export default ClassesPage; 

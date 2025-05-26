@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import {
@@ -19,6 +19,7 @@ function StudentsPage() {
   const { t } = useTranslation();
   const { isAuthenticated, isLoading: isAuthLoading, getToken, user } = useKindeAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [students, setStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -29,7 +30,11 @@ function StudentsPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
+  const [assignedClassesForEdit, setAssignedClassesForEdit] = useState([]);
+  const [availableClassesForAdding, setAvailableClassesForAdding] = useState([]);
+  const [classToAddId, setClassToAddId] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isClassMembershipProcessing, setIsClassMembershipProcessing] = useState(false);
   const [formError, setFormError] = useState(null);
   const [formSuccess, setFormSuccess] = useState(null);
   const [selectedClassGroupId, setSelectedClassGroupId] = useState('');
@@ -39,6 +44,7 @@ function StudentsPage() {
   const [newClassYear, setNewClassYear] = useState('');
   const [isCreatingClass, setIsCreatingClass] = useState(false);
   const [createClassError, setCreateClassError] = useState(null);
+  const [tempPreviousClassToAddId, setTempPreviousClassToAddId] = useState('');
 
   const initialStudentData = {
     first_name: '',
@@ -137,23 +143,37 @@ function StudentsPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      console.log('isAuthenticated:', isAuthenticated);
-      console.log('isLoading:', isLoading);
-      console.log('error:', error);
-      console.log('students.length:', students.length);
-      fetchStudents();
-      fetchClassGroupsForDropdown();
+      // Fetch class groups first
+      fetchClassGroupsForDropdown().then(fetchedClassGroups => {
+        // Then fetch students
+        fetchStudents().then(() => {
+          // Then, if studentToEdit is in location state, show the edit form
+          // Pass the fetchedClassGroups directly because the state might not have updated yet
+          if (location.state?.studentToEdit) {
+            const studentToEditWithId = {
+              ...location.state.studentToEdit,
+              id: location.state.studentToEdit._id || location.state.studentToEdit.id
+            };
+            handleShowEditForm(studentToEditWithId, fetchedClassGroups); 
+          }
+        });
+      });
     }
-  }, [isAuthenticated, fetchStudents, fetchClassGroupsForDropdown]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user, location.state]); // Removed fetchStudents, fetchClassGroupsForDropdown from deps as they are stable
 
   const resetForms = () => {
     setShowCreateForm(false);
     setShowEditForm(false);
     setEditingStudent(null);
+    setAssignedClassesForEdit([]);
+    setAvailableClassesForAdding([]);
+    setClassToAddId('');
     setFormData(initialStudentData);
     setFormError(null);
     setFormSuccess(null);
     setIsProcessing(false);
+    setIsClassMembershipProcessing(false);
     setSelectedClassGroupId('');
     setInitialClassGroupId('');
     setShowCreateClassModal(false);
@@ -161,6 +181,7 @@ function StudentsPage() {
     setNewClassYear('');
     setIsCreatingClass(false);
     setCreateClassError(null);
+    setTempPreviousClassToAddId('');
   };
 
   const handleInputChange = (event) => {
@@ -191,7 +212,12 @@ function StudentsPage() {
     setNewClassYear('');
     setIsCreatingClass(false);
     setCreateClassError(null);
+    
     setSelectedClassGroupId(initialClassGroupId || '');
+    setInitialClassGroupId('');
+
+    setClassToAddId(tempPreviousClassToAddId || '');
+    setTempPreviousClassToAddId('');
   };
 
   const handleCreateClassSubmit = async (event) => {
@@ -209,7 +235,6 @@ function StudentsPage() {
     const payload = {
       class_name: newClassName.trim(),
       academic_year: newClassYear.trim(),
-      teacher_id: user.id
     };
     let newClass = null;
     let token = null;
@@ -281,11 +306,40 @@ function StudentsPage() {
         }
       }
 
-      setClassGroups(prev => [...prev, newClass]);
-      setSelectedClassGroupId(newClass.id);
-      setFormSuccess(t('messages_classes_modal_success_created'));
+      const updatedClassGroupsLocally = classGroups.find(cg => cg.id === newClass.id)
+        ? classGroups.map(cg => cg.id === newClass.id ? (studentIdToAssign && studentAssigned ? {...newClass, student_ids: Array.from(new Set([...(cg.student_ids || []), studentIdToAssign]))} : newClass) : cg)
+        : [...classGroups, (studentIdToAssign && studentAssigned ? {...newClass, student_ids: [studentIdToAssign]} : newClass)];
+      setClassGroups(updatedClassGroupsLocally);
+      
+      if (editingStudent && studentIdToAssign && studentAssigned) {
+        setAssignedClassesForEdit(prevAssigned => {
+          if (!prevAssigned.find(cg => cg.id === newClass.id)) {
+            return [...prevAssigned, newClass];
+          }
+          return prevAssigned;
+        });
+        setAvailableClassesForAdding(prevAvailable => prevAvailable.filter(cg => cg.id !== newClass.id));
+        setFormSuccess(t('messages_students_class_assignSuccessOnCreate', { studentName: `${editingStudent.first_name} ${editingStudent.last_name}`, className: newClass.class_name }) || `Assigned ${editingStudent.first_name} to new class ${newClass.class_name}`);
+      } else {
+        if (editingStudent) {
+          setAvailableClassesForAdding(prevAvailable => {
+            if (!prevAvailable.find(cg => cg.id === newClass.id) && newClass) { 
+              return [...prevAvailable, newClass];
+            }
+            return prevAvailable;
+          });
+        } else {
+          setSelectedClassGroupId(newClass.id);
+        }
+        setFormSuccess(t('messages_classes_modal_success_created', {className: newClass.class_name}) || `Class ${newClass.class_name} created.`);
+      }
+
+      setClassToAddId('');
+      setTempPreviousClassToAddId('');
+      
       handleCloseCreateClassModal();
-      await fetchStudents();
+
+      await fetchClassGroupsForDropdown();
     } catch (err) {
       setCreateClassError(err.message || t('messages_classes_modal_error_unexpected'));
     } finally {
@@ -298,8 +352,23 @@ function StudentsPage() {
     setShowCreateForm(true);
   };
 
-  const handleShowEditForm = async (studentToEdit) => {
-    resetForms();
+  const handleShowEditForm = async (studentToEdit, allClassGroups = classGroups) => {
+    if (!studentToEdit || !studentToEdit.id) {
+      setError(t('messages_students_error_cannotLoadForEdit'));
+      setFormError(t('messages_students_error_cannotLoadForEdit'));
+      return;
+    }
+    setFormError(null);
+    setFormSuccess(null);
+    setIsProcessing(false);
+    setIsClassMembershipProcessing(false);
+
+    const currentClassGroups = allClassGroups && allClassGroups.length > 0 ? allClassGroups : classGroups;
+
+    if (!currentClassGroups || currentClassGroups.length === 0) {
+        console.warn("handleShowEditForm called when classGroups might not be fully loaded.");
+    }
+
     setEditingStudent(studentToEdit);
     setFormData({
       first_name: studentToEdit.first_name || '',
@@ -309,19 +378,127 @@ function StudentsPage() {
       descriptor: studentToEdit.descriptor || '',
       year_group: studentToEdit.year_group || ''
     });
-    const currentClassGroups = await fetchClassGroupsForDropdown();
-    let foundClassId = '';
-    if (Array.isArray(currentClassGroups)) {
-      for (const cg of currentClassGroups) {
-        if (cg.student_ids?.includes(studentToEdit.id)) {
-          foundClassId = cg.id;
-          break;
-        }
-      }
-    }
-    setSelectedClassGroupId(foundClassId);
-    setInitialClassGroupId(foundClassId);
+
+    const assigned = currentClassGroups.filter(cg => 
+        cg.student_ids && cg.student_ids.includes(studentToEdit.id)
+    );
+    setAssignedClassesForEdit(assigned);
+
+    const available = currentClassGroups.filter(cg => 
+        !cg.student_ids || !cg.student_ids.includes(studentToEdit.id)
+    );
+    setAvailableClassesForAdding(available);
+    setClassToAddId('');
+
     setShowEditForm(true);
+    setShowCreateForm(false);
+  };
+
+  const handleRemoveStudentFromClass = async (classGroupIdToRemove) => {
+    if (!editingStudent || !editingStudent.id) {
+      setFormError(t('messages_error_unexpected', { detail: 'No student selected for class removal.'}));
+      return;
+    }
+    if (!isAuthenticated) {
+      setFormError(t('messages_error_loginRequired_form'));
+      return;
+    }
+
+    setIsClassMembershipProcessing(true);
+    setFormError(null);
+
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/${classGroupIdToRemove}/students/${editingStudent.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!response.ok && response.status !== 404) {
+        const errorData = await response.json().catch(() => null);
+        const errorDetail = errorData?.detail || `HTTP ${response.status}`;
+        throw new Error(t('messages_students_class_removeError', { detail: errorDetail }));
+      }
+
+      setAssignedClassesForEdit(prev => prev.filter(cg => cg.id !== classGroupIdToRemove));
+      setClassGroups(prevCgs => prevCgs.map(cg => 
+        cg.id === classGroupIdToRemove 
+          ? { ...cg, student_ids: cg.student_ids.filter(sid => sid !== editingStudent.id) } 
+          : cg
+      ));
+      const studentClassIds = new Set(assignedClassesForEdit.filter(ac => ac.id !== classGroupIdToRemove).map(ac => ac.id));
+      setAvailableClassesForAdding(classGroups.filter(cg => !studentClassIds.has(cg.id)));
+      setFormSuccess(t('messages_students_class_removeSuccess'));
+      setTimeout(() => setFormSuccess(null), 3000);
+
+    } catch (err) {
+      console.error("Error removing student from class:", err);
+      setFormError(err.message || t('messages_error_unexpected'));
+    } finally {
+      setIsClassMembershipProcessing(false);
+    }
+  };
+
+  const handleClassToAddChange = (event) => {
+    const value = event.target.value;
+    if (value === 'CREATE_NEW_CLASS') {
+      setTempPreviousClassToAddId(classToAddId); 
+      handleOpenCreateClassModal();
+    } else {
+      setClassToAddId(value);
+    }
+  };
+
+  const handleAddStudentToSelectedClass = async () => {
+    if (!editingStudent || !editingStudent.id || !classToAddId) {
+      setFormError(t('messages_error_unexpected', { detail: 'Student or class not selected for addition.'}));
+      return;
+    }
+    if (!isAuthenticated) {
+      setFormError(t('messages_error_loginRequired_form'));
+      return;
+    }
+
+    setIsClassMembershipProcessing(true);
+    setFormError(null);
+
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/${classToAddId}/students/${editingStudent.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const errorDetail = errorData?.detail || `HTTP ${response.status}`;
+        throw new Error(t('messages_students_class_addError', { detail: errorDetail }));
+      }
+      
+      const classAdded = classGroups.find(cg => cg.id === classToAddId);
+      if (classAdded) {
+        setAssignedClassesForEdit(prev => [...prev, classAdded]);
+        setAvailableClassesForAdding(prev => prev.filter(cg => cg.id !== classToAddId));
+        setClassGroups(prevCgs => prevCgs.map(cg => 
+          cg.id === classToAddId 
+            ? { ...cg, student_ids: [...(cg.student_ids || []), editingStudent.id] } 
+            : cg
+        ));
+      }
+      setClassToAddId('');
+      setFormSuccess(t('messages_students_class_addSuccess'));
+      setTimeout(() => setFormSuccess(null), 3000);
+
+    } catch (err) {
+      console.error("Error adding student to class:", err);
+      setFormError(err.message || t('messages_error_unexpected'));
+    } finally {
+      setIsClassMembershipProcessing(false);
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -410,8 +587,7 @@ function StudentsPage() {
         throw new Error(t('messages_error_actionFailed', { action: logAction, detail: 'missing ID' }));
       }
       
-      if (selectedClassGroupId !== initialClassGroupId) {
-        // Remove from old class if necessary
+      if (!isEditing && selectedClassGroupId !== initialClassGroupId) {
         if (initialClassGroupId) {
           const deleteUrl = `${API_BASE_URL}/api/v1/classgroups/${initialClassGroupId}/students/${savedStudentId}`;
           try {
@@ -426,7 +602,6 @@ function StudentsPage() {
             console.warn(`[handleSubmit] Error during fetch to remove student from old class ${initialClassGroupId}: ${deleteErr}`);
           }
         }
-        // Add to new class if necessary
         if (selectedClassGroupId) {
           const postUrl = `${API_BASE_URL}/api/v1/classgroups/${selectedClassGroupId}/students/${savedStudentId}`;
           try {
@@ -525,6 +700,21 @@ function StudentsPage() {
     }
   };
 
+  // Helper to get class names for a student
+  const getStudentClassNames = (student) => {
+    if (!student || !student.class_group_ids || student.class_group_ids.length === 0 || !classGroups || classGroups.length === 0) {
+      return '-';
+    }
+    const assignedNames = student.class_group_ids
+      .map(cgId => {
+        const foundClass = classGroups.find(cg => cg.id === cgId || cg._id === cgId);
+        return foundClass ? foundClass.class_name : null;
+      })
+      .filter(name => name !== null);
+
+    return assignedNames.length > 0 ? assignedNames.join(', ') : '-';
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -554,115 +744,209 @@ function StudentsPage() {
                 : t('students_form_heading_create')}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="form-control w-full">
-                  <label className="label" htmlFor="first_name">
-                    <span className="label-text text-sm">
-                      {t('students_form_label_firstName')} <span className="text-error">{t('common_required_indicator')}</span>
-                    </span>
-                  </label>
-                  <input
-                    type="text"
-                    name="first_name"
-                    id="first_name"
-                    required
-                    value={formData.first_name}
-                    onChange={handleInputChange}
-                    className="input input-bordered w-full"
-                  />
-                </div>
-                <div className="form-control w-full">
-                  <label className="label" htmlFor="last_name">
-                    <span className="label-text text-sm">
-                      {t('students_form_label_lastName')} <span className="text-error">{t('common_required_indicator')}</span>
-                    </span>
-                  </label>
-                  <input
-                    type="text"
-                    name="last_name"
-                    id="last_name"
-                    required
-                    value={formData.last_name}
-                    onChange={handleInputChange}
-                    className="input input-bordered w-full"
-                  />
-                </div>
-                <div className="form-control w-full">
-                  <label className="label" htmlFor="email">
-                    <span className="label-text text-sm">{t('students_form_label_email')}</span>
-                  </label>
-                  <input
-                    type="email"
-                    name="email"
-                    id="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    className="input input-bordered w-full"
-                  />
-                </div>
-                <div className="form-control w-full">
-                  <label className="label" htmlFor="external_student_id">
-                    <span className="label-text text-sm">{t('students_form_label_externalId')}</span>
-                  </label>
-                  <input
-                    type="text"
-                    name="external_student_id"
-                    id="external_student_id"
-                    value={formData.external_student_id}
-                    onChange={handleInputChange}
-                    className="input input-bordered w-full"
-                  />
-                </div>
-                <div className="form-control w-full">
-                  <label className="label" htmlFor="descriptor">
-                    <span className="label-text text-sm">{t('students_form_label_descriptor')}</span>
-                  </label>
-                  <input
-                    type="text"
-                    name="descriptor"
-                    id="descriptor"
-                    value={formData.descriptor}
-                    onChange={handleInputChange}
-                    className="input input-bordered w-full"
-                  />
-                </div>
-                <div className="form-control w-full">
-                  <label className="label" htmlFor="year_group">
-                    <span className="label-text text-sm">{t('students_form_label_yearGroup')}</span>
-                  </label>
-                  <input
-                    type="text"
-                    name="year_group"
-                    id="year_group"
-                    value={formData.year_group}
-                    onChange={handleInputChange}
-                    className="input input-bordered w-full"
-                  />
+              {/* Card 1: Student Details */}
+              <div className="card w-full bg-base-100 shadow-md p-4">
+                <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_details_heading', 'Student Details')}</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="form-control w-full">
+                    <label className="label" htmlFor="first_name">
+                      <span className="label-text text-sm">
+                        {t('students_form_label_firstName')} <span className="text-error">{t('common_required_indicator')}</span>
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      name="first_name"
+                      id="first_name"
+                      required
+                      value={formData.first_name}
+                      onChange={handleInputChange}
+                      className="input input-bordered w-full"
+                    />
+                  </div>
+                  <div className="form-control w-full">
+                    <label className="label" htmlFor="last_name">
+                      <span className="label-text text-sm">
+                        {t('students_form_label_lastName')} <span className="text-error">{t('common_required_indicator')}</span>
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      name="last_name"
+                      id="last_name"
+                      required
+                      value={formData.last_name}
+                      onChange={handleInputChange}
+                      className="input input-bordered w-full"
+                    />
+                  </div>
+                  <div className="form-control w-full">
+                    <label className="label" htmlFor="email">
+                      <span className="label-text text-sm">{t('students_form_label_email')}</span>
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      id="email"
+                      value={formData.email}
+                      onChange={handleInputChange}
+                      className="input input-bordered w-full"
+                    />
+                  </div>
+                  <div className="form-control w-full">
+                    <label className="label" htmlFor="external_student_id">
+                      <span className="label-text text-sm">{t('students_form_label_externalId')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="external_student_id"
+                      id="external_student_id"
+                      value={formData.external_student_id}
+                      onChange={handleInputChange}
+                      className="input input-bordered w-full"
+                    />
+                  </div>
+                  <div className="form-control w-full">
+                    <label className="label" htmlFor="descriptor">
+                      <span className="label-text text-sm">{t('students_form_label_descriptor')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="descriptor"
+                      id="descriptor"
+                      value={formData.descriptor}
+                      onChange={handleInputChange}
+                      className="input input-bordered w-full"
+                    />
+                  </div>
+                  <div className="form-control w-full">
+                    <label className="label" htmlFor="year_group">
+                      <span className="label-text text-sm">{t('students_form_label_yearGroup')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="year_group"
+                      id="year_group"
+                      value={formData.year_group}
+                      onChange={handleInputChange}
+                      className="input input-bordered w-full"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="form-control w-full">
-                <label className="label" htmlFor="class_group">
-                  <span className="label-text text-sm">{t('students_form_label_classGroup')}</span>
-                </label>
-                <select
-                  name="class_group"
-                  id="class_group"
-                  value={selectedClassGroupId}
-                  onChange={handleClassChange}
-                  className="select select-bordered w-full"
-                >
-                  <option value="">{t('students_form_select_noClass')}</option>
-                  {classGroups.map((classGroup) => (
-                    <option key={classGroup.id} value={classGroup.id}>
-                      {classGroup.class_name} ({classGroup.academic_year})
+              {/* Card 2: Class Assignments (Only for Edit Form) */}
+              {showEditForm && editingStudent && (
+                <div className="card w-full bg-base-100 shadow-md p-4 mt-4">
+                  <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_classes_heading', 'Class Assignments')}</h4>
+                  
+                  {/* "Add to Another Class" section */}
+                  {availableClassesForAdding.length > 0 && (
+                    <div className="mt-0 pt-0">
+                      <label htmlFor="addClassDropdown" className="label-text text-sm font-medium">
+                        {t('students_form_label_addToAnotherClass', 'Assign to Additional Class:')}
+                      </label>
+                      <div className="flex items-center gap-2 mt-1 mb-4 pb-3 border-b border-base-300">
+                        <select 
+                          id="addClassDropdown"
+                          value={classToAddId}
+                          onChange={handleClassToAddChange}
+                          className="select select-bordered select-sm w-full max-w-xs"
+                          disabled={isClassMembershipProcessing}
+                        >
+                          <option value="">{t('students_form_select_aClass', '-- Select a class --')}</option>
+                          {availableClassesForAdding.map(cg => (
+                            <option key={cg.id} value={cg.id}>
+                              {cg.class_name}{cg.academic_year ? ` (${cg.academic_year})` : ''}
+                            </option>
+                          ))}
+                          <option value="CREATE_NEW_CLASS" className="font-semibold text-secondary">
+                            {t('students_form_select_createNewClassAndAssign', 'Create New Class & Assign...')}
+                          </option>
+                        </select>
+                        <button 
+                          type="button"
+                          onClick={handleAddStudentToSelectedClass}
+                          className="btn btn-sm btn-outline btn-primary"
+                          disabled={!classToAddId || isClassMembershipProcessing}
+                        >
+                          {isClassMembershipProcessing && classToAddId ? 
+                            <span className="loading loading-spinner loading-xs"></span> :
+                            t('students_form_button_addToClass', 'Assign to Selected Class')
+                          }
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* "Currently Assigned Classes" list */}
+                  {assignedClassesForEdit.length > 0 ? (
+                    <div className="mt-0 pt-0"> {/* Adjusted mt-6 to mt-0 as it's inside a card now */}
+                      <h5 className="text-sm font-medium mb-2 text-base-content/90">
+                        {t('students_form_assignedClasses_subheading', 'Currently Assigned Classes:')}
+                      </h5>
+                      <ul className="list-none space-y-2 bg-base-200/30 p-3 rounded-md shadow-inner">
+                        {assignedClassesForEdit.map(cg => (
+                          <li key={cg.id} className="text-sm text-base-content/90 py-1 flex justify-between items-center">
+                            <span>
+                              {cg.class_name}{cg.academic_year ? ` (${cg.academic_year})` : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveStudentFromClass(cg.id)}
+                              className="btn btn-xs btn-ghost text-error hover:bg-error/20"
+                              title={t('students_form_button_removeFromClass_title', { className: cg.class_name })}
+                              disabled={isClassMembershipProcessing}
+                            >
+                              {isClassMembershipProcessing ? 
+                                <span className="loading loading-spinner loading-xs"></span> :
+                                <XCircleIcon className="h-4 w-4" />
+                              }
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-base-content/70 italic">{t('students_form_noClassesAssigned')}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Card 3: Student Documents (Only for Edit Form) */}
+              {showEditForm && editingStudent && (
+                <div className="card w-full bg-base-100 shadow-md p-4 mt-4">
+                  <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_documents_heading', 'Student Documents')}</h4>
+                  {/* Document content will go here later */}
+                  <p className="text-sm text-base-content/70 italic">{t('students_form_documents_placeholder', 'Document management will be available here soon.')}</p>
+                </div>
+              )}
+
+              {/* Form Submission Buttons - Common for Create and Edit */}
+              {showCreateForm && (
+                <div className="form-control w-full mt-4">
+                  <label className="label" htmlFor="class_group">
+                    <span className="label-text text-sm">{t('students_form_label_classGroup')}</span>
+                  </label>
+                  <select
+                    name="class_group"
+                    id="class_group"
+                    value={selectedClassGroupId}
+                    onChange={handleClassChange}
+                    className="select select-bordered w-full"
+                  >
+                    <option value="">{t('students_form_select_noClass')}</option>
+                    {classGroups.map((classGroup) => (
+                      <option key={classGroup.id} value={classGroup.id}>
+                        {classGroup.class_name} ({classGroup.academic_year})
+                      </option>
+                    ))}
+                    <option value="CREATE_NEW_CLASS" className="font-semibold text-secondary">
+                      {t('students_form_select_createNewClass')}
                     </option>
-                  ))}
-                  <option value="CREATE_NEW_CLASS" className="font-semibold text-secondary">
-                    {t('students_form_select_createNewClass')}
-                  </option>
-                </select>
-              </div>
+                  </select>
+                </div>
+              )}
 
               <div className="flex justify-end space-x-3 pt-4">
                 <button type="button" onClick={resetForms} className="btn btn-ghost btn-sm">
@@ -680,87 +964,97 @@ function StudentsPage() {
           </div>
         )}
 
-        <div className="mt-4">
-          {isLoading && (
-            <div className="flex justify-center py-4">
-              <span className="loading loading-spinner loading-lg"></span>
-            </div>
-          )}
-        </div>
-
-        {!isLoading && !error && (
-          <div className="card w-full bg-base-100 shadow-md">
-            <div className="card-body">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="card-title text-xl">{t('students_list_heading', { defaultValue: 'Student List'})}</h2>
-                <div className="flex space-x-2">
-                  <button
-                    onClick={handleShowCreateForm}
-                    className="btn btn-success btn-sm"
-                  >
-                    <PlusIcon className="h-5 w-5 mr-1"/>
-                    {t('studentsPage_button_add')}
-                  </button>
-                  <button
-                    onClick={() => navigate('/bulk-upload')}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    <ArrowUpTrayIcon className="h-5 w-5 mr-1" />
-                    {t('studentsPage_button_bulkUpload', 'Bulk Upload')}
-                  </button>
-                </div>
-              </div>
-              {students.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="table w-full">
-                    <thead>
-                      <tr>
-                        <th>{t('common_label_name')}</th>
-                        <th>{t('common_label_email')}</th>
-                        <th>{t('common_label_yearGroup')}</th>
-                        <th>{t('common_label_actions')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {students.map((student) => (
-                        <tr key={student.id} className="hover">
-                          <td className="font-medium">
-                            {student.first_name} {student.last_name}
-                          </td>
-                          <td>{student.email || '-'}</td>
-                          <td>{student.year_group || '-'}</td>
-                          <td className="space-x-2">
-                            <button
-                              onClick={() => handleShowEditForm(student)}
-                              className="btn btn-ghost btn-xs"
-                              title={t('students_button_edit_title')}
-                            >
-                              <PencilSquareIcon className="h-4 w-4"/> {t('common_button_edit')}
-                            </button>
-                            <button
-                              onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
-                              className="btn btn-ghost btn-xs text-error"
-                              title={t('students_button_delete_title')}
-                            >
-                              <TrashIcon className="h-4 w-4"/> {t('common_button_delete')}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-center py-4">
-                  <p className="text-base-content/70">{t('students_list_empty')}</p>
+        {!showCreateForm && !showEditForm && (
+          <>
+            <div className="mt-4">
+              {isLoading && (
+                <div className="flex justify-center py-4">
+                  <span className="loading loading-spinner loading-lg"></span>
                 </div>
               )}
             </div>
-          </div>
+
+            {!isLoading && !error && (
+              <div className="card bg-base-100 shadow-xl mb-6">
+                <div className="card-body">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-semibold">{t('students_list_title')}</h2>
+                    <div>
+                      <button
+                        onClick={handleShowCreateForm}
+                        className="btn btn-primary mr-2"
+                        aria-label={t('students_list_button_add_title')}
+                      >
+                        <PlusIcon className="h-5 w-5 mr-1 inline-block" />
+                        {t('students_list_button_add')}
+                      </button>
+                      <button
+                        onClick={() => navigate('/bulk-upload')}
+                        className="btn btn-secondary"
+                        aria-label={t('students_list_button_bulkUpload_title')}
+                      >
+                        <ArrowUpTrayIcon className="h-5 w-5 mr-1 inline-block" />
+                        {t('students_list_button_bulkUpload')}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="table w-full">
+                      <thead>
+                        <tr>
+                          <th>{t('students_form_label_name')}</th>
+                          <th>{t('students_form_label_email')}</th>
+                          <th>{t('students_list_header_classGroups')}</th>
+                          <th>{t('common_actions')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {students.map(student => (
+                          <tr key={student.id || student._id} className="hover">
+                            <td>{student.first_name} {student.last_name}</td>
+                            <td>{student.email || '-'}</td>
+                            <td>
+                              {(student.class_group_ids && student.class_group_ids.length > 0 && classGroups.length > 0) ? (
+                                student.class_group_ids.map(cgId => {
+                                  const classGroup = classGroups.find(cg => cg.id === cgId || cg._id === cgId);
+                                  return classGroup ? (
+                                    <div key={cgId}>{classGroup.class_name}</div>
+                                  ) : (
+                                    <div key={cgId} className="italic text-gray-500">{t('common_status_unknown_class')}</div>
+                                  );
+                                })
+                              ) : (
+                                <div>-</div>
+                              )}
+                            </td>
+                            <td className="space-x-1">
+                              <button
+                                onClick={() => handleShowEditForm(student)}
+                                className="btn btn-ghost btn-sm p-1"
+                                title={t('students_list_button_edit_title')}
+                              >
+                                <PencilSquareIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
+                                className="btn btn-ghost btn-sm p-1"
+                                title={t('students_list_button_delete_title')}
+                              >
+                                <TrashIcon className="h-5 w-5 text-red-600 hover:text-red-800" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* Create Class Modal */}
       {showCreateClassModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-base-100 p-6 rounded-lg shadow-xl max-w-md w-full">

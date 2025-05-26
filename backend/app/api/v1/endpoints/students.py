@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends # Add Depen
 
 # Use absolute imports from the 'app' package root
 from ....models.student import Student, StudentCreate, StudentUpdate
+from ....models.bulk import StudentBulkCreateRequest, StudentBulkCreateResponse, StudentBulkResponseItem # Added bulk models
+from ....models.class_group import ClassGroupCreate # Import ClassGroupCreate
 from ....db import crud
 from ....core.security import get_current_user_payload
 
@@ -93,29 +95,27 @@ async def read_student(
     "/",
     response_model=List[Student],
     status_code=status.HTTP_200_OK,
-    summary="Get a list of students (Protected)", # Updated summary
-    description="Retrieves a list of students with optional filtering and pagination. Requires authentication." # Updated description
+    summary="Get a list of students (Protected)",
+    description="Retrieves a list of students with optional filtering and pagination. Requires authentication."
 )
 async def read_students(
     external_student_id: Optional[str] = Query(None, description="Filter by external student ID"),
     first_name: Optional[str] = Query(None, description="Filter by first name (case-insensitive)"),
     last_name: Optional[str] = Query(None, description="Filter by last name (case-insensitive)"),
     year_group: Optional[str] = Query(None, description="Filter by year group"),
+    class_id: Optional[uuid.UUID] = Query(None, description="Filter by class group ID"),
     skip: int = Query(0, ge=0, description="Records to skip"),
     limit: int = Query(100, ge=1, le=500, description="Max records to return"),
-    # === Add Authentication Dependency ===
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     """
     Protected endpoint to retrieve a list of students. Supports filtering and pagination.
+    Can filter by class_id to get students belonging to a specific class.
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to read list of students with filters.")
+    logger.info(f"User {user_kinde_id} attempting to read list of students with filters (class_id: {class_id}).")
 
-    # TODO: Add authorization logic. Listing ALL students might require admin rights.
-    # Non-admins should likely only see students within their associated ClassGroups or School.
-    # This might involve modifying the crud.get_all_students function or adding a new one
-    # that accepts a list of permissible student IDs based on the user's context.
+    # TODO: Further authorization logic for listing students might be needed.
 
     students = await crud.get_all_students(
         teacher_id=user_kinde_id,
@@ -123,6 +123,7 @@ async def read_students(
         first_name=first_name,
         last_name=last_name,
         year_group=year_group,
+        class_id=class_id,
         skip=skip,
         limit=limit
     )
@@ -232,4 +233,160 @@ async def delete_existing_student(
     logger.info(f"Student internal ID {student_internal_id} deleted successfully by user {user_kinde_id}.")
     # No content returned on successful delete
     return None
+
+# === NEW BULK UPLOAD ENDPOINT ===
+@router.post(
+    "/bulk-upload",
+    response_model=StudentBulkCreateResponse,
+    status_code=status.HTTP_200_OK, # Or 207 Multi-Status if returning partial successes/failures
+    summary="Bulk upload students from CSV data (Protected)",
+    description="Processes a list of student records for bulk creation and class assignment. Requires authentication."
+)
+async def bulk_upload_students(
+    bulk_request: StudentBulkCreateRequest,
+    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+):
+    user_kinde_id = current_user_payload.get("sub")
+    if not user_kinde_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+    # Get the teacher's internal ID (UUID)
+    teacher = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id)
+    if not teacher or not teacher.id:
+        logger.error(f"Could not find teacher or teacher.id for kinde_id: {user_kinde_id} during bulk upload.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Teacher profile not found or incomplete.")
+    teacher_internal_id = teacher.id # This is the UUID
+
+    logger.info(f"User {user_kinde_id} (Internal ID: {teacher_internal_id}) initiating bulk student upload with {len(bulk_request.students)} records.")
+
+    response_items: List[StudentBulkResponseItem] = []
+    processed_count = 0
+    succeeded_count = 0
+    failed_count = 0
+
+    for i, student_item in enumerate(bulk_request.students):
+        processed_count += 1
+        row_num = i + 1 # 1-indexed for user feedback
+        class_group_to_assign = None
+        class_group_id_assigned = None
+        class_name_processed_for_msg = None
+        response_status = "FAILED"
+        response_message = ""
+        created_student_id = None
+        student_full_name = f"{student_item.FirstName or 'N/A'} {student_item.LastName or 'N/A'}".strip()
+
+        try:
+            # 1. Validate input student data
+            if not student_item.FirstName or not student_item.LastName:
+                raise ValueError("FirstName and LastName are required.")
+
+            # 2. Handle Class Assignment if AssignToClass is provided
+            if student_item.AssignToClass:
+                class_name_to_find_or_create = student_item.AssignToClass.strip()
+                class_name_processed_for_msg = class_name_to_find_or_create
+                if not class_name_to_find_or_create:
+                    # If AssignToClass was provided but is empty after stripping, treat as no class assignment intended
+                    logger.info(f"Row {row_num}: AssignToClass was whitespace, treating as no class assignment.")
+                    class_name_processed_for_msg = None # Reset for message clarity
+                else:
+                    logger.info(f"Row {row_num}: Processing class '{class_name_to_find_or_create}' for teacher {user_kinde_id}.")
+                    # Look for existing class with name and no academic year
+                    class_group_to_assign = await crud.get_class_group_by_name_and_teacher(
+                        name=class_name_to_find_or_create, 
+                        teacher_kinde_id=user_kinde_id, # Keep using Kinde ID for this lookup as it's on the ClassGroup document for now
+                        academic_year=None # Explicitly look for academic_year = None
+                    )
+                    if not class_group_to_assign:
+                        logger.info(f"Row {row_num}: Class '{class_name_to_find_or_create}' not found for teacher {user_kinde_id} (Kinde ID) with no academic year. Creating new class.")
+                        class_create_payload = ClassGroupCreate(
+                            class_name=class_name_to_find_or_create,
+                            teacher_id=teacher_internal_id, # Use teacher's internal UUID here
+                            academic_year=None # Explicitly set academic_year to None
+                        )
+                        class_group_to_assign = await crud.create_class_group(
+                            class_group_in=class_create_payload
+                            # Removed redundant teacher_id=user_kinde_id from here
+                        )
+                        if not class_group_to_assign:
+                            raise Exception(f"Failed to create new class '{class_name_to_find_or_create}'.")
+                        response_status = "CREATED_WITH_NEW_CLASS"
+                        logger.info(f"Row {row_num}: New class '{class_group_to_assign.class_name}' (ID: {class_group_to_assign.id}) created.")
+                    else:
+                        response_status = "CREATED_WITH_EXISTING_CLASS"
+                        logger.info(f"Row {row_num}: Found existing class '{class_group_to_assign.class_name}' (ID: {class_group_to_assign.id}).")
+                    class_group_id_assigned = class_group_to_assign.id
+            else:
+                response_status = "CREATED_NO_CLASS" # Student created, no class assignment attempted
+
+            # 3. Create Student
+            student_create_payload = StudentCreate(
+                first_name=student_item.FirstName,
+                last_name=student_item.LastName,
+                email=student_item.EmailAddress if student_item.EmailAddress else None,
+                external_student_id=student_item.ExternalID if student_item.ExternalID else None,
+                descriptor=student_item.Descriptor if student_item.Descriptor else None,
+                teacher_id=user_kinde_id # crud.create_student still expects Kinde ID based on its current implementation
+            )
+            created_student = await crud.create_student(student_in=student_create_payload, teacher_id=user_kinde_id)
+            if not created_student:
+                raise Exception("Failed to create student record in database.")
+            created_student_id = created_student.id
+            logger.info(f"Row {row_num}: Student '{student_full_name}' (ID: {created_student_id}) created.")
+
+            # 4. Add Student to Class Group if applicable
+            if class_group_to_assign and created_student_id:
+                added_to_class = await crud.add_student_to_class_group(
+                    class_group_id=class_group_to_assign.id, 
+                    student_id=created_student_id
+                )
+                if not added_to_class:
+                    # This is a soft failure for the overall row; student is created but not assigned.
+                    # The status would already be CREATED_WITH_NEW_CLASS or CREATED_WITH_EXISTING_CLASS
+                    response_message = f"Student created (ID: {created_student_id}), but failed to add to class '{class_group_to_assign.class_name}'."
+                    logger.warning(f"Row {row_num}: {response_message}")
+                    # Decide if this makes the row a partial success or if status should change.
+                    # For now, keeping the class-related status and adding to message.
+                else:
+                    logger.info(f"Row {row_num}: Student {created_student_id} added to class {class_group_to_assign.id}.")
+            
+            # Final success status determination if not already set by class creation path
+            if response_status == "FAILED": # Should have been updated by now if successful
+                response_status = "CREATED_NO_CLASS" if not class_group_to_assign else response_status
+            
+            response_message = response_message or f"Student '{student_full_name}' processed successfully."
+            if class_name_processed_for_msg:
+                response_message += f" Class: '{class_name_processed_for_msg}'."
+            succeeded_count += 1
+
+        except ValueError as ve:
+            logger.warning(f"Row {row_num}: Validation error for student '{student_full_name}' - {str(ve)}")
+            response_message = f"Validation Error: {str(ve)}"
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"Row {row_num}: Error processing student '{student_full_name}': {str(e)}", exc_info=True)
+            response_message = f"Processing Error: {str(e)}"
+            failed_count += 1
+            # Ensure status reflects failure if an exception occurred after potential class status set
+            response_status = "FAILED"
+
+        response_items.append(
+            StudentBulkResponseItem(
+                row_number=row_num,
+                status=response_status,
+                student_id=created_student_id,
+                student_name=student_full_name,
+                class_group_id=class_group_id_assigned,
+                class_name_processed=class_name_processed_for_msg,
+                message=response_message
+            )
+        )
+    
+    return StudentBulkCreateResponse(
+        results=response_items,
+        summary={
+            "total_processed": processed_count,
+            "total_succeeded": succeeded_count, 
+            "total_failed": failed_count
+        }
+    )
 

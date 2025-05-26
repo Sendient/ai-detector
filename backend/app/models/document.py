@@ -3,10 +3,15 @@
 import uuid
 from pydantic import BaseModel, Field, field_validator, ConfigDict # Added ConfigDict for V2
 from datetime import datetime, timezone
-from typing import Optional, Any # Added Any for validator
+from typing import Optional, Any, List # Added Any for validator, List for keywords
 
 # Import Enums with correct names
 from .enums import FileType, DocumentStatus # Corrected: DocumentStatus
+from .student import StudentBasicInfo # Added StudentBasicInfo
+
+# Model for Assign Student Request
+class DocumentAssignStudentRequest(BaseModel):
+    student_id: uuid.UUID = Field(..., description="Internal ID of the student to associate with the document")
 
 # --- Base Model ---
 class DocumentBase(BaseModel):
@@ -19,7 +24,7 @@ class DocumentBase(BaseModel):
     status: DocumentStatus = Field(default=DocumentStatus.UPLOADED, description="Current processing status of the document")
     
     # Optional fields based on your application's needs
-    batch_id: Optional[uuid.UUID] = Field(None, description="ID of the batch this document belongs to, if any")
+    batch_id: Optional[uuid.UUID] = Field(default=None, description="ID of the batch this document belongs to")
     queue_position: Optional[int] = Field(None, description="Position in the processing queue (if applicable)")
     processing_priority: int = Field(default=0, description="Priority for processing (e.g., 0=normal, 1=high)")
     
@@ -34,7 +39,8 @@ class DocumentBase(BaseModel):
     # It's not Optional[str] here because DocumentBase might be used where it's always expected.
     # However, for DocumentCreate, it's set by the backend. For Document, it's always there.
     # For consistency in schemas that expect it, keep it non-optional in Base, handle in Create/Update.
-    teacher_id: str = Field(..., description="Kinde ID of the teacher who uploaded/owns the document")
+    teacher_id: str = Field(..., description="Kinde User ID of the owning teacher")
+    student_details: Optional[StudentBasicInfo] = Field(default=None, description="Basic details of the assigned student, if any")
 
     @field_validator('file_type', mode='before')
     @classmethod

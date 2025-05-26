@@ -7,11 +7,18 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends # Removed ,
 from pydantic import ValidationError # Added ValidationError
 
 # Import Pydantic models for ClassGroup
-from ....models.class_group import ClassGroup, ClassGroupCreate, ClassGroupUpdate
+from ....models.class_group import (
+    ClassGroup, 
+    ClassGroupCreate, 
+    ClassGroupCreateRequest,
+    ClassGroupUpdate, 
+    ClassGroupWithStudents
+)
 # Import CRUD functions for ClassGroup
 from ....db import crud
 # Import the authentication dependency
 from ....core.security import get_current_user_payload
+# from ....models import User # REMOVE THIS LINE
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -110,29 +117,31 @@ async def _check_user_is_teacher_of_group( # Needs async to call crud.get_teache
     response_model=ClassGroup,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new class group (Protected)",
-    description="Creates a new class group record. Requires authentication. The teacher ID is taken from the authenticated user."
+    description="Creates a new class group record. Requires authentication. The teacher ID is taken from the authenticated user's internal ID."
 )
 async def create_new_class_group(
-    class_group_in: ClassGroupCreate, # Removed request: Request
+    class_group_in: ClassGroupCreateRequest, # Changed to ClassGroupCreateRequest
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+    # current_teacher: models.Teacher = Depends(deps.get_current_active_teacher) # Example if you had such a dep
 ):
     """Creates a new class group, assigning the authenticated user as the teacher."""
-    # Removed the "EXTREME DEBUGGING" block
-    logger.info(f"Attempting to create new class group. User payload: {current_user_payload.get('sub')}") # This is the first log line
+    logger.info(f"Attempting to create new class group. User payload: {current_user_payload.get('sub')}")
 
     user_kinde_id_str = current_user_payload.get("sub")
+    if not user_kinde_id_str:
+        logger.error("Kinde ID ('sub') missing from token payload.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
 
-    # --- Get Teacher's Internal UUID ---
     teacher_internal_id: Optional[uuid.UUID] = None
     try:
         teacher_record = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id_str)
-        if teacher_record:
+        if teacher_record and teacher_record.id:
             teacher_internal_id = teacher_record.id
         else:
-            logger.error(f"Could not find teacher record for authenticated user Kinde ID: {user_kinde_id_str}")
+            logger.error(f"Could not find teacher record or teacher ID for authenticated user Kinde ID: {user_kinde_id_str}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Authenticated user's teacher profile not found in database."
+                detail="Authenticated user's teacher profile not found or incomplete in database."
             )
     except Exception as e:
          logger.error(f"Error looking up teacher by Kinde ID '{user_kinde_id_str}': {e}", exc_info=True)
@@ -141,51 +150,55 @@ async def create_new_class_group(
              detail="Error retrieving teacher information."
          )
 
-    if not teacher_internal_id:
-         raise HTTPException(status_code=500, detail="Could not determine teacher ID.")
-    # --- End Get Teacher ID ---
-
-    # TODO: Add further checks? Does the specified school_id exist?
+    # Prepare the data for creating the class group, using the internal teacher_id
+    class_group_to_create = ClassGroupCreate(
+        **class_group_in.model_dump(), 
+        teacher_id=teacher_internal_id
+    )
+    
+    # Check for existing class with same name, year, for this teacher
+    existing_class = await crud.get_class_group_by_name_year_and_teacher(
+        class_name=class_group_to_create.class_name,
+        academic_year=class_group_to_create.academic_year,
+        teacher_id=teacher_internal_id
+    )
+    if existing_class:
+        logger.warning(f"Class group '{class_group_to_create.class_name}' with year '{class_group_to_create.academic_year}' already exists for teacher ID {teacher_internal_id}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A class with the name '{class_group_to_create.class_name}' and academic year '{class_group_to_create.academic_year or "Not specified"}' already exists for you."
+        )
 
     try:
-        logger.info(f"User {user_kinde_id_str} attempting to create class group with data from Pydantic model: {class_group_in.model_dump()}")
+        logger.info(f"User {user_kinde_id_str} (Teacher ID: {teacher_internal_id}) attempting to create class group with data: {class_group_to_create.model_dump()}")
 
+        # Pass the fully prepared ClassGroupCreate model to the CRUD function
+        # The crud.create_class_group should NOT take an additional teacher_id parameter if it's already in class_group_to_create
         created_cg = await crud.create_class_group(
-            class_group_in=class_group_in,
-            teacher_id=teacher_internal_id # Pass the internal ID
+            class_group_in=class_group_to_create
         )
 
         if not created_cg:
-            logger.error(f"CRUD create_class_group returned None for user {user_kinde_id_str} with data {class_group_in.model_dump()}")
+            logger.error(f"CRUD create_class_group returned None for teacher {teacher_internal_id} with data {class_group_to_create.model_dump()}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not create the class group record (CRUD function returned None)."
+                detail="Could not create the class group record."
             )
-        logger.info(f"ClassGroup '{created_cg.class_name}' (ID: {created_cg.id}) created successfully by user {user_kinde_id_str} (Teacher ID: {teacher_internal_id}).")
+        logger.info(f"ClassGroup '{created_cg.class_name}' (ID: {created_cg.id}) created successfully by Teacher ID: {teacher_internal_id}).")
         return created_cg
     except ValidationError as e:
-        logger.error(f"Pydantic ValidationError manually caught in create_new_class_group for user {user_kinde_id_str}. Errors: {e.errors()}", exc_info=True)
-        error_details = []
-        for error in e.errors():
-            field = " -> ".join(str(loc) for loc in error.get("loc", []))
-            message = error.get("msg", "Unknown validation error")
-            error_type = error.get("type", "Unknown type")
-            error_details.append({"field": field, "message": message, "type": error_type})
+        # This catch block might be redundant if Pydantic validation happens at the input model level (ClassGroupCreateRequest)
+        # However, it can catch issues if ClassGroupCreate itself has further validation that fails.
+        logger.error(f"Pydantic ValidationError during ClassGroupCreate construction or CRUD operation for teacher {teacher_internal_id}. Errors: {e.errors()}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"message": "Validation Error caught in endpoint", "errors": error_details}
+            detail=e.errors() # Pydantic errors are already in a good format
         )
     except HTTPException as http_exc:
-        logger.warning(f"HTTPException caught in create_new_class_group for user {user_kinde_id_str}: {http_exc.detail}", exc_info=True)
+        # Re-raise HTTPExceptions directly
         raise http_exc
     except Exception as e:
-        # Log the incoming data if possible, but be cautious with sensitive info
-        logged_data = "Error accessing class_group_in for logging"
-        try:
-            logged_data = class_group_in.model_dump(exclude_none=True)
-        except Exception:
-            pass # Keep default error string
-        logger.error(f"Unexpected error creating class group for user {user_kinde_id_str} with data {logged_data}: {e}", exc_info=True)
+        logger.error(f"Unexpected error creating class group for teacher {teacher_internal_id} with data {class_group_to_create.model_dump()}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(e)}"
@@ -276,25 +289,45 @@ async def update_existing_class_group(
     class_group_in: ClassGroupUpdate,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    user_kinde_id_str = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id_str} attempting to update class group ID: {class_group_id}")
-
-    existing_class_group = await crud.get_class_group_by_id(class_group_id=class_group_id)
-    if existing_class_group is None:
+    user_kinde_id = current_user_payload.get("sub")
+    logger.info(f"User {user_kinde_id} attempting to update class group ID: {class_group_id}")
+    
+    class_group = await crud.get_class_group_by_id(class_group_id=class_group_id)
+    if class_group is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Class group with ID {class_group_id} not found."
         )
-    # Use the restored async auth check
-    await _check_user_is_teacher_of_group(existing_class_group, current_user_payload, action="update")
+    
+    # Authorization: Ensure the current user is the teacher of this class group.
+    # This helper now compares internal UUIDs after fetching the teacher record for the current user.
+    await _check_user_is_teacher_of_group(class_group, current_user_payload, action="update")
 
-    updated_cg = await crud.update_class_group(class_group_id=class_group_id, class_group_in=class_group_in)
-    if updated_cg is None:
+    # Fetch the teacher's internal UUID to pass to the CRUD function
+    teacher_record = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id)
+    if not teacher_record or not teacher_record.id:
+        logger.error(f"Could not find teacher record or teacher ID for Kinde ID: {user_kinde_id} during class group update.")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update class group with ID {class_group_id}."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user's teacher profile not found or incomplete."
         )
-    logger.info(f"ClassGroup ID {class_group_id} updated successfully by user {user_kinde_id_str}.")
+    teacher_internal_uuid = teacher_record.id
+
+    logger.debug(f"Attempting to update ClassGroup {class_group_id} by Teacher (internal UUID) {teacher_internal_uuid} with data: {class_group_in.model_dump(exclude_unset=True)}")
+    updated_cg = await crud.update_class_group(
+        class_group_id=class_group_id, 
+        teacher_id=teacher_internal_uuid, # Pass internal UUID
+        class_group_in=class_group_in
+    )
+    if updated_cg is None:
+        # This could be because the class wasn't found again, or the update failed for other reasons (e.g. DB error)
+        # The CRUD function logs more details. Here, we return a generic server error or a more specific one if identifiable.
+        logger.error(f"Update failed for class group ID {class_group_id} by teacher {teacher_internal_uuid}. CRUD function returned None.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, # Or 404 if it was a not found issue during update
+            detail="Failed to update class group."
+        )
+    logger.info(f"ClassGroup {updated_cg.id} updated successfully by teacher {user_kinde_id}.")
     return updated_cg
 
 # --- DELETE /classgroups/{class_group_id} ---
@@ -308,26 +341,51 @@ async def delete_existing_class_group(
     class_group_id: uuid.UUID,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
-    user_kinde_id_str = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id_str} attempting to delete class group ID: {class_group_id}")
+    user_kinde_id = current_user_payload.get("sub")
+    logger.info(f"User {user_kinde_id} attempting to delete class group ID: {class_group_id}")
 
-    existing_class_group = await crud.get_class_group_by_id(class_group_id=class_group_id)
-    if existing_class_group is None:
+    class_group = await crud.get_class_group_by_id(class_group_id=class_group_id)
+    if class_group is None:
+        # If the class group doesn't exist, returning 204 is idempotent for DELETE.
+        # However, for RBAC, we might want to ensure it existed and was owned first.
+        # For now, let's be strict: if it's not found, we can't verify ownership.
+        logger.warning(f"Class group {class_group_id} not found for deletion attempt by user {user_kinde_id}.")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Class group with ID {class_group_id} not found."
         )
-    # Use the restored async auth check
-    await _check_user_is_teacher_of_group(existing_class_group, current_user_payload, action="delete")
 
-    deleted_successfully = await crud.delete_class_group(class_group_id=class_group_id)
-    if not deleted_successfully:
+    # Authorization: Ensure the current user is the teacher of this class group.
+    await _check_user_is_teacher_of_group(class_group, current_user_payload, action="delete")
+
+    # Fetch the teacher's internal UUID to pass to the CRUD function
+    teacher_record = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id)
+    if not teacher_record or not teacher_record.id:
+        logger.error(f"Could not find teacher record or teacher ID for Kinde ID: {user_kinde_id} during class group deletion.")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete class group with ID {class_group_id}."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user's teacher profile not found or incomplete."
         )
-    logger.info(f"ClassGroup ID {class_group_id} deleted successfully by user {user_kinde_id_str}.")
-    return None
+    teacher_internal_uuid = teacher_record.id
+
+    logger.debug(f"Attempting to delete ClassGroup {class_group_id} by Teacher (internal UUID) {teacher_internal_uuid}")
+    success = await crud.delete_class_group(class_group_id=class_group_id, teacher_id=teacher_internal_uuid)
+    if not success:
+        # This could mean the class group was not found by the delete query (e.g., already deleted, or ownership mismatch despite _check_user_is_teacher_of_group)
+        # or a database error occurred.
+        logger.error(f"Deletion failed for class group ID {class_group_id} by teacher {teacher_internal_uuid}. CRUD function returned False.")
+        # Raising 404 if not found, or 500 for other errors. 
+        # The CRUD function logs more details, but here we might infer based on `class_group` being found earlier.
+        # If `class_group` was found by `get_class_group_by_id`, then a `False` return likely means it was not found by `delete_class_group`'s query *with the teacher_id*.
+        # This implies an ownership issue or it was deleted between checks. A 404 or 403 could be suitable.
+        # For simplicity, if it was found initially, a failure to delete points to an issue during the delete operation.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, # Or 500. 404 if not found by delete_class_group due to stricter query.
+            detail="Failed to delete class group. It might have been already deleted or an error occurred."
+        )
+    # If successful, FastAPI handles the 204 No Content response automatically.
+    logger.info(f"ClassGroup {class_group_id} deleted successfully by teacher {user_kinde_id}.")
+    return # FastAPI will return 204 No Content
 
 # --- START: Endpoints for ClassGroup <-> Student Relationship ---
 
@@ -434,5 +492,4 @@ async def remove_student_from_group(
     # Return No Content on success
     return None
 
-# --- END: NEW ENDPOINTS for ClassGroup <-> Student Relationship ---
- 
+# --- END: NEW ENDPOINTS for ClassGroup <-> Student Relationship --- 
