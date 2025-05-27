@@ -12,6 +12,10 @@ class ParagraphResult(BaseModel):
     paragraph: Optional[str] = Field(None, description="The text content of the paragraph")
     label: Optional[str] = Field(None, description="Classification label for the paragraph (e.g., AI-Generated, Human-Written, Undetermined)")
     probability: Optional[float] = Field(None, ge=0.0, le=1.0, description="AI detection probability score for the paragraph (0.0 to 1.0)")
+    # NEW: Add fields for detailed text segments and explanations
+    segments: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of text segments within the paragraph, with their own labels/scores/highlighting info")
+    # Example segment: {"text": "some part of the paragraph", "label": "AI_HIGH_CONFIDENCE", "color_hint": "red"}
+    paragraph_explanation: Optional[str] = Field(None, description="Human-readable explanation for this paragraph's result")
 
     # Allow extra fields if the API returns more than we explicitly define,
     # although we only care about the ones defined above for now.

@@ -42,6 +42,7 @@ function DocumentsPage() {
   const [deleteError, setDeleteError] = useState(null);
   const [deleteSuccess, setDeleteSuccess] = useState(null);
   const [cancellingStatus, setCancellingStatus] = useState({});
+  const [reprocessingStatus, setReprocessingStatus] = useState({});
 
   // State for Assign Student Modal
   const [showAssignStudentModal, setShowAssignStudentModal] = useState(false);
@@ -410,9 +411,17 @@ function DocumentsPage() {
       });
       if (!response.ok) {
         let errorDetail = `HTTP error ${response.status}`;
-        try { const errData = await response.json(); errorDetail = errData.detail || errorDetail; } catch (e) { const textError = await response.text(); errorDetail = textError || errorDetail; }
+        const textError = await response.text(); // Read as text first
+        try {
+          const errData = JSON.parse(textError); // Try to parse the text as JSON
+          errorDetail = errData.detail || errorDetail;
+        } catch (e) {
+          // If JSON parsing fails, use the textError if it's not empty, otherwise stick to the HTTP status
+          errorDetail = textError || errorDetail;
+        }
         throw new Error(t('messages_delete_failed', { detail: errorDetail }));
       }
+      // If response.ok, it's a 204 No Content, so no body to read.
       setDeleteSuccess(t('messages_delete_success'));
       await fetchDocuments();
       setTimeout(() => {
@@ -568,9 +577,74 @@ function DocumentsPage() {
     return mimeType || 'Unknown'; // Fallback to full mime type or 'Unknown'
   };
 
+  const handleReprocessDocument = async (documentId) => {
+    if (!isAuthenticated) {
+      setError(t('messages_error_loginRequired_general'));
+      return;
+    }
+
+    const confirmed = window.confirm(t('documentsPage_confirmReprocess'));
+    if (!confirmed) {
+      return;
+    }
+
+    setReprocessingStatus(prev => ({ ...prev, [documentId]: t('documentsPage_status_reprocessing') }));
+    setError(null);
+    let token;
+
+    try {
+      token = await getToken();
+      if (!token) {
+        throw new Error(t('messages_error_authTokenMissing'));
+      }
+
+      const response = await fetch(`${PROXY_PATH}/documents/${documentId}/reprocess`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+
+      if (!response.ok) {
+        let errorDetail = `HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          errorDetail = errData.detail || errorDetail;
+        } catch (e) {
+          const textError = await response.text();
+          errorDetail = textError || errorDetail;
+        }
+        throw new Error(t('documentsPage_reprocessFailedError', { detail: errorDetail }));
+      }
+
+      // Assuming 202 Accepted means success
+      setReprocessingStatus(prev => ({ ...prev, [documentId]: t('documentsPage_status_reprocess_success') }));
+      // Optimistically update document status in UI or wait for poll
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === documentId ? { ...doc, status: QUEUED_STATUS } : doc
+        )
+      );
+      setTimeout(() => {
+        setReprocessingStatus(prev => ({ ...prev, [documentId]: null }));
+        fetchDocuments(true); // Poll to get updated status
+      }, 3000);
+
+    } catch (err) {
+      console.error(`Error reprocessing document ${documentId}:`, err);
+      setError(err.message || t('messages_error_unexpected'));
+      setReprocessingStatus(prev => ({ ...prev, [documentId]: t('documentsPage_status_reprocess_failed') }));
+       setTimeout(() => {
+        setReprocessingStatus(prev => ({ ...prev, [documentId]: null }));
+      }, 5000);
+    }
+  };
+
   const renderDocumentActions = (doc) => {
     const isProcessing = assessmentStatus[doc.id] === 'loading';
     const isCancelling = cancellingStatus[doc.id] === 'loading';
+    const isTextExtractable = doc.file_type && supportedTextTypes.includes(doc.file_type.toLowerCase());
 
     let statusActions = null;
 
@@ -656,7 +730,7 @@ function DocumentsPage() {
                 <TrashIcon className="h-4 w-4" />
             </button>
         )}
-        {supportedTextTypes.includes(doc.file_type?.toLowerCase()) && doc.status !== PROCESSING_STATUS && (
+        {isTextExtractable && doc.status !== PROCESSING_STATUS && (
             <button
                 onClick={() => handleViewText(doc.id)}
                 className="btn btn-xs btn-ghost"
@@ -665,6 +739,14 @@ function DocumentsPage() {
                 <DocumentTextIcon className="h-4 w-4" />
             </button>
         )}
+        <button
+          onClick={() => handleReprocessDocument(doc.id)}
+          title={t('documentsPage_action_reprocess')}
+          className="p-2 text-gray-600 hover:text-blue-600 transition-colors disabled:opacity-50"
+          disabled={reprocessingStatus[doc.id] || isProcessing}
+        >
+          <ArrowPathIcon className="h-5 w-5" />
+        </button>
       </div>
     );
   };
@@ -819,6 +901,14 @@ function DocumentsPage() {
                           )}
                         </td>
                         <td className="space-x-1 whitespace-nowrap">
+                          <button
+                            onClick={() => handleReprocessDocument(doc.id)}
+                            title={t('documentsPage_action_reprocess')}
+                            className="btn btn-ghost btn-xs p-1"
+                            disabled={reprocessingStatus[doc.id] || (assessmentStatus[doc.id] === 'loading' || doc.status === PROCESSING_STATUS || doc.status === QUEUED_STATUS)}
+                          >
+                            <ArrowPathIcon className="h-5 w-5 text-gray-600 hover:text-blue-600" />
+                          </button>
                           <button
                             onClick={() => handleViewReport(doc.id)}
                             className="btn btn-ghost btn-xs p-1"

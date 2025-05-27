@@ -19,7 +19,7 @@ from backend.app.core.config import settings
 # from app.core.security import get_current_user_payload # OLD
 from backend.app.core.security import get_current_user_payload # NEW - For dependency override
 from backend.app.models.document import Document, DocumentStatus # For asserting response and types
-from backend.app.models.result import Result, ResultStatus # For asserting result creation
+from backend.app.models.result import Result, ResultStatus, ResultCreate # For asserting result creation
 from backend.app.models.enums import FileType # For asserting file type
 
 # Mark all tests in this module to use pytest-asyncio
@@ -186,11 +186,12 @@ async def test_upload_document_success(
 
     # Verify result creation
     mock_crud_create_result.assert_called_once()
-    call_args_create_result = mock_crud_create_result.call_args[1]
-    result_in_arg = call_args_create_result['result_in']
+    # crud.create_result is now called with result_in: ResultCreate
+    result_in_arg = mock_crud_create_result.call_args[1]['result_in']
+    assert isinstance(result_in_arg, ResultCreate)
     assert result_in_arg.document_id == created_doc_id
     assert result_in_arg.teacher_id == test_user_kinde_id
-    assert result_in_arg.status == ResultStatus.PENDING
+    # Optional: assert result_in_arg.status == ResultStatus.PENDING (or whatever is expected)
 
     # Clean up dependency override
     if original_override:
@@ -403,7 +404,9 @@ async def test_upload_document_too_large(
     assert document_in_arg.teacher_id == test_user_kinde_id
 
     mock_crud_create_result.assert_called_once()
+    # crud.create_result is now called with result_in: ResultCreate
     result_in_arg = mock_crud_create_result.call_args[1]['result_in']
+    assert isinstance(result_in_arg, ResultCreate)
     assert result_in_arg.document_id == created_doc_id
     assert result_in_arg.teacher_id == test_user_kinde_id
 

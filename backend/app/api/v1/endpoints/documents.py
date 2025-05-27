@@ -1,13 +1,14 @@
 import uuid
 import logging
 import os # Needed for path operations (splitext)
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from fastapi import (
     APIRouter, HTTPException, status, Query, Depends,
     UploadFile, File, Form
 )
 # Add PlainTextResponse for the new endpoint's return type
 from fastapi.responses import PlainTextResponse, JSONResponse # Added JSONResponse
+from starlette.responses import Response # Added Response
 from datetime import datetime, timezone
 import httpx # Import httpx for making external API calls
 import re # Import re for word count calculation
@@ -129,11 +130,12 @@ async def upload_document(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,"Failed to save document metadata after upload.")
 
     # 3. Create initial Result record
-    result_data = ResultCreate(
-        score=None, status=ResultStatus.PENDING, result_timestamp=now, document_id=created_document.id, teacher_id=user_kinde_id
-        # paragraph_results will be None by default from the model
+    result_create_data = ResultCreate(
+        document_id=created_document.id,
+        teacher_id=user_kinde_id,
+        # status is optional in ResultCreate and defaults to PENDING in the model
     )
-    created_result = await crud.create_result(result_in=result_data)
+    created_result = await crud.create_result(result_in=result_create_data)
     if not created_result:
         logger.error(f"Failed to create initial pending result record for document {created_document.id}")
         # Decide if this should cause the whole upload request to fail - maybe not?
@@ -153,13 +155,37 @@ async def upload_document(
         )
         if updated_doc:
             created_document = updated_doc
+        else:
+            # This case is tricky: task is in queue, but doc status not updated.
+            # Log critically. The worker might pick it up if it finds a PENDING/IN_PROGRESS task,
+            # but the document status in the main documents table will be UPLOADED.
+            # This could lead to inconsistencies.
+            logger.critical(
+                f"CRITICAL: Task for document {created_document.id} was enqueued, "\
+                f"but FAILED to update document status to QUEUED. Document remains UPLOADED."
+            )
+            # Potentially set an error status or a specific 'NEEDS_ATTENTION' status here.
+            # For now, just critical logging. The assessment worker should still process based on the task queue.
     else:
         logger.error(
-            f"Failed to enqueue assessment task for document {created_document.id}"
+            f"Failed to enqueue assessment task for document {created_document.id}. "\
+            f"Updating document status to ERROR."
         )
+        # Set document status to ERROR if enqueuing failed
+        error_updated_doc = await crud.update_document_status(
+            document_id=created_document.id,
+            teacher_id=user_kinde_id,
+            status=DocumentStatus.ERROR, # Set to ERROR
+        )
+        if error_updated_doc:
+            created_document = error_updated_doc
+        else:
+            logger.error(
+                f"Failed to update document {created_document.id} status to ERROR after enqueue failure."
+            )
 
     logger.info(
-        f"Document {created_document.id} uploaded and queued for assessment."
+        f"Document {created_document.id} (status: {created_document.status}) processed by upload endpoint." # Updated log
     )
 
     return created_document
@@ -509,79 +535,65 @@ async def delete_document_endpoint( # Renamed to avoid potential clash
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to delete document ID: {document_id}")
+    logger.info(f"User {user_kinde_id} attempting to delete document {document_id}")
 
-    # Try to get the document, EXCLUDING already soft-deleted ones first.
-    document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id, include_deleted=False)
+    # Step 1: Soft-delete the document record (this is transactional)
+    # crud.delete_document now returns (bool_success, blob_path_or_none)
+    doc_delete_success, blob_to_delete_path = await crud.delete_document(document_id=document_id, teacher_id=user_kinde_id)
+
+    if not doc_delete_success:
+        # If doc_delete_success is False, it means the document was not found, not owned, or already deleted.
+        # Or an actual DB error occurred during the transaction.
+        # The crud.delete_document function logs these cases.
+        # We still might have a blob_path if the document record was initially found but the update failed.
+        # For now, we treat this as a failure to find/delete the primary record.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found, not accessible, or already deleted.")
+
+    # Step 2: If document soft-deletion was successful, soft-delete associated result (separate transaction)
+    logger.info(f"Document {document_id} soft-deleted. Attempting to soft-delete associated result.")
+    result_delete_success = await crud.soft_delete_result_by_document_id(document_id=document_id, teacher_id=user_kinde_id)
     
-    doc_was_already_soft_deleted = False
-    if not document:
-        # Not found (or not accessible). Check if it was because it's already soft-deleted.
-        logger.info(f"Document {document_id} not found (potentially already soft-deleted or not accessible). Checking with include_deleted=True.")
-        document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id, include_deleted=True)
-        if not document:
-            # Still not found, even when including deleted ones and checking ownership.
-            logger.warning(f"User {user_kinde_id} failed to delete: Document {document_id} truly not found or not accessible.")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found.")
-        
-        # If found here, it must have been soft-deleted. Mark it as such for logging.
-        if document.is_deleted:
-            doc_was_already_soft_deleted = True
-            logger.info(f"Document {document_id} ({document.original_filename}) was already soft-deleted. Proceeding with remaining cleanup (blob, task).")
-        else:
-            # This case implies document was found only when include_deleted=True but is_deleted is False.
-            # This could mean an ownership issue if teacher_id wasn't part of the initial query correctly or some other inconsistency.
-            # For safety, treat as not found for deletion by this user.
-            logger.warning(f"User {user_kinde_id} failed to delete: Document {document_id} found only when including deleted records but is_deleted flag is False. Possible data inconsistency or access issue.")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} in an inconsistent state for deletion.")
+    if not result_delete_success:
+        # Log this, but don't necessarily fail the whole operation if the primary document was deleted.
+        # The result might not have existed, or was already deleted, or an error occurred.
+        # crud.soft_delete_result_by_document_id logs details.
+        logger.warning(f"Failed to soft-delete result for document {document_id}, or no active result found. Document deletion was successful.")
+    else:
+        logger.info(f"Successfully soft-deleted result for document {document_id}.")
 
-    # At this point, 'document' object is valid (either was never deleted, or was already soft-deleted and re-fetched).
-    try:
-        if not doc_was_already_soft_deleted:
-            # If it wasn't already soft-deleted by a previous call, attempt soft-deletion now.
-            success = await crud.delete_document(document_id=document.id, teacher_id=user_kinde_id)
-            if not success:
-                logger.warning(f"crud.delete_document failed for {document.id} by user {user_kinde_id}, though it was found initially.")
-                # crud.delete_document internally logs if it's already deleted or fails for other reasons.
-                # If it returns False here, it implies an issue during the update_one operation.
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to soft-delete document during operation.")
-            logger.info(f"Successfully soft-deleted document {document.id} ({document.original_filename}) from DB.")
-        
-        # --- Delete the file from Blob Storage ---
-        if document.storage_blob_path:
-            try:
-                blob_deleted_successfully = await delete_blob(document.storage_blob_path)
-                if blob_deleted_successfully:
-                    logger.info(f"Successfully deleted blob {document.storage_blob_path} from Azure Storage.")
-                else:
-                    logger.warning(f"Failed to delete blob {document.storage_blob_path} from Azure Storage. Document metadata remains soft-deleted.")
-            except Exception as e_blob_delete:
-                logger.error(f"Error deleting blob {document.storage_blob_path} for document {document.id}: {e_blob_delete}", exc_info=True)
-        else:
-            logger.info(f"No storage_blob_path for document {document.id}, skipping blob deletion.")
-
-        # --- ATTEMPT TO DELETE THE TASK FROM THE QUEUE ---
-        logger.info(f"Attempting to delete assessment task for document {document.id} from queue.")
+    # Step 3: If document soft-deletion was successful, attempt to delete the blob
+    blob_delete_successful = False
+    if blob_to_delete_path:
+        logger.info(f"Attempting to delete blob: {blob_to_delete_path} for document {document_id}")
         try:
-            from ....db.database import get_database 
-            db_instance = get_database()
-            if db_instance:
-                delete_result = await db_instance.assessment_tasks.delete_many({"document_id": document.id})
-                if delete_result.deleted_count > 0:
-                    logger.info(f"Successfully deleted {delete_result.deleted_count} assessment task(s) associated with document {document.id}.")
-                else:
-                    logger.info(f"No assessment task found for document {document.id} to delete, or it was already deleted.")
+            # Assuming delete_blob is an async function
+            # It was changed to return a single boolean
+            if asyncio.iscoroutinefunction(delete_blob):
+                blob_delete_successful = await delete_blob(blob_to_delete_path)
             else:
-                logger.warning(f"Could not get DB instance to delete assessment task for document {document.id}. Task may remain orphaned.")
-        except Exception as e_task_delete:
-            logger.error(f"Error attempting to delete assessment task for document {document.id}: {e_task_delete}", exc_info=True)
+                blob_delete_successful = await asyncio.to_thread(delete_blob, blob_to_delete_path)
+            
+            if blob_delete_successful:
+                logger.info(f"Successfully deleted blob: {blob_to_delete_path} for document {document_id}")
+            else:
+                # This else block might be redundant if delete_blob raises an exception on failure rather than returning False.
+                # Adjust based on actual behavior of delete_blob.
+                logger.warning(f"Blob deletion service reported failure for blob: {blob_to_delete_path} for document {document_id}. The DB records were soft-deleted.")
+        except ResourceNotFoundError: # Specific exception for Azure Blob Storage if blob not found
+            logger.warning(f"Blob {blob_to_delete_path} not found during deletion for document {document_id}. It might have been already deleted.")
+            blob_delete_successful = True # Consider it a success in terms of overall flow if blob is already gone
+        except Exception as e:
+            # Log error but don't fail the request if DB records were deleted
+            logger.error(f"Error deleting blob {blob_to_delete_path} for document {document_id}: {e}. DB records were soft-deleted.", exc_info=True)
+    else:
+        logger.info(f"No blob path found or returned for document {document_id}. Skipping blob deletion.")
+        # If no blob path, we can consider blob deletion part vacuously successful for the overall operation status
+        blob_delete_successful = True 
 
-        return # Returns 204 No Content by default
-    except HTTPException: 
-        raise
-    except Exception as e: 
-        logger.error(f"Unexpected error in delete document endpoint for {document_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during document deletion.")
+    # If document and result (if any) DB deletions were successful, and blob (if any) was handled, return 204
+    # The critical part is doc_delete_success.
+    logger.info(f"Delete process completed for document {document_id}. Doc delete: {doc_delete_success}, Result delete: {result_delete_success}, Blob handled: {blob_delete_successful or not blob_to_delete_path}")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.post(
     "/batch",
@@ -808,12 +820,10 @@ async def upload_batch(
             logger.info(f"Document {created_document.id} ({created_document.original_filename}) created for batch {created_batch.id}.")
 
             # 2c. Create initial Result record
-            result_data = ResultCreate(
-                document_id=created_document.id,
-                teacher_id=user_kinde_id,
-                status=ResultStatus.PENDING
+            created_result = await crud.create_result(
+                document_id=created_document.id, 
+                teacher_id=user_kinde_id
             )
-            created_result = await crud.create_result(result_in=result_data)
             if not created_result:
                 logger.error(f"Failed to create initial result for document {created_document.id} in batch {created_batch.id}. Document status set to ERROR.")
                 await crud.update_document_status(document_id=created_document.id, teacher_id=user_kinde_id, status=DocumentStatus.ERROR)
@@ -1041,78 +1051,96 @@ async def cancel_assessment_status_endpoint( # Renamed
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to CANCEL status for document {document_id}. Endpoint called.")
+    logger.info(f"User {user_kinde_id} attempting to cancel assessment for document {document_id}")
 
+    # Fetch the document to verify ownership and current status
     document = await crud.get_document_by_id(document_id=document_id, teacher_id=user_kinde_id)
     if not document:
-        logger.warning(f"User {user_kinde_id} failed to cancel: Document {document_id} not found or not accessible.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found or not accessible.")
 
-    auth_teacher_id = document.teacher_id
-    logger.info(f"Current status of document {document.id} is '{document.status}'. Checking if cancellable.")
+    # Check if the document is in a state that allows cancellation
+    if document.status not in [DocumentStatus.PROCESSING.value, DocumentStatus.QUEUED.value, DocumentStatus.RETRYING.value]: # Added QUEUED
+        logger.warning(f"Document {document_id} is in status {document.status}, not cancellable from PROCESSING/QUEUED/RETRYING.")
+        # Allow to proceed to result check, as result might be in ASSESSING even if doc isn't.
+        # This might happen if doc status update failed but task was picked up.
 
-    # Define cancellable document statuses
-    cancellable_doc_statuses = [DocumentStatus.PROCESSING.value, DocumentStatus.RETRYING.value, DocumentStatus.QUEUED.value, DocumentStatus.UPLOADED.value]
-    # Define cancellable result statuses (when document is being cancelled)
-    cancellable_res_statuses = [ResultStatus.PROCESSING.value, ResultStatus.RETRYING.value, ResultStatus.PENDING.value] # Use .value for list comparison
-
-    document_updated = False
-    result_updated = False
-
-    if document.status in cancellable_doc_statuses:
-        logger.info(f"Document {document.id} status is '{document.status}'. Attempting to set to ERROR.")
-        updated_doc = await crud.update_document_status(
-            document_id=document.id, 
-            teacher_id=auth_teacher_id, 
-            status=DocumentStatus.ERROR.value
-        )
-        if updated_doc and updated_doc.status == DocumentStatus.ERROR.value:
-            document_updated = True
-            logger.info(f"Successfully set document {document.id} status to ERROR.")
-        else:
-            logger.error(f"Failed to update document {document.id} status to ERROR. Current status: {updated_doc.status if updated_doc else 'None'}.")
-
-        # Also attempt to set the associated result to FAILED
-        current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
-        if current_result:
-            logger.info(f"Found result {current_result.id} with status '{current_result.status}' for document {document.id}. Checking if cancellable.")
-            if current_result.status in cancellable_res_statuses:
-                logger.info(f"Result {current_result.id} status is '{current_result.status}'. Attempting to set to FAILED.") # Corrected to FAILED
-                updated_res = await crud.update_result(
-                    result_id=current_result.id, 
-                    update_data={"status": ResultStatus.FAILED.value}, # Corrected to FAILED
-                    teacher_id=auth_teacher_id
-                )
-                if updated_res and updated_res.status == ResultStatus.FAILED.value: # Corrected to FAILED
-                    result_updated = True
-                    logger.info(f"Successfully set result {current_result.id} status to FAILED.") # Corrected to FAILED
-                else:
-                    logger.error(f"Failed to update result {current_result.id} status to FAILED. Current status: {updated_res.status if updated_res else 'None'}.") # Corrected to FAILED
-            else:
-                logger.info(f"Result {current_result.id} status '{current_result.status}' is not in a cancellable state ({[s for s in cancellable_res_statuses]}). No action taken on result.")
-        else:
-            logger.warning(f"No result record found for document {document.id} during cancellation. Cannot update result status.")
-    else:
-        logger.warning(f"Document {document.id} is not in a cancellable state (currently '{document.status}'). Valid cancellable states are: {cancellable_doc_statuses}. Cannot cancel.")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Document status '{document.status}' is not cancellable. "
-                   f"Cancellable states are: {[s for s in cancellable_doc_statuses]}."
-        )
+    # Fetch the result
+    result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=user_kinde_id)
     
-    if document_updated or result_updated:
-        logger.info(f"Cancellation process completed for document {document.id}. Document updated: {document_updated}, Result updated: {result_updated}.")
-        return {"message": f"Attempted cancellation for document {document_id}. Document status set to ERROR: {document_updated}. Result status set to FAILED: {result_updated}."} # Corrected to FAILED
-    else:
-        # This case should ideally be caught by the HTTPException above if doc status wasn't cancellable,
-        # or if DB updates failed (logged as errors).
-        logger.warning(f"Cancellation attempt for document {document.id} resulted in no changes. Document status remains '{document.status}'.")
-        # Return a more informative error if no updates happened despite initial checks passing
-        # This might indicate issues with the DB update calls themselves not returning expected objects
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Cancellation for document {document.id} did not result in status changes despite being in a potentially cancellable state. Check logs."
+    doc_updated = False
+    res_updated = False
+
+    # Reset Document status to ERROR if it was PROCESSING, QUEUED, or RETRYING
+    if document.status in [DocumentStatus.PROCESSING.value, DocumentStatus.QUEUED.value, DocumentStatus.RETRYING.value]: # Added QUEUED
+        updated_doc = await crud.update_document_status(
+            document_id=document_id,
+            teacher_id=user_kinde_id,
+            status=DocumentStatus.ERROR
         )
+        if updated_doc:
+            doc_updated = True
+            logger.info(f"Document {document_id} status reset to ERROR from {document.status}.")
+        else:
+            logger.error(f"Failed to reset document {document_id} status from {document.status} to ERROR.")
+
+    if result:
+        # Reset Result status to FAILED if it was ASSESSING or RETRYING
+        if result.status in [ResultStatus.PROCESSING.value, ResultStatus.RETRYING.value]: # Changed from ASSESSING to PROCESSING
+            updated_res = await crud.update_result_status(
+                result_id=result.id,
+                status=ResultStatus.FAILED,
+                teacher_id=user_kinde_id,
+                label="Manually cancelled by user"
+            )
+            if updated_res:
+                res_updated = True
+                logger.info(f"Result {result.id} for document {document_id} status reset to FAILED from {result.status}.")
+            else:
+                logger.error(f"Failed to reset result {result.id} status from {result.status} to FAILED.")
+        else:
+            logger.info(f"Result {result.id} for document {document_id} is in status {result.status}, not cancellable from PROCESSING/RETRYING.")
+    else:
+        logger.warning(f"No result found for document {document_id} during cancel operation.")
+
+    if not doc_updated and not res_updated:
+        # If neither was updated, it means the document/result wasn't in a cancellable state
+        # or an update error occurred which was already logged.
+        # Return a message indicating nothing was changed or eligible for change.
+        return {"message": f"Document {document_id} and its result were not in a state that required cancellation, or an update error occurred."}
+
+    return {"message": f"Attempted to cancel assessment for document {document_id}. Document updated: {doc_updated}. Result updated: {res_updated}."}
+
+@router.post(
+    "/{document_id}/reprocess",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Reprocess a document (Protected)",
+    description="Sets a document and its result for reprocessing by queueing a new assessment task. Requires authentication.",
+    response_model=Dict[str, str]
+)
+async def reprocess_document_endpoint(
+    document_id: uuid.UUID,
+    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+):
+    user_kinde_id = current_user_payload.get("sub")
+    logger.info(f"User {user_kinde_id} attempting to reprocess document {document_id}")
+
+    success = await crud.reprocess_document_and_result(
+        document_id=document_id,
+        teacher_id=user_kinde_id
+    )
+
+    if not success:
+        # The CRUD function logs specifics, so a generic error here is okay.
+        # It could be due to document not found, DB error, or enqueue failure.
+        # We might want to distinguish based on what reprocess_document_and_result can return
+        # if we add more detailed return values from it.
+        logger.error(f"Failed to trigger reprocessing for document {document_id} by user {user_kinde_id}.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reprocess document {document_id}. Check logs for details."
+        )
+
+    return {"message": f"Document {document_id} successfully queued for reprocessing."}
 
 @router.put(
     "/{document_id}/assign-student",

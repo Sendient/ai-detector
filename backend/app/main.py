@@ -126,55 +126,64 @@ async def startup_event():
     # --- Configure Logging (Refined) ---
     log_level_env_val = os.getenv("LOG_LEVEL", "INFO" if not settings.DEBUG else "DEBUG").upper()
     numeric_log_level = getattr(logging, log_level_env_val, logging.INFO if not settings.DEBUG else logging.DEBUG)
-
     root_logger = logging.getLogger()
-    root_logger.setLevel(numeric_log_level) # Set root logger level
-
-    # Remove existing handlers to avoid duplication if app reloads (e.g., with uvicorn --reload)
+    root_logger.setLevel(numeric_log_level)
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-        handler.close() # Close handler before removing
-
-    # Add a new, correctly formatted StreamHandler
-    stream_handler = logging.StreamHandler(sys.stdout) # Use sys.stdout
+        handler.close()
+    stream_handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
-        fmt="%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s", # More detailed format
+        fmt="%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
     stream_handler.setFormatter(formatter)
-    stream_handler.setLevel(numeric_log_level) # Set level on handler too
+    stream_handler.setLevel(numeric_log_level)
     root_logger.addHandler(stream_handler)
-    
     logger.info(f"Logging re-configured in startup. Root level: {logging.getLevelName(root_logger.level)}. LOG_LEVEL env: {log_level_env_val}.")
     # --- End Logging Configuration ---
 
     logger.info("Executing startup event: Connecting to database...")
+    connected_successfully = False # Flag to track connection status
+
     try:
-        await connect_to_mongo()
-        logger.info("Startup event: Database connection successful.")
-    except Exception as e:
-        logger.critical(f"[STARTUP_CRITICAL] connect_to_mongo() FAILED: {e}", exc_info=True)
-        raise
+        # connect_to_mongo returns True on success, False on failure
+        connected_successfully = await connect_to_mongo()
+        if connected_successfully:
+            logger.info("Startup event: Database connection successful.")
+        else:
+            # connect_to_mongo internally logs the specific error and sets _db to None
+            logger.critical("[STARTUP_CRITICAL] connect_to_mongo() returned False. Database connection failed. Halting startup.")
+            raise RuntimeError("Failed to connect to MongoDB during startup.") # This will halt FastAPI startup
+
+    except Exception as e: # Catches exceptions from connect_to_mongo OR the RuntimeError raised above
+        logger.critical(f"[STARTUP_CRITICAL] Database connection process FAILED: {e}", exc_info=True)
+        raise # Re-raise to ensure FastAPI app startup is halted
+
+    # The rest of the startup_event proceeds ONLY if the connection was successful.
+    # If we reach here, connected_successfully must have been True.
 
     logger.info("Ensuring database indexes...")
-    db = get_database()
+    db = get_database() # This should now always return a valid DB instance.
+
     if db is None:
-        logger.critical("[STARTUP_CRITICAL] get_database() returned None. Cannot ensure indexes.")
-        # Depending on policy, you might want to raise an exception here to stop startup
-        return
+        # This check acts as an additional safeguard.
+        # If connect_to_mongo succeeded but get_database() still returns None,
+        # it indicates a deeper issue in database.py state management.
+        logger.critical("[STARTUP_CRITICAL] get_database() returned None even after supposedly successful connection. Halting startup.")
+        raise RuntimeError("Database not available after supposedly successful connection during startup.")
+
+    # --- Database Index Creation ---
     try:
-        # Ensure index on teachers.kinde_id (non-unique as per your model structure)
+        # (Keep your existing index creation logic here)
+        # Example:
         await db.teachers.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
         logger.info("Index on teachers.kinde_id ensured (unique=False).")
-
         # Ensure Stripe related indexes on teachers collection
-        await db.teachers.create_index("stripe_customer_id", name="idx_teacher_stripe_customer_id", unique=False, sparse=True)
+        await db.teachers.create_index("stripe_customer_id", name="idx_teacher_stripe_customer_id", unique=False, sparse=True) # TEMPORARILY NON-UNIQUE
         logger.info("Index on teachers.stripe_customer_id ensured (unique=False, sparse=True) - TEMPORARILY NON-UNIQUE.")
-        await db.teachers.create_index("stripe_subscription_id", name="idx_teacher_stripe_subscription_id", unique=False, sparse=True)
+        await db.teachers.create_index("stripe_subscription_id", name="idx_teacher_stripe_subscription_id", unique=False, sparse=True) # TEMPORARILY NON-UNIQUE
         logger.info("Index on teachers.stripe_subscription_id ensured (unique=False, sparse=True) - TEMPORARILY NON-UNIQUE.")
-
-
-        # Index for assessment_tasks dequeue order
+        
         idx_assessment_dequeue = IndexModel(
             [("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)],
             name="idx_assessment_tasks_dequeue_order"
@@ -183,42 +192,49 @@ async def startup_event():
         logger.info("Index on assessment_tasks for dequeue order ensured.")
 
     except OperationFailure as e:
-        # Code 85: IndexOptionsConflict (e.g., trying to change unique property of existing index)
-        # Code 86: IndexKeySpecsConflict (e.g., trying to change fields of existing index)
+        # (Keep your existing OperationFailure handling logic)
         if e.code in [85, 86] or "already exists with different options" in e.details.get('errmsg', ''):
             logger.warning(f"Index creation conflict for an existing index: {e.details.get('errmsg', str(e))}. App will continue.")
+        # ... (other specific error handling for OperationFailure)
         elif "The order by query does not have a corresponding composite index" in e.details.get('errmsg', ''): # For CosmosDB specific messages if applicable
             logger.warning(f"CosmosDB index hint: {e.details.get('errmsg', str(e))}. App will continue.")
         else:
             logger.error(f"Database OperationFailure during index creation: {e}", exc_info=True)
-            # Depending on policy, you might want to raise to stop startup
+            # Consider if certain OperationFailures should also halt startup
     except Exception as e:
         logger.error(f"Error during index creation: {e}", exc_info=True)
-        # Depending on policy, you might want to raise
+        # Consider if generic errors during index creation should halt startup
+    # --- End Database Index Creation ---
 
-    # Start BatchProcessor
+    # --- Start Background Workers ---
+    # (Keep your existing worker startup logic here)
+    # Example: Start BatchProcessor
     try:
-        bp_instance = BatchProcessor()
+        bp_instance = BatchProcessor() # Ensure BatchProcessor is correctly imported
         _original_fastapi_app.state.batch_processor_instance = bp_instance
         _original_fastapi_app.state.batch_processor_task = asyncio.create_task(bp_instance.process_batches())
         logger.info("BatchProcessor started and stored in app.state.")
     except Exception as e:
         logger.critical(f"[STARTUP_CRITICAL] Failed to start BatchProcessor: {e}", exc_info=True)
+        # Consider if failure to start critical workers should halt startup
 
-    # Start AssessmentWorker
+    # Example: Start AssessmentWorker
     try:
-        db_for_worker = get_database()
+        db_for_worker = get_database() # Re-get in case it's needed specifically by the worker
         if db_for_worker is not None:
-            aw_instance = AssessmentWorker(db=db_for_worker)
+            aw_instance = AssessmentWorker(db=db_for_worker) # Ensure AssessmentWorker is imported
             _original_fastapi_app.state.assessment_worker_instance = aw_instance
             _original_fastapi_app.state.assessment_worker_task = asyncio.create_task(aw_instance.run())
             logger.info("AssessmentWorker started and stored in app.state.")
         else:
-            logger.error("Failed to get DB for AssessmentWorker post-index creation. Worker not started.")
+            logger.error("[STARTUP_CRITICAL] Failed to get DB for AssessmentWorker. Worker not started.")
+            # Consider if this should halt startup
     except Exception as e:
         logger.critical(f"[STARTUP_CRITICAL] Failed to start AssessmentWorker: {e}", exc_info=True)
-    
-    logger.info("[STARTUP_EVENT] >>> FastAPI startup_event function COMPLETED.")
+        # Consider if failure to start critical workers should halt startup
+    # --- End Background Workers ---
+
+    logger.info("[STARTUP_EVENT] >>> FastAPI startup_event function COMPLETED SUCCESSFULLY.")
 
 
 @_original_fastapi_app.on_event("shutdown")

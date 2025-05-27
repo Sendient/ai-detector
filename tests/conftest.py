@@ -14,10 +14,7 @@ import time
 from typing import Dict, Any, AsyncGenerator
 from pytest_mock import MockerFixture
 from unittest.mock import AsyncMock, patch, Mock
-
-# Setup logger for conftest early with ERROR level only
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)
+from datetime import datetime, timezone
 
 # --- Global Patcher for Blob Storage ---
 blob_uploader_patcher = None
@@ -63,17 +60,40 @@ except ImportError as e:
 
 # --- Import lifecycle functions to mock ---
 from backend.app.db.database import connect_to_mongo, close_mongo_connection, get_database
-from backend.app.tasks import batch_processor
+# from backend.app.tasks import batch_processor # This specific import might no longer be needed if class is imported above
 
 @pytest_asyncio.fixture(scope="function")
 async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
     """Creates a FastAPI app instance for each test function, mocking startup/shutdown events."""
+
+    # Imports moved inside the fixture for clarity and to ensure they are in scope
+    from backend.app.tasks.assessment_worker import AssessmentWorker
+    from backend.app.tasks.batch_processor import BatchProcessor
+
     # Mock database connection functions
     mocker.patch("backend.app.main.connect_to_mongo", return_value=True)
     mocker.patch("backend.app.main.close_mongo_connection", return_value=None)
     
+    # --- Mock worker classes and asyncio.create_task for app startup ---
+    # This is to prevent real workers from starting during LifespanManager execution
+    # (which calls main.py's startup_event)
+    mock_assessment_worker_instance = AsyncMock(spec=AssessmentWorker)
+    # If AssessmentWorker has methods like start/stop that might be called if not fully mocked:
+    # mock_assessment_worker_instance.start = AsyncMock() 
+    # mock_assessment_worker_instance.stop = AsyncMock()
+    mocker.patch("backend.app.main.AssessmentWorker", return_value=mock_assessment_worker_instance)
+
+    mock_batch_processor_instance = AsyncMock(spec=BatchProcessor)
+    # mock_batch_processor_instance.start = AsyncMock()
+    # mock_batch_processor_instance.stop = AsyncMock()
+    mocker.patch("backend.app.main.BatchProcessor", return_value=mock_batch_processor_instance)
+
+    # Prevent the asyncio.create_task in main.py's startup_event from running the real worker loops
+    mocker.patch("backend.app.main.asyncio.create_task", return_value=AsyncMock(name="mocked_startup_worker_task"))
+    # --- End worker and asyncio.create_task mocking ---
+
     # Create a mock database instance
-    mock_db_instance = AsyncMock()
+    mock_db_instance = AsyncMock(name="MockMongoDBInstance")
     
     # Create mock collections for all used collections
     mock_collections = {
@@ -92,31 +112,48 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
         # Configure create_index to return None
         collection.create_index = AsyncMock(return_value=None)
         
-        # Configure find to return an AsyncMock that can be awaited
-        mock_cursor = AsyncMock()
-        
-        # Make mock_cursor itself an async iterable (e.g., by mocking __aiter__)
-        # It will yield items from an empty list by default.
-        # Tests requiring specific find results should mock .find().return_value.__aiter__ or .to_list()
-        async def mock_aiter_impl():
-            if hasattr(mock_cursor, '_custom_find_results'):
-                for item in mock_cursor._custom_find_results:
-                    yield item
-                return
-            for item in []: # Default empty list
-                yield item
-        
-        mock_cursor.__aiter__ = Mock(side_effect=mock_aiter_impl) # Use Mock for synchronous __aiter__ assignment
-        
-        # Configure skip and limit to return the same mock_cursor instance
-        # So that collection.find().skip().limit() works and returns the iterable mock_cursor
-        mock_cursor.skip = Mock(return_value=mock_cursor)
-        mock_cursor.limit = Mock(return_value=mock_cursor)
-        
-        # Configure to_list to return an empty list by default
-        mock_cursor.to_list = AsyncMock(return_value=[])
+        # Configure find to return a mock cursor object that is an async iterable
+        # collection.find() is synchronous and returns a cursor object.
+        # This cursor object must then support async iteration.
 
-        collection.find = Mock(return_value=mock_cursor)
+        # This is the object that will be returned by cursor.__aiter__()
+        # and will handle the actual async iteration.
+        class AsyncIteratorMock:
+            def __init__(self, items):
+                self._items = iter(items) # Regular iterator
+
+            async def __anext__(self):
+                try:
+                    return next(self._items)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+            def __aiter__(self):
+                return self
+
+        # Create the mock_cursor object that collection.find() will return.
+        # This should be a standard Mock, not AsyncMock.
+        mock_cursor_obj = Mock(name=f"MockCursor_{name}")
+
+        # The __aiter__ method of the mock_cursor_obj should return an instance of our AsyncIteratorMock.
+        mock_cursor_obj._custom_find_results = []
+        
+        # MODIFIED: __aiter__ lambda now accepts 'self_arg' (which will be mock_cursor_obj when called)
+        # and uses it to access its _custom_find_results attribute.
+        mock_cursor_obj.__aiter__ = lambda self_arg: AsyncIteratorMock(self_arg._custom_find_results)
+
+        # Configure skip and limit to return the same mock_cursor_obj instance
+        mock_cursor_obj.skip = Mock(return_value=mock_cursor_obj)
+        mock_cursor_obj.limit = Mock(return_value=mock_cursor_obj)
+        
+        # Configure to_list to return a list from _custom_find_results
+        # This needs to be an AsyncMock because to_list() is awaited.
+        async def mock_to_list_impl(*args, **kwargs):
+            return list(mock_cursor_obj._custom_find_results) # Convert to list
+        mock_cursor_obj.to_list = AsyncMock(side_effect=mock_to_list_impl)
+
+        # collection.find is a synchronous method, so it's a standard Mock.
+        collection.find = Mock(return_value=mock_cursor_obj)
         
         # Configure find_one to return None by default
         collection.find_one = AsyncMock(return_value=None)
@@ -146,6 +183,30 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
     # ADDED: Explicitly set find_one_and_update for assessment_tasks to return None
     mock_collections["assessment_tasks"].find_one_and_update = AsyncMock(return_value=None)
 
+    # NEW: Specifically configure documents.find_one_and_update to return a mock document
+    # This helps the update_document_status call in the upload endpoint succeed by default.
+    # Tests that need specific behavior for update_document_status (like test_update_document_status_success)
+    # already mock crud.update_document_status directly.
+    # mock_updated_doc_for_default = AsyncMock(name="DefaultUpdatedDocumentMock") # OLD
+    # Populate with minimal fields to satisfy Document model instantiation if necessary
+    default_doc_data = {
+        "id": "mock_updated_doc_id", 
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "teacher_id": "mock_teacher_id",
+        "status": "QUEUED", # Or whatever default status makes sense
+        "original_filename": "mockfile.pdf",
+        "file_type": "PDF",
+        "blob_filename": "mock_blob.pdf",
+        # Add other required fields for Document model with default values
+    }
+    mock_updated_doc_for_default = AsyncMock(spec=dict, **default_doc_data) # NEW
+    # Configure it to behave like a dict for ** unpacking
+    mock_updated_doc_for_default.keys = Mock(return_value=default_doc_data.keys())
+    mock_updated_doc_for_default.__getitem__ = Mock(side_effect=lambda key: default_doc_data[key])
+    
+    mock_collections["documents"].find_one_and_update = AsyncMock(return_value=mock_updated_doc_for_default)
+
     # Configure the mock database to return appropriate collections
     def get_collection(name):
         return mock_collections.get(name, AsyncMock())
@@ -153,20 +214,59 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
     # Use Mock instead of AsyncMock for get_collection since it's not async
     mock_db_instance.get_collection = Mock(side_effect=get_collection)
     
+    # NEW: Explicitly set attributes on mock_db_instance for direct access
+    for name, configured_collection_mock in mock_collections.items():
+        setattr(mock_db_instance, name, configured_collection_mock)
+    
     # Add an initialized flag to prevent "not initialized" warnings
     mock_db_instance.is_initialized = True
     
-    # Mock get_database to return the database instance directly, not a coroutine
-    # This matches the actual implementation in database.py where get_database() is not async
+    # Mock get_database to return the database instance directly
     mocker.patch("backend.app.main.get_database", return_value=mock_db_instance)
     mocker.patch("backend.app.db.database.get_database", return_value=mock_db_instance)
+
+    # --- REVISED: Explicitly mock init_database and related module-level variables in database.py ---
+    # This ensures that when app.main.connect_to_mongo (which calls init_database) runs via LifespanManager,
+    # it uses our mocks and sets up the database module correctly for subsequent get_database calls.
     
+    # Additionally, directly patch the module-level variables in database.py that get_database() might rely on.
+    # This is a bit belt-and-suspenders but ensures all avenues are covered.
+    # These are set when connect_to_mongo (which is mocked at main level) would have run.
+    mocker.patch("backend.app.db.database._db", mock_db_instance) # Patching the actual global var name _db
+    mocker.patch("backend.app.db.database._client", AsyncMock(name="MockMotorClientGlobal")) # Patching _client
+    # --- END REVISED ---
+    
+    # --- START: Configure session mock for transactions ---
+    mock_motor_client = AsyncMock(name="MockMotorClientForSession")
+    mock_session_instance = AsyncMock(name="MockSessionInstance")
+    
+    # Configure mock_session_instance.start_transaction to be an async context manager
+    # that yields another AsyncMock (or the session itself if preferred for simplicity in tests)
+    mock_transaction_context = AsyncMock(name="MockTransactionContext")
+    mock_session_instance.start_transaction = Mock(return_value=mock_transaction_context) #.start_transaction() returns the context
+    mock_transaction_context.__aenter__ = AsyncMock(return_value=AsyncMock(name="ActiveMockTransaction")) # __aenter__ returns the active transaction
+    mock_transaction_context.__aexit__ = AsyncMock(return_value=None)
+
+    # Configure mock_motor_client.start_session
+    # This method is awaited: `await current_db.client.start_session()`
+    # So, it should be an AsyncMock.
+    # The result of this await is then used in an `async with ... as session`,
+    # so the return_value of this AsyncMock must be an async context manager.
+    mock_client_session_context = AsyncMock(name="MockClientSessionContextYieldedByAwait")
+    mock_client_session_context.__aenter__ = AsyncMock(return_value=mock_session_instance) # This will be 'session'
+    mock_client_session_context.__aexit__ = AsyncMock(return_value=None)
+
+    mock_motor_client.start_session = AsyncMock(return_value=mock_client_session_context) # MODIFIED: .start_session is an AsyncMock
+
+    # Ensure the mock_db_instance.client is this configured mock_motor_client
+    mock_db_instance.client = mock_motor_client
+    # --- END: Configure session mock for transactions ---
+
     # Mock the crud module's _get_collection function
     mocker.patch("backend.app.db.crud._get_collection", side_effect=get_collection)
 
     # Mock the batch processor if it exists
     try:
-        from backend.app.tasks.batch_processor import BatchProcessor
         # Create a properly mocked BatchProcessor that doesn't leave hanging coroutines
         mock_batch_processor = AsyncMock()
         mock_batch_processor.start = AsyncMock()
@@ -181,15 +281,6 @@ async def app(mocker: MockerFixture) -> AsyncGenerator[FastAPI, None]:
         
         # Replace real BatchProcessor with mock version
         mocker.patch("backend.app.tasks.batch_processor.BatchProcessor", return_value=mock_batch_processor)
-
-        # ADDED: Mock AssessmentWorker's _run_loop to prevent it from actually running
-        # try:
-        #     mocker.patch("backend.app.main.AssessmentWorker._run_loop", new_callable=AsyncMock)
-        # except AttributeError: # If the class or method doesn't exist, pass silently
-        #     pass
-
-        # NEW: Patch the entire AssessmentWorker class in main to be an AsyncMock
-        # mocker.patch("backend.app.main.AssessmentWorker", new_callable=AsyncMock)
 
         # REVISED: Patch AssessmentWorker to return a specific AsyncMock instance
         mock_aw_instance = AsyncMock(name="MockAssessmentWorkerInstance")
@@ -293,13 +384,32 @@ async def app_without_auth(app: FastAPI) -> FastAPI:
 def pytest_collectreport(report):
     """Log collection errors with more detail."""
     if report.failed:
+        # Use the logging module directly
+        current_logger = logging.getLogger(__name__ + ".pytest_collectreport")
         # Safely access nodeid, provide a default if not present
         node_name = getattr(report, 'nodeid', 'Initial Collection Phase') 
         # Ensure longreprtext is a string before logging
         longrepr_text = str(getattr(report, 'longreprtext', 'No longrepr available'))
-        logger.error(f"Test collection failed for {node_name}: {longrepr_text}")
+        current_logger.error(f"Test collection failed for {node_name}: {longrepr_text}")
 
 def pytest_exception_interact(node, call, report):
     """Log details of exceptions during test execution."""
     if report.failed:
-        logger.error(f"Test {node.nodeid} failed during {call.when}:")
+        # Use the logging module directly
+        current_logger = logging.getLogger(__name__ + ".pytest_exception_interact")
+        current_logger.error(f"Test {node.nodeid} failed during {call.when}:")
+        # You could add more details from the report or call objects here
+        # For example, to print the exception info:
+        # excinfo = call.excinfo
+        # if excinfo:
+        #     current_logger.error(f"  Exception: {excinfo.type.__name__}: {excinfo.value}")
+        #     current_logger.error(f"  Traceback: \n{''.join(excinfo.traceback.format())}")
+
+# --- Optional: Setup a root logger for conftest if needed elsewhere ---
+# logger = logging.getLogger(__name__) # If you need a module-level logger
+# logger.setLevel(logging.DEBUG) # Set your desired level
+#
+# handler = logging.StreamHandler()
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# logger.addHandler(handler)

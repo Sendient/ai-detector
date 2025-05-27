@@ -29,21 +29,28 @@ class AssessmentTask(BaseModel):
     available_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retry_count: int = Field(default=0)
+    last_error: Optional[str] = Field(default=None)
 
     class Config:
         allow_population_by_field_name = True
         arbitrary_types_allowed = True
 
-async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority_level: int, db: Optional[AsyncIOMotorDatabase] = None) -> bool:
+async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority_level: int, db: Optional[AsyncIOMotorDatabase] = None, session=None) -> bool:
     """Add a new assessment task to the queue."""
     if db is None:
         db = get_database()
     
     if db is None:
+        logger.error("Failed to get database for enqueue_assessment_task.")
         return False
     task = AssessmentTask(document_id=document_id, user_id=user_id, priority_level=priority_level)
-    result = await db.assessment_tasks.insert_one(task.model_dump(by_alias=True))
-    return bool(result.acknowledged)
+    result = await db.assessment_tasks.insert_one(task.model_dump(by_alias=True), session=session)
+    if not result.acknowledged:
+        logger.error(f"Failed to insert assessment task for document {document_id}. Insert not acknowledged.")
+        return False
+    logger.info(f"Successfully enqueued assessment task for document {document_id} with task ID {task.id}.")
+    return True
 
 async def _claim_next_task(db: AsyncIOMotorDatabase, visibility_timeout: int) -> Optional[dict]:
     now = datetime.now(timezone.utc)

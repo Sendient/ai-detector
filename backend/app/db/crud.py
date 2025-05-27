@@ -3,7 +3,7 @@
 # --- Core Imports ---
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 from pymongo import ReturnDocument
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 from pymongo.collation import Collation, CollationStrength # Add for case-insensitive aggregation if needed
 import uuid
 from typing import List, Optional, Dict, Any, TypeVar, Type, Tuple
@@ -36,6 +36,8 @@ from ..models.result import Result, ResultCreate, ResultUpdate, ResultStatus
 # --- Import Enums used in Teacher model ---
 from ..models.enums import DocumentStatus, ResultStatus, FileType, MarketingSource
 from ..models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
+# --- Import for reprocess ---
+from ..queue import enqueue_assessment_task
 
 # --- Service Imports --- ADD THIS SECTION IF IT DOESN'T EXIST
 from ..services.blob_storage import delete_blob as service_delete_blob # ADD THIS IMPORT
@@ -68,28 +70,25 @@ async def transaction():
     Provides a database transaction context using the MongoDB session.
     Ensures that the session is started and properly committed or aborted.
     """
-    # global db_instance_for_crud # Not needed
-    # if db_instance_for_crud is None:
-    #     db_instance_for_crud = get_database() # Initialize if not already
+    current_db = get_database()
 
-    current_db = get_database() # Use get_database()
-
-    if current_db is None: # Check the result of get_database()
+    if current_db is None:
         logger.error("Transaction cannot proceed: Database not initialized (get_database() returned None).")
         raise RuntimeError("Database connection not available for transaction (get_database() returned None)")
 
     # Using the client from the database instance
-    async with await current_db.client.start_session() as session:
-        async with session.start_transaction():
+    async with await current_db.client.start_session() as session: # 'session' is the motor session object
+        async with session.start_transaction(): # MODIFIED: Use async with for the transaction context
             logger.debug(f"Transaction started with session ID: {session.session_id}")
             try:
-                yield session
-                if session.in_transaction:
+                yield session # Yield the session for operations to use
+                # If yield completes without exception, commit.
+                if session.in_transaction: # Check if still in transaction before committing
                     await session.commit_transaction()
                     logger.debug(f"Transaction committed for session ID: {session.session_id}")
             except Exception as e:
                 logger.error(f"Transaction aborted due to error: {e} for session ID: {session.session_id}", exc_info=True)
-                if session.in_transaction:
+                if session.in_transaction: # Check if still in transaction before aborting
                     await session.abort_transaction()
                 raise # Re-raise the exception after aborting
 
@@ -1237,77 +1236,54 @@ async def update_document_counts(
         else: logger.warning(f"Document {document_id} not found or already deleted for count update."); return None
     except Exception as e: logger.error(f"Error updating document counts for ID {document_id}: {e}", exc_info=True); return None
 
-@with_transaction
-async def delete_document(document_id: uuid.UUID, teacher_id: str, session=None) -> bool: # ADDED teacher_id
-    collection = _get_collection(DOCUMENT_COLLECTION)
-    result_collection = _get_collection(RESULT_COLLECTION)
-    if collection is None or result_collection is None:
-        logger.error(f"Collections not found for deleting document {document_id}")
-        return False
+@with_transaction # Add decorator back
+async def delete_document(document_id: uuid.UUID, teacher_id: str, session=None) -> Tuple[bool, Optional[str]]: # Add session back, change return type
+    doc_collection = _get_collection(DOCUMENT_COLLECTION)
+    if doc_collection is None:
+        logger.error(f"Document collection not found when trying to delete document {document_id}")
+        return False, None
 
-    logger.info(f"Attempting to soft-delete document {document_id} by teacher {teacher_id}")
+    logger.info(f"Attempting to soft-delete document {document_id} by teacher {teacher_id} (session: {'provided' if session else 'None'})")
 
-    # 1. Fetch the document to get blob_path and verify ownership
-    doc_to_delete = await collection.find_one(
+    # 1. Fetch the document to get blob_path and verify ownership, ensuring it's not already deleted.
+    # Uses the session from the decorator.
+    doc_to_delete = await doc_collection.find_one(
         {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}},
         session=session
     )
 
     if not doc_to_delete:
-        logger.warning(f"Document {document_id} not found or not owned by teacher {teacher_id}, or already deleted.")
-        return False # Or raise HTTPException(404, "Document not found or access denied")
+        logger.warning(f"Document {document_id} not found for teacher {teacher_id}, or already soft-deleted.")
+        # To check if it was not found vs already deleted, one could do another query without is_deleted filter.
+        # For now, if it's not an active document we can operate on, we indicate failure to perform a *new* delete.
+        return False, None
 
-    # 2. Soft-delete the Document record
+    blob_path_to_delete = doc_to_delete.get("storage_blob_path")
+
+    # 2. Soft-delete the Document record using the session from the decorator.
     now = datetime.now(timezone.utc)
-    update_result = await collection.update_one(
-        {"_id": document_id, "teacher_id": teacher_id},
-        {"$set": {"is_deleted": True, "updated_at": now, "status": DocumentStatus.DELETED}},
-        session=session
-    )
+    try:
+        update_doc_result = await doc_collection.update_one(
+            {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}}, # Ensure it's still active
+            {"$set": {"is_deleted": True, "updated_at": now, "status": DocumentStatus.DELETED.value}},
+            session=session
+        )
 
-    if update_result.modified_count == 0:
-        logger.warning(f"Soft-delete failed for document {document_id}. It might have been deleted by another process or ownership changed.")
-        # Don't return False yet, try to delete other related data if doc was already marked deleted.
-        # If doc_to_delete was found, it implies it wasn't marked as deleted by *this* query.
-        # This path could be hit if is_deleted was set to True between find_one and update_one.
+        if update_doc_result.modified_count == 0:
+            # This could happen if the document was deleted by another process between the find_one and update_one.
+            logger.warning(f"Soft-delete failed for document {document_id} (modified_count is 0). It might have been deleted by another process. Blob path if found: {blob_path_to_delete}")
+            # Return False, but still provide blob_path for potential cleanup by caller if doc was initially found.
+            return False, blob_path_to_delete
+        
+        logger.info(f"Successfully soft-deleted document {document_id}. Blob path: {blob_path_to_delete}")
+        return True, blob_path_to_delete
 
-    # 3. Soft-delete associated Result record (if any)
-    # We delete the result regardless of whether the document update itself modified a count, as long as the doc was initially found.
-    result_update = await result_collection.update_one(
-        {"document_id": document_id, "teacher_id": teacher_id}, # Ensure teacher_id matches for the result too
-        {"$set": {"is_deleted": True, "updated_at": now, "status": ResultStatus.DELETED}},
-        session=session
-    )
-    if result_update.modified_count > 0:
-        logger.info(f"Soft-deleted result associated with document {document_id}.")
-    else:
-        logger.info(f"No active result found to soft-delete for document {document_id}, or it was already deleted.")
-
-    # 4. Delete the file from Blob Storage
-    blob_path = doc_to_delete.get("storage_blob_path")
-    if blob_path:
-        try:
-            logger.info(f"Attempting to delete blob: {blob_path} for document {document_id}")
-            # Assuming service_delete_blob is an async function or can be run in a thread
-            # If service_delete_blob is synchronous, use asyncio.to_thread
-            if asyncio.iscoroutinefunction(service_delete_blob):
-                await service_delete_blob(blob_path)
-            else:
-                await asyncio.to_thread(service_delete_blob, blob_path)
-            logger.info(f"Successfully deleted blob: {blob_path} for document {document_id}")
-        except ResourceNotFoundError:
-            logger.warning(f"Blob {blob_path} not found during deletion for document {document_id}. It might have been already deleted.")
-        except Exception as e:
-            logger.error(f"Error deleting blob {blob_path} for document {document_id}: {e}", exc_info=True)
-            # Decide if this should cause the whole operation to fail. 
-            # For now, we'll consider the DB soft-delete successful even if blob deletion fails.
-    else:
-        logger.warning(f"No storage_blob_path found for document {document_id}. Cannot delete from blob storage.")
-
-    # If the initial document was found and we attempted deletion, consider it a success from CRUD perspective
-    # The API endpoint will return 204 if this function returns True.
-    logger.info(f"Soft-delete process completed for document {document_id}.")
-    return True
+    except PyMongoError as e:
+        logger.error(f"PyMongoError during document soft-deletion for {document_id} within transaction: {e}", exc_info=True)
+        return False, blob_path_to_delete # Return blob_path if known, even on DB error
+    except Exception as e:
+        logger.error(f"Unexpected error during document soft-deletion for {document_id} within transaction: {e}", exc_info=True)
+        return False, blob_path_to_delete # Return blob_path if known, even on DB error
 
 @with_transaction
 async def update_document_student_id(
@@ -1379,6 +1355,99 @@ async def get_result_by_document_id(document_id: uuid.UUID, teacher_id: Optional
     except Exception as e:
         logger.error(f"Error getting result by document_id {document_id}: {e}", exc_info=True)
         return None
+
+@with_transaction
+async def update_result_status(
+    result_id: uuid.UUID,
+    status: ResultStatus,
+    teacher_id: str, # Kinde ID for ownership check
+    score: Optional[float] = None,
+    label: Optional[str] = None, # MODIFIED: Changed from overall_assessment to label
+    ai_generated: Optional[bool] = None,
+    human_generated: Optional[bool] = None,
+    paragraph_results: Optional[List[Any]] = None, # MODIFIED: Type hint to List[Any] to accept models or dicts initially
+    error_message: Optional[str] = None,
+    raw_response: Optional[Dict[str, Any]] = None, 
+    session=None
+) -> Optional[Result]:
+    collection = _get_collection(RESULT_COLLECTION)
+    if collection is None:
+        logger.error(f"Result collection (\'{RESULT_COLLECTION}\') not found.")
+        return None
+
+    now = datetime.now(timezone.utc)
+    update_payload: Dict[str, Any] = {"updated_at": now}
+
+    # Explicitly add fields to update_payload if they are provided
+    if status is not None: # Status is mandatory, but good practice
+        update_payload["status"] = status.value # Ensure enum value is used
+    
+    if score is not None:
+        update_payload["score"] = score
+    
+    # Use 'label' as per the Result model, not 'overall_assessment' for the main label
+    if label is not None:
+        update_payload["label"] = label
+    
+    if ai_generated is not None:
+        update_payload["ai_generated"] = ai_generated
+        
+    if human_generated is not None:
+        update_payload["human_generated"] = human_generated
+
+    if paragraph_results is not None:
+        # Convert list of ParagraphResult models to list of dicts
+        # This uses .model_dump() available on Pydantic V2 models
+        update_payload["paragraph_results"] = [
+            p.model_dump(mode='json') if hasattr(p, 'model_dump') else p 
+            for p in paragraph_results
+        ]
+        logger.debug(f"Paragraph results being prepared for DB: {update_payload['paragraph_results']}")
+
+
+    if error_message is not None:
+        update_payload["error_message"] = error_message
+        # If there's an error, it's common to also clear fields that might be misleading
+        update_payload["score"] = None 
+        update_payload["label"] = "ERROR" # Or use the specific error status if appropriate
+        update_payload["ai_generated"] = None
+        update_payload["human_generated"] = None
+        # update_payload["paragraph_results"] = [] # Optionally clear paragraph results on error
+
+    if raw_response is not None:
+        update_payload["raw_response"] = raw_response
+
+    # Always update result_timestamp when this function is called
+    update_payload["result_timestamp"] = now
+    
+    logger.info(f"[update_result_status] Attempting to update result {result_id} for teacher {teacher_id} to status {status.value if status else 'N/A'}. Payload: { {k: v for k, v in update_payload.items() if k != 'paragraph_results'} }") # Log payload excluding potentially large paragraph_results
+
+    try:
+        updated_doc = await collection.find_one_and_update(
+            {"_id": result_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}}, # Ensure teacher owns the result and it's not deleted
+            {"$set": update_payload},
+            return_document=ReturnDocument.AFTER,
+            session=session
+        )
+        if updated_doc:
+            logger.info(f"[update_result_status] Successfully updated result {result_id} to status {status.value if status else 'N/A'}.")
+            return Result(**updated_doc)
+        else:
+            logger.warning(f"[update_result_status] Result {result_id} not found or not owned by teacher {teacher_id}, or already deleted. No update performed.")
+            return None
+    except DuplicateKeyError as e: # Should not happen on update unless changing an indexed field to a duplicate
+        logger.error(f"[update_result_status] Duplicate key error for result {result_id}: {e}", exc_info=True)
+        return None
+    except PyMongoError as e: # Catch other MongoDB-related errors
+        logger.error(f"[update_result_status] MongoDB error updating result {result_id}: {e}", exc_info=True)
+        # This will be caught by @with_transaction if it's a transactional error
+        raise # Re-raise to be handled by transaction decorator or calling function
+    except ValidationError as e: # Pydantic validation error on return
+        logger.error(f"[update_result_status] Pydantic validation error for updated result {result_id}: {e}", exc_info=True)
+        return None # Or raise, depending on desired error handling
+    except Exception as e: # Catch any other unexpected errors
+        logger.error(f"[update_result_status] Unexpected error updating result {result_id}: {e}", exc_info=True)
+        raise # Re-raise to be handled by transaction decorator or calling function
 
 async def get_dashboard_stats(current_user_payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -2039,6 +2108,131 @@ async def delete_result(result_id: uuid.UUID, session=None) -> bool:
         logger.error(f"Error deleting result {result_id}: {e}", exc_info=True)
         return False
 
+# NEW: Function to update document status for reprocessing (transactional)
+@with_transaction
+async def _update_document_for_reprocessing(document_id: uuid.UUID, teacher_id: str, session=None) -> bool:
+    doc_collection = _get_collection(DOCUMENT_COLLECTION)
+    if doc_collection is None:
+        logger.error(f"[_update_document_for_reprocessing] Document collection not found for {document_id}")
+        return False
+    now = datetime.now(timezone.utc)
+    doc_update_result = await doc_collection.update_one(
+        {"_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}},
+        {"$set": {"status": DocumentStatus.QUEUED.value, "updated_at": now, "score": None}},
+        session=session
+    )
+    if doc_update_result.matched_count == 0:
+        logger.warning(f"[_update_document_for_reprocessing] Document {document_id} not found for teacher {teacher_id}, or already deleted.")
+        return False
+    logger.info(f"[_update_document_for_reprocessing] Document {document_id} status updated to QUEUED (modified: {doc_update_result.modified_count}).")
+    return True
+
+# NEW: Function to update result(s) for reprocessing (transactional)
+@with_transaction
+async def _update_results_for_reprocessing(document_id: uuid.UUID, teacher_id: str, session=None) -> bool:
+    res_collection = _get_collection(RESULT_COLLECTION)
+    if res_collection is None:
+        logger.error(f"[_update_results_for_reprocessing] Result collection not found for doc {document_id}")
+        return False
+    now = datetime.now(timezone.utc)
+    result_update_payload = {
+        "$set": {
+            "status": ResultStatus.PENDING.value,
+            "updated_at": now,
+            "result_timestamp": now,
+            "score": None,
+            "overall_assessment": "Assessment pending reprocessing.",
+            "label": None,
+            "paragraph_results": [],
+            "error_message": None,
+            "raw_response": None
+        }
+    }
+    res_update_result = await res_collection.update_many(
+        {"document_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}},
+        result_update_payload,
+        session=session
+    )
+    logger.info(f"[_update_results_for_reprocessing] {res_update_result.modified_count} result(s) for document {document_id} updated to PENDING (matched: {res_update_result.matched_count}).")
+    # This function returns True even if no results were modified, as long as the operation didn't fail.
+    # The caller can decide if 0 modified results is an issue.
+    return True
+
+
+async def reprocess_document_and_result(
+    document_id: uuid.UUID,
+    teacher_id: str, # Kinde ID of the user requesting reprocessing
+) -> bool:
+    """
+    Resets a document's status to QUEUED and its associated result to PENDING,
+    then re-enqueues it for assessment.
+    Each DB update step is now individually transactional.
+    """
+    # Step 1: Update document status (transactional)
+    doc_updated = await _update_document_for_reprocessing(document_id, teacher_id)
+    if not doc_updated:
+        logger.error(f"[Reprocess] Failed to update document status for {document_id}. Reprocessing aborted.")
+        return False
+
+    # Step 2: Update result status (transactional)
+    results_updated = await _update_results_for_reprocessing(document_id, teacher_id)
+    if not results_updated:
+        # Log this, but decide if it's a hard failure. For now, if the document was updated,
+        # but results weren't (e.g., no result existed), we might still want to enqueue.
+        # However, if _update_results_for_reprocessing itself errored (not just 0 modified),
+        # then it's a problem. The current _update_results_for_reprocessing returns True unless an exception.
+        logger.warning(f"[Reprocess] Call to update results for document {document_id} returned {results_updated}. This might be okay if no results existed or an error occurred.")
+        # For now, let's consider a False return from _update_results_for_reprocessing as a failure to proceed.
+        # This could be refined if "no results found to update" is an acceptable state.
+        # Given the current error, any failure here is likely a transaction issue.
+        return False
+
+
+    # Step 3: Re-enqueue the assessment task
+    logger.info(f"[Reprocess] Attempting to enqueue task for {document_id} after DB updates.")
+    enqueue_success = await enqueue_assessment_task(
+        document_id=document_id,
+        user_id=teacher_id, 
+        priority_level=0
+    )
+
+    if not enqueue_success:
+        logger.error(f"[Reprocess] Document {document_id} statuses were reset, but FAILED to re-enqueue assessment task.")
+        return False
+
+    logger.info(f"[Reprocess] Document {document_id} successfully re-queued for assessment after DB updates.")
+    return True
+
+@with_transaction
+async def soft_delete_result_by_document_id(document_id: uuid.UUID, teacher_id: str, session=None) -> bool:
+    """
+    Soft-deletes result records associated with a given document_id and teacher_id.
+    This function is designed to be called in its own transaction.
+    Returns True if the operation was successful (even if no records were modified),
+    False if an error occurred.
+    """
+    res_collection = _get_collection(RESULT_COLLECTION)
+    if res_collection is None:
+        logger.error(f"[soft_delete_result] Result collection not found for document {document_id}")
+        return False
+
+    now = datetime.now(timezone.utc)
+    try:
+        update_result = await res_collection.update_many(
+            {"document_id": document_id, "teacher_id": teacher_id, "is_deleted": {"$ne": True}},
+            {"$set": {"is_deleted": True, "updated_at": now, "status": ResultStatus.DELETED.value}},
+            session=session
+        )
+        logger.info(f"[soft_delete_result] Attempted to soft-delete results for document {document_id} by teacher {teacher_id}. Matched: {update_result.matched_count}, Modified: {update_result.modified_count}.")
+        # Consider success if no error, regardless of modified count (e.g., results might have been already deleted or none existed)
+        return True 
+    except PyMongoError as e:
+        logger.error(f"[soft_delete_result] PyMongoError soft-deleting results for document {document_id}: {e}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"[soft_delete_result] Unexpected error soft-deleting results for document {document_id}: {e}", exc_info=True)
+        return False
+
 # <<< START EDIT: Add new analytics CRUD function >>>
 async def get_usage_stats_for_period(
     teacher_id: str,
@@ -2237,3 +2431,71 @@ async def get_result_by_id(result_id: uuid.UUID, teacher_id: Optional[str] = Non
     except Exception as e:
         logger.error(f"Error getting result by ID {result_id}: {e}", exc_info=True)
         return None
+
+# If _get_collection is not globally available or needs specific import:
+# from .database import _get_collection
+
+# Initialize logger if not already done (though usually configured in main.py)
+logger = logging.getLogger(__name__) # Or use your project's standard logger
+
+# Define RESULT_COLLECTION if not imported (ensure this matches your actual collection name)
+RESULT_COLLECTION = "results"
+
+# If using a transaction decorator, apply it. Otherwise, remove @with_transaction.
+# @with_transaction
+async def create_result(
+    result_in: ResultCreate, # MODIFIED: Accept ResultCreate schema
+    session=None # For database transactions, if used
+) -> Optional[Result]: # MODIFIED: Changed from Optional[models.Result] to Optional[Result]
+    """Creates a new result record in the database from a ResultCreate schema."""
+    collection = _get_collection(RESULT_COLLECTION)
+    if collection is None:
+        logger.error("Result collection not found.")
+        return None
+
+    now = datetime.now(timezone.utc)
+    new_result_id = uuid.uuid4()
+
+    # Create the dictionary for the new result document from result_in
+    # and add auto-generated fields.
+    result_doc_data = result_in.model_dump()
+    result_doc_data["_id"] = new_result_id
+    result_doc_data["id"] = new_result_id # Also set 'id' if your model uses it directly
+
+    # Ensure essential fields that might not be in ResultCreate but are in Result model
+    # are set with defaults if applicable, or are expected to be in result_in.
+    # For example, created_at and updated_at are usually set by the CRUD.
+    result_doc_data["created_at"] = now
+    result_doc_data["updated_at"] = now
+    
+    # If status is part of ResultCreate and has a default, it will be used.
+    # If not, and it's required by Result model, ensure it's provided or set here.
+    # Example: if result_in doesn't guarantee status, set a default:
+    if "status" not in result_doc_data or result_doc_data["status"] is None:
+        result_doc_data["status"] = ResultStatus.PENDING.value # Default to PENDING
+
+    logger.info(f"Attempting to insert new result with ID: {new_result_id} for document ID: {result_in.document_id}")
+
+    try:
+        # Use the result_doc_data dictionary for insertion
+        inserted_result = await collection.insert_one(result_doc_data, session=session)
+        if inserted_result.acknowledged:
+            # Retrieve the document using the internal _id field
+            created_doc = await collection.find_one({"_id": new_result_id}, session=session)
+            if created_doc:
+                # Ensure the Pydantic model can handle aliasing if _id is mapped to id
+                return Result(**created_doc)
+            else:
+                logger.error(f"Failed to retrieve result after insert: {new_result_id}")
+                return None
+        else:
+            logger.error(f"Insert not acknowledged for result ID: {new_result_id}")
+            return None
+    except DuplicateKeyError:
+        logger.error(f"Attempted to insert a result with a duplicate ID: {new_result_id}")
+        return None
+    except Exception as e:
+        logger.error(f"Error creating result: {e}", exc_info=True)
+        return None
+
+# --- Batch CRUD ---

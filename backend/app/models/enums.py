@@ -37,6 +37,7 @@ class DocumentStatus(str, Enum):
     RETRYING = "RETRYING"   # System is retrying a failed step
     ERROR = "ERROR"         # An error occurred during processing
     LIMIT_EXCEEDED = "LIMIT_EXCEEDED" # User has exceeded their usage limit
+    DELETED = "DELETED"     # ADDED: For soft-deleted documents
     # Add other statuses as needed
 
 # --- NEW ENUMS FOR STRIPE INTEGRATION ---
@@ -67,6 +68,7 @@ class ResultStatus(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     RETRYING = "RETRYING" # As seen in tests
+    DELETED = "DELETED"     # ADDED: For soft-deleted results
     # Add other statuses as needed, e.g., CANCELED if applicable to results
 
 class BatchStatus(str, Enum):

@@ -39,7 +39,7 @@ class BatchProcessor:
             BatchStatus.VALIDATING.value,
         ]
 
-        cursor = db.batches.find({"status": {"$in": active_statuses}})
+        cursor = await db.batches.find({"status": {"$in": active_statuses}})
         async for batch_doc in cursor:
             batch = Batch(**batch_doc)
             await self._compute_and_update_batch(batch)

@@ -5,7 +5,7 @@ import time # For a simple delay in the loop
 import random # For dummy score
 from typing import Optional, List, Dict, Any
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 import string # Added import
 
@@ -94,26 +94,44 @@ class AssessmentWorker:
         document = await crud.get_document_by_id(document_id=document_id, teacher_id=teacher_id)
         if not document:
             logger.error(f"[AssessmentWorker] Document {document_id} not found or not accessible by teacher {teacher_id} for task {task.id}. Marking task for potential dead-lettering if repeated.")
+            # Consider updating task to a FAILED state here if this repeats. For now, just return.
+            # No task deletion here as the task might be picked up again if the document appears.
             return
 
         # Update Document status to PROCESSING
-        await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.PROCESSING)
+        doc_status_updated_to_processing = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.PROCESSING)
+        if not doc_status_updated_to_processing:
+            logger.critical(f"[AssessmentWorker] CRITICAL: Failed to update document {document_id} status to PROCESSING for task {task.id}. Re-queueing task for retry.")
+            await self._update_task_for_retry(task, "DB_UPDATE_PROCESSING_FAILED")
+            return # Do not delete the task
         
         result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=teacher_id)
         if not result:
             logger.warning(f"[AssessmentWorker] Result record not found for document {document_id} (task {task.id}). Creating one.")
-            result_data = ResultCreate(
+            result = await crud.create_result(
                 document_id=document_id, 
-                teacher_id=teacher_id, 
-                status=ResultStatus.PENDING
+                teacher_id=teacher_id
             )
-            result = await crud.create_result(result_in=result_data)
             if not result:
                 logger.error(f"[AssessmentWorker] Failed to create result record for document {document_id}. Aborting task {task.id}.")
-                await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+                # Attempt to set document status back to ERROR
+                error_update_doc = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+                if not error_update_doc:
+                    logger.error(f"[AssessmentWorker] Also failed to update doc {document_id} to ERROR after result creation failure.")
+                # Task should be retried or handled, not deleted immediately if result creation fails
+                await self._update_task_for_retry(task, "RESULT_CREATION_FAILED")
                 return
         
-        await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.PROCESSING}, teacher_id=teacher_id)
+        # Update Result status to PROCESSING
+        result_status_updated = await crud.update_result_status(
+            result_id=result.id,
+            status=ResultStatus.PROCESSING,
+            teacher_id=teacher_id
+        )
+        if not result_status_updated:
+            logger.critical(f"[AssessmentWorker] CRITICAL: Failed to update result {result.id} status to PROCESSING for task {task.id} (doc {document_id}). Re-queueing task for retry.")
+            await self._update_task_for_retry(task, "RESULT_UPDATE_PROCESSING_FAILED")
+            return # Do not delete the task
 
         extracted_text: Optional[str] = None
         character_count: Optional[int] = None
@@ -151,15 +169,26 @@ class AssessmentWorker:
             logger.info(f"[AssessmentWorker] Text extraction complete for doc {document.id}. Chars: {character_count}, Words: {word_count}")
 
             # Always update document with character and word counts, regardless of limit checks
-            await crud.update_document_counts(document_id=document.id, teacher_id=teacher_id, character_count=character_count, word_count=word_count)
-            logger.info(f"[AssessmentWorker] Updated char/word counts for doc {document.id}")
+            doc_counts_updated = await crud.update_document_counts(document_id=document.id, teacher_id=teacher_id, character_count=character_count, word_count=word_count)
+            if not doc_counts_updated:
+                logger.error(f"[AssessmentWorker] Failed to update char/word counts for doc {document.id} (task {task.id}). Proceeding with ML, but counts are stale.")
+                # Not re-queueing here as ML call is more critical, but this is a data integrity issue.
 
             # --- Usage Limit Check ---
             teacher_db = await crud.get_teacher_by_kinde_id(kinde_id=teacher_id)
             if not teacher_db:
                 logger.error(f"[AssessmentWorker] Teacher {teacher_id} not found. Cannot check usage limits. Aborting task {task.id} for doc {document.id}")
-                await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
-                await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": "User not found, cannot verify usage limits."}, teacher_id=teacher_id)
+                doc_limit_err_update = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+                res_limit_err_update = await crud.update_result_status(
+                    result_id=result.id, 
+                    status=ResultStatus.FAILED,
+                    teacher_id=teacher_id,
+                    error_message="User not found, cannot verify usage limits."
+                )
+                if not doc_limit_err_update or not res_limit_err_update:
+                    logger.error(f"[AssessmentWorker] Failed to update doc/result to ERROR after teacher not found for limit check (doc: {document_id}). Re-queueing task.")
+                    await self._update_task_for_retry(task, "DB_UPDATE_TEACHER_NOT_FOUND_FAILED")
+                    return # Do not delete task
                 await self._delete_assessment_task(task.id)
                 return
 
@@ -226,163 +255,255 @@ class AssessmentWorker:
 
                 if limit_exceeded:
                     error_message = f"Monthly {exceeded_by} limit exceeded."
-                    await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.LIMIT_EXCEEDED)
-                    await crud.update_result(
-                        result_id=result.id, 
-                        update_data={
-                            "status": ResultStatus.FAILED, 
-                            "error_message": error_message
-                        }, 
-                        teacher_id=teacher_id
+                    doc_limit_update_success = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.LIMIT_EXCEEDED)
+                    res_limit_update_success = await crud.update_result_status(
+                        result_id=result.id,
+                        status=ResultStatus.FAILED,
+                        teacher_id=teacher_id,
+                        error_message=error_message
                     )
+
+                    if not doc_limit_update_success or not res_limit_update_success:
+                        logger.error(f"[AssessmentWorker] Failed to update doc/result to LIMIT_EXCEEDED/FAILED after limit check (doc: {document_id}). Re-queueing task.")
+                        await self._update_task_for_retry(task, "DB_UPDATE_LIMIT_EXCEEDED_FAILED")
+                        return # Do not delete the task
+                    
                     await self._delete_assessment_task(task.id)
                     logger.info(f"[AssessmentWorker] Task {task.id} for document {document.id} deleted due to {exceeded_by} limit exceeded.")
                     return # Stop processing this task further
             
             # --- End Usage Limit Check ---
 
-            # --- ML API Call (Copied from documents.py and adapted) ---
-            ml_api_url_worker = settings.ML_API_URL 
-            if not ml_api_url_worker:
-                logger.critical("[AssessmentWorker] ML_API_URL is not configured in settings. Cannot proceed with ML call.")
-                raise ValueError("ML_API_URL not configured.")
-
-            ai_score: Optional[float] = None
-            error_message_ml: Optional[str] = None
-            label: Optional[str] = None # Initialize label
-            ai_generated_flag: Optional[bool] = None # Initialize
-            human_generated_flag: Optional[bool] = None # Initialize
-            paragraph_results_data: List[ParagraphResult] = [] # Initialize
-
-            if not extracted_text:
-                logger.warning(f"[AssessmentWorker] Document {document.id} (task {task.id}) has no extracted text. Skipping ML API call. Setting score to 0.")
-                ai_score = 0.0 # Or None, depending on desired behavior for empty text
-                label = "No text available"
-                # paragraph_results_data will remain empty as initialized
-            else:
-                logger.info(f"[AssessmentWorker] Calling ML API for doc {document.id} (task {task.id})")
-                async with httpx.AsyncClient(timeout=settings.ML_API_TIMEOUT_SECONDS) as client:
-                    try:
-                        response = await client.post(ml_api_url_worker, json={"text": extracted_text})
-                        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-                        ml_response_data = response.json()
-                        
-                        # --- REMOVE DETAILED LOGGING OF THE RESPONSE (was for debugging) ---
-                        # logger.info(f"[AssessmentWorker] RAW ML API Response for doc {document.id}: {ml_response_data}")
-                        # --- END REMOVED LOGGING ---
-
-                        # --- Corrected Score, Label, and Flags Extraction ---
-                        ai_score: Optional[float] = None # Initialize
-                        label: Optional[str] = None    # Initialize
-
-                        ai_generated_flag = ml_response_data.get('ai_generated')
-                        human_generated_flag = ml_response_data.get('human_generated')
-
-                        # Derive overall label from boolean flags
-                        if ai_generated_flag is True:
-                            label = "AI-Generated"
-                        elif human_generated_flag is True: # Only if not ai_generated
-                            label = "Human-Written"
-                        else:
-                            label = "Undetermined" # Or "Mixed", or keep as None to show "Unknown" or "N/A"
-
-                        logger.info(f"[AssessmentWorker] ML API call successful for doc {document.id}. Overall Flags: AI? {ai_generated_flag}, Human? {human_generated_flag}. Derived Label: {label}")
-
-                        # --- Corrected Extraction and Processing Paragraph-Level Results ---
-                        paragraph_results_data: List[ParagraphResult] = []
-                        raw_paragraph_analysis = ml_response_data.get('results') # CORRECTED KEY
-                        
-                        if isinstance(raw_paragraph_analysis, list):
-                            for idx, para_item in enumerate(raw_paragraph_analysis):
-                                if isinstance(para_item, dict):
-                                    try:
-                                        p_text = para_item.get('paragraph')         # CORRECTED KEY
-                                        p_label = para_item.get('label')           # CORRECTED KEY
-                                        p_score_raw = para_item.get('probability') # CORRECTED KEY
-                                        p_score_val = float(p_score_raw) if p_score_raw is not None else None
-
-                                        p_result = ParagraphResult(
-                                            paragraph=p_text,
-                                            label=p_label,
-                                            probability=p_score_val
-                                        )
-                                        paragraph_results_data.append(p_result)
-
-                                        # Derive overall ai_score from the first paragraph's probability, as per Result model hint
-                                        if idx == 0 and p_score_val is not None:
-                                            ai_score = p_score_val
-                                            logger.info(f"[AssessmentWorker] Set overall ai_score to {ai_score} from first paragraph for doc {document.id}")
-
-                                    except (ValueError, TypeError) as e:
-                                        logger.warning(f"[AssessmentWorker] Error processing a paragraph result for doc {document.id}: {para_item}. Error: {e}. Skipping this paragraph.")
-                                else:
-                                    logger.warning(f"[AssessmentWorker] Expected a dict for paragraph item, got {type(para_item)} for doc {document.id}. Skipping item.")
-                            logger.info(f"[AssessmentWorker] Extracted {len(paragraph_results_data)} paragraph results for doc {document.id}. Overall Score derived: {ai_score}")
-                        elif raw_paragraph_analysis is not None:
-                            logger.warning(f"[AssessmentWorker] Expected 'results' to be a list, got {type(raw_paragraph_analysis)} for doc {document.id}. No paragraph results will be stored.")
-                        else:
-                            logger.warning(f"[AssessmentWorker] ML API response did not contain a 'results' key for doc {document.id}. No paragraph results will be stored.")
-                        # --- END Corrected Extraction ---
-
-                    except httpx.ReadTimeout:
-                        logger.error(f"[AssessmentWorker] ML API call timed out for doc {document.id} (task {task.id})")
-                        error_message_ml = "ML API request timed out."
-                    except httpx.HTTPStatusError as e:
-                        logger.error(f"[AssessmentWorker] ML API call failed for doc {document.id} (task {task.id}): HTTP {e.response.status_code} - {e.response.text}")
-                        error_message_ml = f"ML API request failed: {e.response.status_code}"
-                    except Exception as e:
-                        logger.error(f"[AssessmentWorker] Error during ML API call for doc {document.id} (task {task.id}): {e}", exc_info=True)
-                        error_message_ml = f"Unexpected error during ML processing: {str(e)[:100]}"
+            # --- ML API Call & Response Processing ---
+            # TODO: Replace with actual ML API call logic using self._call_ml_api(extracted_text)
             
-            # --- Update Result and Document based on ML outcome --- 
-            result_update_payload: Dict[str, Any] = {
-                "score": ai_score,
-                "label": label,
-                "ai_generated": ai_generated_flag, # ADDED
-                "human_generated": human_generated_flag, # ADDED
-                "paragraph_results": [p.model_dump() for p in paragraph_results_data] if paragraph_results_data else None # MODIFIED: Ensure model_dump for DB
-            }
-            new_doc_status = DocumentStatus.COMPLETED # Default to COMPLETED
+            # --- NEW Enhanced Dummy ML API Response Simulation ---
+            overall_score = random.uniform(0.0, 1.0)
+            overall_label = "AI-Generated" if overall_score > 0.6 else ("Human-Written" if overall_score < 0.4 else "Mixed/Uncertain")
+            overall_ai_generated = overall_label == "AI-Generated"
+            overall_human_generated = overall_label == "Human-Written"
 
-            if error_message_ml is None: # ML API call was successful and response processed (score might be None)
-                result_update_payload["status"] = ResultStatus.COMPLETED
-                # Document status remains COMPLETED
-            else: # Error during ML call (timeout, HTTP error, etc.) or score processing issue that generated an error_message_ml
-                result_update_payload["status"] = ResultStatus.FAILED
-                result_update_payload["error_message"] = error_message_ml # This was already set if there was an ML error
-                new_doc_status = DocumentStatus.ERROR
+            generated_paragraph_results: List[ParagraphResult] = []
+            parsed_paragraphs_list = extracted_text.split('\n\n') if extracted_text else []
+
+            if parsed_paragraphs_list:
+                for i, para_text in enumerate(parsed_paragraphs_list):
+                    if not para_text.strip(): # Skip empty paragraphs
+                        continue
+                    
+                    para_score = random.uniform(0.0, 1.0)
+                    para_label = "AI-Generated" if para_score > 0.7 else ("Human-Written" if para_score < 0.3 else "Undetermined")
+                    
+                    segments_data = []
+                    if para_label == "AI-Generated":
+                        # Simulate some segments being marked
+                        # Make a few segments, some AI, some not, for variety
+                        words_in_para = para_text.split()
+                        if len(words_in_para) > 5: # Only segment if there are enough words
+                            cut1 = len(words_in_para) // 3
+                            cut2 = (len(words_in_para) // 3) * 2
+                            
+                            segments_data.append({
+                                "text": " ".join(words_in_para[:cut1]),
+                                "label": "POSSIBLY_HUMAN_IN_AI_PARA",
+                                "color_hint": "lightgray" # Less prominent
+                            })
+                            segments_data.append({
+                                "text": " ".join(words_in_para[cut1:cut2]),
+                                "label": "AI_HIGH_CONFIDENCE",
+                                "color_hint": "red" 
+                            })
+                            segments_data.append({
+                                "text": " ".join(words_in_para[cut2:]),
+                                "label": "AI_MEDIUM_CONFIDENCE",
+                                "color_hint": "orange"
+                            })
+                        else: # Short AI paragraph, mark all of it
+                             segments_data.append({
+                                "text": para_text,
+                                "label": "AI_HIGH_CONFIDENCE",
+                                "color_hint": "red"
+                            })
+                    elif para_label == "Human-Written":
+                        segments_data.append({
+                            "text": para_text,
+                            "label": "HUMAN_LIKELY",
+                            "color_hint": "green" 
+                        })
+                    else: # Undetermined
+                        segments_data.append({
+                            "text": para_text,
+                            "label": "UNDETERMINED_SEGMENT",
+                            "color_hint": "blue" # Or some neutral color
+                        })
+
+                    generated_paragraph_results.append(
+                        ParagraphResult(
+                            paragraph=para_text,
+                            label=para_label,
+                            probability=para_score,
+                            segments=segments_data,
+                            paragraph_explanation=f"This paragraph was classified as '{para_label}' with a confidence of {para_score:.2f}. Highlighting indicates specific segments."
+                        )
+                    )
             
-            await crud.update_result(result_id=result.id, update_data=result_update_payload, teacher_id=teacher_id)
-            logger.info(f"[AssessmentWorker] Result {result.id} for doc {document.id} updated with status: {result_update_payload['status']}")
+            if not generated_paragraph_results: # Fallback if no paragraphs were parsed or all were empty
+                 generated_paragraph_results.append(
+                    ParagraphResult(
+                        paragraph="Document content could not be parsed into processable paragraphs or was empty.",
+                        label="ERROR_PARSING",
+                        probability=0.0,
+                        segments=[{"text": "N/A", "label": "ERROR_CONTENT", "color_hint": "grey"}],
+                        paragraph_explanation="Content parsing failed, document was empty, or paragraphs were empty."
+                    )
+                )
+                 # Update overall assessment if parsing failed
+                 overall_label = "ERROR_PARSING"
+                 overall_score = 0.0
+                 overall_ai_generated = False
+                 overall_human_generated = False
 
-            # MODIFIED: Call update_document_status to include the score and final status
-            logger.info(f"[AssessmentWorker] Preparing to update document {document.id} with status: {new_doc_status} and score: {ai_score}")
-            await crud.update_document_status(
-                document_id=document.id, 
+
+            # --- End of NEW Enhanced Dummy ML API Response ---
+            
+            # Update Document status to COMPLETED and include the score
+            doc_update_completed = await crud.update_document_status(
+                document_id=document_id, 
                 teacher_id=teacher_id, 
-                status=new_doc_status, 
-                score=ai_score # Persist the score on the document record
+                status=DocumentStatus.COMPLETED,
+                score=overall_score 
             )
-            logger.info(f"[AssessmentWorker] Document {document.id} status updated to {new_doc_status} and score to {ai_score}.")
-            # --- End ML API Call ---
+            # REMOVED: dummy_ml_response = {} - No longer needed in this old form
 
-        except FileNotFoundError as e:
-            logger.error(f"[AssessmentWorker] File not found for doc {document.id} (task {task.id}): {e}", exc_info=True)
-            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
-            await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": f"File processing error: {e}"}, teacher_id=teacher_id)
-        except ValueError as e: # Catch config errors or text extraction mapping errors
-            logger.error(f"[AssessmentWorker] Value error processing doc {document.id} (task {task.id}): {e}", exc_info=True)
-            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
-            await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": f"Configuration or data error: {e}"}, teacher_id=teacher_id)
+            # Update Result with score and status
+            # Ensure paragraph_results uses the list of ParagraphResult model instances
+            final_res_update = await crud.update_result_status(
+                result_id=result.id,
+                teacher_id=teacher_id,
+                status=ResultStatus.COMPLETED,
+                score=overall_score,
+                label=overall_label, # Use overall_label
+                ai_generated=overall_ai_generated, # Use overall_ai_generated
+                human_generated=overall_human_generated, # Use overall_human_generated
+                paragraph_results=generated_paragraph_results, # Pass the list of ParagraphResult objects
+                # raw_response can be added here if/when _call_ml_api is implemented and returns a raw dict
+            )
+            
+            if not doc_update_completed or not final_res_update:
+                logger.error(f"[AssessmentWorker] Failed to update doc/result to COMPLETED/FAILED after ML processing for task {task.id}. Re-queueing task.")
+                await self._update_task_for_retry(task, "RESULT_UPDATE_ML_DATA_FAILED")
+                return
+
+            logger.info(f"[AssessmentWorker] Successfully processed task {task.id} for document {document_id}. Final score: {overall_score}")
+            await self._delete_assessment_task(task.id) # Delete task after successful processing
+
+        except FileNotFoundError as fnf_error:
+            logger.error(f"[AssessmentWorker] File not found error for task {task.id} (document {document_id}): {fnf_error}. Setting doc/result to ERROR. Task will be retried.")
+            doc_err_update = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            res_err_update = await crud.update_result_status(
+                result_id=result.id,
+                status=ResultStatus.FAILED,
+                teacher_id=teacher_id,
+                error_message=f"File processing error: {str(fnf_error)[:500]}" # Truncated for safety
+            )
+
+            if not doc_err_update or not res_err_update:
+                 logger.error(f"[AssessmentWorker] Also failed to update doc/result to ERROR after FileNotFoundError for task {task.id}. Re-queueing task.")
+            await self._update_task_for_retry(task, f"FILE_NOT_FOUND: {fnf_error}")
+
+        except ValueError as val_error: # Catch specific ValueError from file type mapping or text extraction
+            logger.error(f"[AssessmentWorker] Value error during processing for task {task.id} (document {document_id}): {val_error}. Setting doc/result to ERROR. Task will be retried.")
+            doc_err_update = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            res_err_update = await crud.update_result_status(
+                result_id=result.id,
+                status=ResultStatus.FAILED,
+                teacher_id=teacher_id,
+                error_message=f"Value error: {str(val_error)[:500]}" # Truncated for safety
+            )
+            
+            if not doc_err_update or not res_err_update:
+                 logger.error(f"[AssessmentWorker] Also failed to update doc/result to ERROR after ValueError for task {task.id}. Re-queueing task.")
+            await self._update_task_for_retry(task, f"VALUE_ERROR: {val_error}")
+
+        except httpx.HTTPStatusError as http_err:
+            logger.error(f"[AssessmentWorker] HTTP error calling ML API for task {task.id} (document {document_id}): {http_err}. Response: {http_err.response.text}. Re-queueing task.")
+            doc_ml_err_update = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            res_ml_err_update = await crud.update_result_status(
+                result_id=result.id,
+                status=ResultStatus.FAILED,
+                teacher_id=teacher_id,
+                error_message=f"ML API HTTP error: {http_err.response.status_code}"
+            )
+            
+            if not doc_ml_err_update or not res_ml_err_update:
+                 logger.error(f"[AssessmentWorker] Also failed to update doc/result to ERROR after ML API HTTPStatusError for task {task.id}. Re-queueing task.")
+            await self._update_task_for_retry(task, f"ML_API_HTTP_ERROR: {http_err.response.status_code}")
+        
+        except httpx.RequestError as req_err: # More general network errors
+            logger.error(f"[AssessmentWorker] Network error calling ML API for task {task.id} (document {document_id}): {req_err}. Re-queueing task.")
+            doc_net_err_update = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            res_net_err_update = await crud.update_result_status(
+                result_id=result.id,
+                status=ResultStatus.FAILED,
+                teacher_id=teacher_id,
+                error_message=f"ML API Network error: {type(req_err).__name__}"
+            )
+            
+            if not doc_net_err_update or not res_net_err_update:
+                 logger.error(f"[AssessmentWorker] Also failed to update doc/result to ERROR after ML API RequestError for task {task.id}. Re-queueing task.")
+            await self._update_task_for_retry(task, f"ML_API_REQUEST_ERROR: {type(req_err).__name__}")
+
         except Exception as e:
-            logger.error(f"[AssessmentWorker] Unhandled error processing doc {document.id} (task {task.id}): {e}", exc_info=True)
-            # Generic error status
-            await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
-            await crud.update_result(result_id=result.id, update_data={"status": ResultStatus.FAILED, "error_message": f"Unexpected worker error: {str(e)[:100]}"}, teacher_id=teacher_id)
-        finally:
-            # Delete the task from the queue after processing
-            await self._delete_assessment_task(task.id)
-            logger.info(f"[AssessmentWorker] Task {task.id} processing finished for document {document_id}. Task deleted.")
+            logger.error(f"[AssessmentWorker] Unhandled error processing task {task.id} (document {document_id}): {e}", exc_info=True)
+            doc_gen_err_update = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.ERROR)
+            res_gen_err_update = await crud.update_result_status(
+                result_id=result.id,
+                status=ResultStatus.FAILED,
+                teacher_id=teacher_id,
+                error_message=f"Unhandled worker error: {type(e).__name__}"
+            )
+
+            if not doc_gen_err_update or not res_gen_err_update:
+                 logger.error(f"[AssessmentWorker] Also failed to update doc/result to ERROR after unhandled exception for task {task.id}. Re-queueing task.")
+            await self._update_task_for_retry(task, f"UNHANDLED_EXCEPTION: {type(e).__name__}")
+            # Do not delete the task, let it be retried after cool-down or manually inspected.
+    
+    async def _update_task_for_retry(self, task: AssessmentTask, error_reason: str):
+        """
+        Updates a task in the queue to mark it for retry after a failure.
+        Increments retry_count and sets available_at to a future time.
+        Args:
+            task: The AssessmentTask object to update.
+            error_reason: A string indicating the reason for the retry.
+        """
+        if self.db is None:
+            logger.error(f"[AssessmentWorker] Database instance (self.db) not available, cannot update task {task.id} for retry.")
+            return
+
+        retry_count = task.retry_count + 1
+        # Exponential backoff for retry, e.g., 10s, 20s, 40s, etc., max 1 hour
+        delay_seconds = min(self.poll_interval * (2 ** retry_count), 3600) 
+        available_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        
+        update_payload = {
+            "status": "RETRYING", # Or a more specific error status if your queue handles it
+            "retry_count": retry_count,
+            "available_at": available_at,
+            "last_error": f"{error_reason} at {datetime.now(timezone.utc).isoformat()}"
+        }
+
+        try:
+            logger.info(f"[AssessmentWorker] Updating task {task.id} for retry. Error: {error_reason}. Retry count: {retry_count}. Available at: {available_at.isoformat()}")
+            result = await self.db.assessment_tasks.update_one(
+                {"_id": task.id},
+                {"$set": update_payload}
+            )
+            if result.modified_count == 0:
+                logger.error(f"[AssessmentWorker] Failed to update task {task.id} in queue for retry (modified_count was 0). Task might have been processed/deleted by another worker.")
+            else:
+                logger.info(f"[AssessmentWorker] Successfully updated task {task.id} for retry.")
+        except Exception as e:
+            logger.error(f"[AssessmentWorker] Error updating task {task.id} in queue for retry: {e}", exc_info=True)
 
     async def run(self):
         """
@@ -428,6 +549,59 @@ class AssessmentWorker:
         """
         logger.info("AssessmentWorker stop called.")
         self._running = False
+
+    async def _call_ml_api(self, document_content: str) -> Dict[str, Any]:
+        """
+        Placeholder for calling the actual ML API.
+        For now, this will simulate a delay and return a basic structure.
+        It should eventually make an HTTP call to the ML service.
+        """
+        logger.info(f"[_call_ml_api] Simulating ML API call for document content (first 100 chars): {document_content[:100]}")
+        await asyncio.sleep(2) # Simulate network latency
+
+        # This is a VERY basic placeholder. The actual API call will be more complex
+        # and will need to handle potential errors, retries, etc.
+        # The response structure will depend on the actual ML API.
+        # For now, let's imagine it returns something that needs to be transformed
+        # into our ParagraphResult model structure.
+        
+        # Example of a raw response structure we might get:
+        # {
+        #     "overall_assessment": {
+        #         "score": 0.75,
+        #         "classification": "AI_GENERATED_HIGH_CONFIDENCE"
+        #     },
+        #     "paragraphs": [
+        #         {
+        #             "text": "This is the first paragraph.",
+        #             "analysis": {
+        #                 "score": 0.9,
+        #                 "label": "AI_STRONG",
+        #                 "explanation": "Strong indicators of AI generation found.",
+        #                 "highlight_spans": [
+        #                     {"start_char": 10, "end_char": 20, "suggestion": "Reword this phrase.", "color": "red"}
+        #                 ]
+        #             }
+        #         },
+        #         # ... more paragraphs
+        #     ]
+        # }
+        # We would then need to parse this and map it to our ResultUpdate and ParagraphResult models.
+
+        logger.warning("[_call_ml_api] ML API call is currently a placeholder and returns a static dummy response. Needs implementation.")
+        
+        # For now, let's return a structure that the calling code might expect
+        # based on how we USED to do dummy data. The real implementation will
+        # replace this entirely.
+        # This method should return data that `_process_task` can then
+        # use to build `ParagraphResult` objects and the `ResultUpdate` object.
+        
+        # Let's assume _process_task will now iterate through paragraphs itself
+        # and call a sub-function or directly build ParagraphResult.
+        # So, this API might just return the raw classifications.
+        
+        # For now, returning an empty dict as the main logic is dummied in _process_task
+        return {}
 
 # Example usage (for testing, typically managed by main application)
 async def worker_main_test(): # Renamed to avoid conflict
