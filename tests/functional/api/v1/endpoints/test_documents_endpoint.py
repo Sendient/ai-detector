@@ -21,6 +21,7 @@ from backend.app.core.security import get_current_user_payload # NEW - For depen
 from backend.app.models.document import Document, DocumentStatus # For asserting response and types
 from backend.app.models.result import Result, ResultStatus, ResultCreate # For asserting result creation
 from backend.app.models.enums import FileType # For asserting file type
+from backend.app.models.student import Student as StudentModel # Added for mocking student
 
 # Mark all tests in this module to use pytest-asyncio
 pytestmark = pytest.mark.asyncio
@@ -72,6 +73,21 @@ async def test_upload_document_success(
     now_utc = datetime.now(timezone.utc)
 
     # 3. Mock External Service Calls and CRUD Operations
+    # Mock crud.get_student_by_id to simulate student exists and is associated with the teacher
+    mock_student_instance = StudentModel(
+        id=student_uuid, 
+        kinde_id=f"student_kinde_id_{student_uuid}", # Or some other Kinde ID if your model requires
+        first_name="Test", 
+        last_name="Student", 
+        email=f"test_student_{student_uuid}@example.com",
+        teacher_id=test_user_kinde_id # Ensure this matches the authenticated user's Kinde ID
+    )
+    mocker.patch(
+        'backend.app.api.v1.endpoints.documents.crud.get_student_by_id',
+        new_callable=AsyncMock,
+        return_value=mock_student_instance
+    )
+
     # Mock blob storage upload - using the correct import path
     mock_upload_blob = mocker.patch(
         'backend.app.api.v1.endpoints.documents.upload_file_to_blob',
@@ -232,6 +248,21 @@ async def test_upload_document_invalid_file_type(
     mock_file_name = "unsupported_document.zip" # Unsupported file extension
     
     # 3. Mock External Service Calls (Blob storage should not be called)
+    # Mock crud.get_student_by_id
+    mock_student_instance = StudentModel(
+        id=student_uuid, 
+        kinde_id=f"student_kinde_id_{student_uuid}",
+        first_name="Test", 
+        last_name="Student", 
+        email=f"test_student_{student_uuid}@example.com",
+        teacher_id=test_user_kinde_id 
+    )
+    mocker.patch(
+        'backend.app.api.v1.endpoints.documents.crud.get_student_by_id',
+        new_callable=AsyncMock,
+        return_value=mock_student_instance
+    )
+
     mock_upload_blob = mocker.patch(
         'backend.app.api.v1.endpoints.documents.upload_file_to_blob',
         new_callable=AsyncMock
@@ -305,10 +336,28 @@ async def test_upload_document_too_large(
     # Starlette's default max_file_size for MultiPartParser is 1MB (1024 * 1024 bytes)
     large_file_size = 10 * 1024 * 1024  # 10MB
     large_file_content = b'a' * large_file_size 
-    mock_file_name = "very_large_document.txt"
-    mock_blob_name = f"test_blob_{uuid.uuid4()}.txt"
+    mock_file_name = "large_document.pdf"
+    mock_blob_name = f"large_blob_{uuid.uuid4()}.pdf"
+    student_uuid_for_large_test = uuid.uuid4() # Use a local UUID for clarity
+    assignment_uuid_for_large_test = uuid.uuid4()
+
+    # 3. Mock External Service Calls and CRUD Operations
+    # Mock crud.get_student_by_id
+    mock_student_instance = StudentModel(
+        id=student_uuid_for_large_test, # Use the specific UUID for this test
+        kinde_id=f"student_kinde_id_{student_uuid_for_large_test}",
+        first_name="Test", 
+        last_name="StudentLarge", 
+        email=f"test_student_large_{student_uuid_for_large_test}@example.com",
+        teacher_id=test_user_kinde_id 
+    )
+    mocker.patch(
+        'backend.app.api.v1.endpoints.documents.crud.get_student_by_id',
+        new_callable=AsyncMock,
+        return_value=mock_student_instance
+    )
     
-    # 3. Mock External Service Calls
+    # Mock blob storage upload
     mock_upload_blob = mocker.patch(
         'backend.app.api.v1.endpoints.documents.upload_file_to_blob',
         new_callable=AsyncMock,
@@ -322,10 +371,10 @@ async def test_upload_document_too_large(
         "id": created_doc_id,
         "original_filename": mock_file_name,
         "storage_blob_path": mock_blob_name,
-        "file_type": FileType.TXT.value,
+        "file_type": FileType.PDF.value,
         "upload_timestamp": now_utc,
-        "student_id": uuid.uuid4(),
-        "assignment_id": uuid.uuid4(),
+        "student_id": student_uuid_for_large_test,
+        "assignment_id": assignment_uuid_for_large_test,
         "status": DocumentStatus.UPLOADED.value,
         "teacher_id": test_user_kinde_id,
         "character_count": None,
@@ -363,11 +412,11 @@ async def test_upload_document_too_large(
 
     # 4. Prepare form data and file for upload
     form_data = {
-        "student_id": str(mock_created_document_data["student_id"]),
-        "assignment_id": str(mock_created_document_data["assignment_id"])
+        "student_id": str(student_uuid_for_large_test), # Use the specific UUID
+        "assignment_id": str(assignment_uuid_for_large_test) # Use the specific UUID
     }
     files_data = {
-        "file": (mock_file_name, BytesIO(large_file_content), "text/plain")
+        "file": (mock_file_name, BytesIO(large_file_content), "application/pdf")
     }
 
     # 5. Make the API Request
@@ -387,7 +436,7 @@ async def test_upload_document_too_large(
     response_data = response.json()
     assert response_data["original_filename"] == mock_file_name
     assert response_data["storage_blob_path"] == mock_blob_name
-    assert response_data["file_type"] == FileType.TXT.value
+    assert response_data["file_type"] == FileType.PDF.value
     assert response_data["status"] == DocumentStatus.UPLOADED.value
     assert response_data["teacher_id"] == test_user_kinde_id
     assert response_data["_id"] == str(created_doc_id)

@@ -394,7 +394,11 @@ async def delete_current_user_profile(
 
     # Call CRUD function using Kinde ID to identify the teacher to delete
     # Ensure crud.delete_teacher supports deletion by kinde_id
-    deleted_successfully = await crud.delete_teacher(kinde_id=user_kinde_id_str)
+    try:
+        deleted_successfully = await crud.delete_teacher(kinde_id=user_kinde_id_str)
+    except Exception as e:
+        logger.error(f"Unexpected error during deletion of teacher profile for Kinde ID {user_kinde_id_str}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while deleting the teacher profile.")
 
     if not deleted_successfully:
         # crud.delete_teacher returning False likely means the record wasn't found

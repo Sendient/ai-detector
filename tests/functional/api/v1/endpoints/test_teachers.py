@@ -1,7 +1,7 @@
 # app/tests/api/v1/test_teachers.py
 import pytest
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 import httpx # <-- ADD THIS IMPORT
 from httpx import AsyncClient, ASGITransport # Use this for type hinting
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase  # For DB checks
@@ -24,7 +24,7 @@ import logging
 import jwt
 from starlette.testclient import TestClient
 from backend.app.api.v1.endpoints.teachers import get_current_user_payload
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch, ANY
 
 # Attempt to import the app instance directly for manual client creation
 # This relies on sys.path being correctly configured by the main conftest.py
@@ -602,37 +602,58 @@ async def test_delete_teacher_not_found(
     app_with_mock_auth: FastAPI,
     mocker: MockerFixture
 ):
-    """Test attempting to delete a teacher profile via DELETE /me when it does not exist."""
+    """Test attempting to delete a teacher profile that doesn't exist."""
     api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_delete_not_found = "delete_not_found_teacher_kinde_id"
+    test_kinde_id = f"kinde_id_delete_not_found_{uuid.uuid4()}" # Consistent variable name
 
-    # Mock authentication
+    # Define a mock payload for the authenticated user
     default_mock_payload = {
-        "sub": test_kinde_id_delete_not_found,
+        "sub": test_kinde_id,
         "iss": settings.KINDE_DOMAIN or "mock_issuer",
         "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
         "exp": time.time() + 3600,
         "iat": time.time(),
         "roles": ["teacher"]
     }
-    mocker.patch('backend.app.core.security.validate_token', return_value=default_mock_payload)
 
-    # Mock crud.delete_teacher to return False (simulating teacher not found/not deleted)
-    delete_crud_mock = mocker.patch('backend.app.db.crud.delete_teacher', return_value=False) 
+    async def override_get_current_user_payload_local() -> Dict[str, Any]:
+        return default_mock_payload
 
-    # --- Make the Request ---
-    headers = {"Authorization": "Bearer dummytoken"}
-    delete_url = f"{api_prefix}/teachers/me"
+    original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
+    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload_local
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://test") as client:
-        response = await client.delete(delete_url, headers=headers)
+    try:
+        # Mock get_teacher_by_kinde_id to return None (teacher not found)
+        # Target where it's used in the endpoint module
+        mock_crud_get_teacher = mocker.patch(
+            'backend.app.api.v1.endpoints.teachers.crud.get_teacher_by_kinde_id',
+            new_callable=AsyncMock,
+            return_value=None
+        )
 
-    # --- Assertions ---
-    assert response.status_code == status.HTTP_404_NOT_FOUND, \
-        f"Expected 404 Not Found, got {response.status_code}. Response: {response.text}"
-    
-    # Ensure delete_teacher WAS called, and its False return value led to the 404
-    delete_crud_mock.assert_called_once_with(kinde_id=test_kinde_id_delete_not_found)
+        # ADD THIS MOCK: Ensure crud.delete_teacher (as used by the endpoint) returns False
+        mock_actual_delete_call = mocker.patch(
+            'backend.app.api.v1.endpoints.teachers.crud.delete_teacher',
+            new_callable=AsyncMock,
+            return_value=False # Simulate teacher not found by delete operation
+        )
+
+        async with AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
+            response = await client.delete(
+                f"{api_prefix}/teachers/me",
+                headers={"Authorization": "Bearer dummytoken"}
+            )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND, f"Expected 404, got {response.status_code}. Response: {response.text}"
+        # mock_crud_get_teacher.assert_called_once_with(kinde_id=test_kinde_id) # This was already correctly removed
+        mock_actual_delete_call.assert_called_once_with(kinde_id=test_kinde_id) # Assert our new mock was called
+
+    finally:
+        # Restore original dependency override
+        if original_override:
+            app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
+        elif get_current_user_payload in app_with_mock_auth.dependency_overrides: # Check before deleting
+            del app_with_mock_auth.dependency_overrides[get_current_user_payload]
 
 
 # --- Test POST / (Create Teacher - Conflict) ---
@@ -1438,12 +1459,12 @@ async def test_delete_teacher_server_error(
     mock_kinde_user: Dict[str, Any]
 ):
     """
-    Test handling of a teacher that doesn't exist when trying to delete.
-    The endpoint should return 404 Not Found.
+    Test handling of a server error when attempting to delete a teacher.
+    The endpoint should return 500 Internal Server Error.
     """
     # Create a token payload for this test
     token_payload = {"sub": mock_kinde_user["id"], "email": mock_kinde_user["email"]}
-    
+
     # Mock validate_token to return a valid token
     mocker.patch(
         'backend.app.core.security.validate_token',
@@ -1451,33 +1472,66 @@ async def test_delete_teacher_server_error(
     )
 
     # Override get_current_user_payload for this test
-    async def override_get_current_user_payload() -> Dict[str, Any]:
+    async def override_get_current_user_payload_local() -> Dict[str, Any]: # Renamed for clarity
         return token_payload
 
     original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
-    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
+    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload_local
 
-    # Mock get_teacher_by_kinde_id to return None, simulating a teacher that doesn't exist
-    mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=None)
-    
-    # Mock delete_teacher to return False, indicating teacher was not found
-    mocker.patch('backend.app.db.crud.delete_teacher', return_value=False)
+    # Mock get_teacher_by_kinde_id to RETURN a teacher, so delete is attempted
+    # Convert mock_teacher dict to a Teacher model instance
+    # Ensure all required fields for Teacher model are present in mock_teacher or add them
+    # For simplicity, we assume mock_teacher is a valid Teacher dict from a fixture
+    # If mock_teacher is a raw dict, you might need to construct Teacher(**mock_teacher)
+    # For this example, let's assume mock_teacher is already a Teacher-like object or can be used to construct one.
+    # We need to ensure it has an 'id' attribute if the model expects it (even if not used by delete).
+    # The key is that it's NOT None.
+    # Create a simple Teacher instance for the mock
+    # Ensure the mock_teacher fixture provides all necessary fields for the Teacher model.
+    # Assuming mock_teacher provides a dictionary. We should use the Teacher model here.
+    existing_teacher_instance = Teacher(
+        id=uuid.uuid4(), # Internal ID, can be anything for this mock
+        kinde_id=mock_kinde_user["id"], 
+        email=mock_kinde_user["email"], 
+        first_name=mock_teacher.get("first_name", "MockFirstName"), 
+        last_name=mock_teacher.get("last_name", "MockLastName"),
+        school_name=mock_teacher.get("school_name", "MockSchool"),
+        # Add any other required fields for Teacher model with default values if not in mock_teacher
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
+    )
+
+    mock_crud_get_teacher = mocker.patch(
+        'backend.app.api.v1.endpoints.teachers.crud.get_teacher_by_kinde_id',
+        new_callable=AsyncMock,
+        return_value=existing_teacher_instance # Simulate teacher found
+    )
+
+    # Define an async side_effect function that raises an error
+    async def raise_runtime_error_side_effect(*args, **kwargs):
+        raise RuntimeError("Simulated DB error during delete")
+
+    mock_crud_delete_teacher = mocker.patch(
+        'backend.app.api.v1.endpoints.teachers.crud.delete_teacher',
+        new_callable=AsyncMock,
+        side_effect=raise_runtime_error_side_effect # Use the async side_effect
+    )
 
     api_prefix = settings.API_V1_PREFIX
     url = f"{api_prefix}/teachers/me"
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
-            # Include Authorization header
             response = await client.delete(url, headers={"Authorization": "Bearer test-token"})
 
-        # Expect 404 Not Found when the teacher doesn't exist
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        response_data = response.json()
-        assert "detail" in response_data
-        assert "Teacher profile for Kinde ID" in response_data["detail"]
-        assert "not found" in response_data["detail"]
+        # Expect 500 Internal Server Error when delete_teacher raises an exception
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR, \
+            f"Expected 500, got {response.status_code}. Response: {response.text}"
+        
+        mock_crud_delete_teacher.assert_called_once_with(kinde_id=mock_kinde_user["id"])
+
     finally:
+        # Restore original dependency override
         if original_override:
             app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
         elif get_current_user_payload in app_with_mock_auth.dependency_overrides:

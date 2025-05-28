@@ -407,7 +407,8 @@ async def delete_teacher(kinde_id: str, hard_delete: bool = False, session=None)
             );
             count = result.modified_count
     except Exception as e:
-        logger.error(f"Error deleting teacher with Kinde ID {kinde_id}: {e}", exc_info=True); return False
+        logger.error(f"Error deleting teacher with Kinde ID {kinde_id}: {e}", exc_info=True)
+        raise # Re-raise the exception
 
     if count == 1:
         logger.info(f"Successfully {'hard' if hard_delete else 'soft'} deleted teacher with Kinde ID {kinde_id}")
