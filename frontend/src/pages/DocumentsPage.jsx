@@ -161,12 +161,10 @@ function DocumentsPage() {
     }
   }, [isAuthenticated, isAuthLoading, getToken, fetchResultsForDocuments, t, COMPLETED_STATUS, assessmentResults]);
 
-  const performUpload = async (fileToUpload) => {
+  const performUpload = async (fileToUpload, studentId, assignmentId) => {
     if (!isAuthenticated) {
       throw new Error(t('messages_error_loginRequired_upload'));
     }
-    const placeholderStudentId = "00000000-0000-0000-0000-000000000001";
-    const placeholderAssignmentId = "00000000-0000-0000-0000-000000000002";
 
     const token = await getToken();
     if (!token) {
@@ -175,8 +173,13 @@ function DocumentsPage() {
 
     const formData = new FormData();
     formData.append('file', fileToUpload);
-    formData.append('student_id', placeholderStudentId);
-    formData.append('assignment_id', placeholderAssignmentId);
+
+    if (studentId) {
+      formData.append('student_id', studentId);
+    }
+    if (assignmentId) {
+      formData.append('assignment_id', assignmentId);
+    }
 
     const response = await fetch(`${PROXY_PATH}/documents/upload`, {
       method: 'POST',
@@ -218,7 +221,7 @@ function DocumentsPage() {
     setError(null);
 
     try {
-      const result = await performUpload(selectedFile);
+      const result = await performUpload(selectedFile, null, null);
       console.log('[DocumentsPage] Single upload successful:', result);
       setUploadStatus(t('messages_upload_success', { id: result.id }));
       setSelectedFile(null); 
@@ -253,7 +256,7 @@ function DocumentsPage() {
       const file = files[i];
       setUploadStatus(t('common_status_uploading_file_count', {fileName: file.name, current: i + 1, total: totalFiles}));
       try {
-        const result = await performUpload(file);
+        const result = await performUpload(file, null, null);
         console.log(`[DocumentsPage] Bulk upload successful for ${file.name}:`, result);
         successCount++;
       } catch (error) {
@@ -919,11 +922,17 @@ function DocumentsPage() {
                     const isCompleted = doc.status === COMPLETED_STATUS;
                     const hasFailed = currentAssessmentStatus === 'error' || doc.status === ERROR_STATUS;
                     const hasCancelError = !!currentAssessmentError;
+                    const isLimitExceeded = doc.status === LIMIT_EXCEEDED_STATUS;
+
+                    if (isLimitExceeded) { // Diagnostic log
+                        console.log(`[DocumentsPage] Rendering LIMIT_EXCEEDED status for doc ${doc.id}. Key: 'documents_list_status_limitExceeded', Translated: '${t('documents_list_status_limitExceeded')}'`);
+                    }
 
                     let statusBadge;
                     if (isCancelling) { statusBadge = <span className="badge badge-warning badge-outline gap-1 text-xs"><span className="loading loading-spinner loading-xs"></span>Cancelling...</span>; }
                     else if (isProcessing) { statusBadge = <span className="badge badge-info badge-outline gap-1 text-xs"><span className="loading loading-spinner loading-xs"></span>{PROCESSING_STATUS}</span>; }
                     else if (hasCancelError) { statusBadge = <span className="badge badge-error badge-outline text-xs" title={currentAssessmentError}>Cancel Failed</span>; }
+                    else if (isLimitExceeded) { statusBadge = <span className="badge badge-warning badge-outline text-xs">{t('documents_list_status_limitExceeded')}</span>; }
                     else if (hasFailed && !isActuallyProcessing) { statusBadge = <span className="badge badge-error badge-outline text-xs" title={currentAssessmentError || 'Document processing failed'}>{ERROR_STATUS}</span>; }
                     else if (isCompleted) { statusBadge = <span className="badge badge-success badge-outline text-xs">{COMPLETED_STATUS}</span>; }
                     else if (doc.status === UPLOADED_STATUS) { statusBadge = <span className="badge badge-ghost text-xs">{UPLOADED_STATUS}</span>; }

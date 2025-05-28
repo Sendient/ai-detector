@@ -63,8 +63,8 @@ router = APIRouter(
 )
 async def upload_document(
     # Use Form(...) for fields sent alongside the file
-    student_id: uuid.UUID = Form(..., description="Internal ID of the student associated with the document"),
-    assignment_id: uuid.UUID = Form(..., description="ID of the assignment associated with the document"),
+    student_id: Optional[uuid.UUID] = Form(None, description="Internal ID of the student associated with the document"),
+    assignment_id: Optional[uuid.UUID] = Form(None, description="ID of the assignment associated with the document"),
     # Use File(...) for the file upload itself
     file: UploadFile = File(..., description="The document file to upload (PDF, DOCX, TXT, PNG, JPG)"),
     # === Add Authentication Dependency ===
@@ -79,13 +79,14 @@ async def upload_document(
     logger.info(f"User {user_kinde_id} attempting to upload document '{original_filename}' for student {student_id}, assignment {assignment_id}")
 
     # --- Validate Student Ownership ---
-    student = await crud.get_student_by_id(student_internal_id=student_id, teacher_id=user_kinde_id)
-    if not student:
-        logger.warning(f"User {user_kinde_id} attempting to upload document for non-existent or unauthorized student {student_id}.")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with ID {student_id} not found or not associated with your account."
-        )
+    if student_id is not None:
+        student = await crud.get_student_by_id(student_internal_id=student_id, teacher_id=user_kinde_id)
+        if not student:
+            logger.warning(f"User {user_kinde_id} attempting to upload document for non-existent or unauthorized student {student_id}.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Student with ID {student_id} not found or not associated with your account."
+            )
     # --- End Student Ownership Validation ---
 
     # --- Authorization Check ---

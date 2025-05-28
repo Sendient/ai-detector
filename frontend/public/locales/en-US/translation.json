@@ -75,6 +75,7 @@
     "documents_list_status_loading": "Loading documents...",
     "documents_list_label_aiScore": "AI Score:",
     "documents_list_status_assessmentFailed": "Assessment failed.",
+    "documents_list_status_limitExceeded": "Limit Exceeded",
     "documents_list_button_assess_title": "Assess Document",
     "documents_list_button_assess": "Assess",
     "documents_list_button_assessing_title": "Assessment in Progress",
@@ -225,6 +226,7 @@
     "messages_students_delete_error_invalidId": "Cannot delete student: Invalid ID.",
     "messages_students_delete_failed": "Failed to delete student: {{message}}",
     "messages_students_delete_success": "Student deleted successfully!",
+    "messages_students_documents_fetchError": "Could not fetch documents for {{studentName}}: {{detail}}",
     "messages_students_error_cannotLoadForEdit": "Could not load student data for editing - missing ID.",
   
     "role_teacher": "Teacher",
@@ -504,5 +506,9 @@
     "bulkUpload_heading": "Bulk Student Upload",
     "bulkUpload_description": "Upload multiple students at once using a CSV template, or download the template to get started.",
     "bulkUpload_button_upload": "Bulk Upload Files",
-    "bulkUpload_button_downloadTemplate": "Download Template"
+    "bulkUpload_button_downloadTemplate": "Download Template",
+    "studentsPage_studentDocumentsTitle": "Documents for {{studentName}}",
+    "studentsPage_loadingDocuments": "Loading documents...",
+    "studentsPage_refreshDocuments": "Refresh Documents",
+    "studentsPage_refreshingDocuments": "Refreshing..."
 }

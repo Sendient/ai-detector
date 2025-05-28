@@ -215,34 +215,34 @@ class AssessmentWorker:
                 if current_plan == SubscriptionPlan.FREE:
                     plan_word_limit_free = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
                     plan_char_limit_free = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
-                    logger.info(f"[AssessmentWorker] FREE Plan: Monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_free}")
-                    logger.info(f"[AssessmentWorker] FREE Plan: Monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_free}")
+                    logger.info(f"[AssessmentWorker] FREE Plan: Current monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_free}")
+                    logger.info(f"[AssessmentWorker] FREE Plan: Current monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_free}")
 
-                    if current_monthly_words > plan_word_limit_free:
+                    if (current_monthly_words + doc_word_count) > plan_word_limit_free:
                         limit_exceeded = True
                         exceeded_by = "word"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed FREE plan monthly word limit of {plan_word_limit_free} (current usage: {current_monthly_words}).")
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed FREE plan monthly word limit of {plan_word_limit_free} (current usage: {current_monthly_words}). Projected total: {current_monthly_words + doc_word_count}")
                     
-                    if not limit_exceeded and current_monthly_chars > plan_char_limit_free:
+                    if not limit_exceeded and (current_monthly_chars + doc_char_count) > plan_char_limit_free:
                         limit_exceeded = True
                         exceeded_by = "character"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FREE plan monthly char limit of {plan_char_limit_free} (current usage: {current_monthly_chars}).")
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FREE plan monthly char limit of {plan_char_limit_free} (current usage: {current_monthly_chars}). Projected total: {current_monthly_chars + doc_char_count}")
                 
                 elif current_plan == SubscriptionPlan.PRO:
                     plan_word_limit_pro = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
                     plan_char_limit_pro = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
-                    logger.info(f"[AssessmentWorker] PRO Plan: Monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_pro}")
-                    logger.info(f"[AssessmentWorker] PRO Plan: Monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_pro}")
+                    logger.info(f"[AssessmentWorker] PRO Plan: Current monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_pro}")
+                    logger.info(f"[AssessmentWorker] PRO Plan: Current monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_pro}")
 
-                    if current_monthly_words > plan_word_limit_pro:
+                    if (current_monthly_words + doc_word_count) > plan_word_limit_pro:
                         limit_exceeded = True
                         exceeded_by = "word"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed PRO plan monthly word limit of {plan_word_limit_pro} (current usage: {current_monthly_words}).")
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed PRO plan monthly word limit of {plan_word_limit_pro} (current usage: {current_monthly_words}). Projected total: {current_monthly_words + doc_word_count}")
                     
-                    if not limit_exceeded and current_monthly_chars > plan_char_limit_pro:
+                    if not limit_exceeded and (current_monthly_chars + doc_char_count) > plan_char_limit_pro:
                         limit_exceeded = True
                         exceeded_by = "character"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed PRO plan monthly char limit of {plan_char_limit_pro} (current usage: {current_monthly_chars}).")
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed PRO plan monthly char limit of {plan_char_limit_pro} (current usage: {current_monthly_chars}). Projected total: {current_monthly_chars + doc_char_count}")
 
                 else: # Fallback for any other unknown non-SCHOOLS plan - use FREE plan char limits
                     plan_char_limit_fallback = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT

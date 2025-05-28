@@ -291,3 +291,63 @@ These are states shown temporarily in the UI based on ongoing actions or fronten
     1.  **Frontend (`handleCancelAssessment`):** The API call to the backend fails.
     2.  **Frontend Error Handling:** The `catch` block or error handling logic within `handleCancelAssessment` is executed. An error message is typically stored in the component's state (e.g., `assessmentErrors[doc.id]`).
     3.  **UI Display:** The `statusBadge` logic checks for this error state and, if present after a cancellation attempt, displays "Cancel Failed". The document's actual status in the backend (likely still `PROCESSING` if the cancellation command itself failed) might remain unchanged.
+
+# Document Processing and Usage Limit Enforcement Workflow
+
+This document outlines the process by which documents are assessed for AI-generated content and how usage limits (based on word and character counts) are applied according to the teacher's subscription plan.
+
+## 1. Document Upload and Queuing
+
+1.  **Upload:** A teacher uploads a document through the frontend interface.
+2.  **Initial Save:** The document metadata (filename, file type, associated teacher, etc.) is saved in the database with an initial status (e.g., `UPLOADED`). The document file itself is stored in blob storage.
+3.  **Task Creation:** An assessment task is created and added to a processing queue. This task contains information like the document ID and the teacher's ID.
+
+## 2. Assessment Worker Processing
+
+The `AssessmentWorker` is a backend process that continuously polls the queue for new tasks. When a task is claimed:
+
+1.  **Document Retrieval:** The worker retrieves the full document details from the database using the document ID from the task.
+2.  **Status Update (Processing):** The document's status is updated to `PROCESSING` in the database. An associated `Result` record is also created/updated to `PROCESSING`.
+
+3.  **Text Extraction & Counting:**
+    *   The document file is downloaded from blob storage.
+    *   Text content is extracted from the document.
+    *   The **`character_count`** and **`word_count`** for the current document are calculated based on the extracted text.
+
+4.  **Update Document Counts:**
+    *   The calculated `character_count` and `word_count` are immediately saved to the document's record in the database. This ensures these counts are persisted even if subsequent steps fail.
+
+5.  **Usage Limit Check:**
+    *   **Fetch Teacher's Plan:** The worker retrieves the teacher's current subscription plan (e.g., Free, Pro, Schools).
+    *   **Schools Plan Bypass:** If the teacher is on a "Schools" plan (or a similar unlimited tier), the usage limit check is bypassed, and processing proceeds directly to ML analysis.
+    *   **Fetch Current Usage:** For metered plans (Free, Pro), the worker calls `crud.get_usage_stats_for_period` to get the teacher's current total `word_count` and `character_count` for the current billing period (e.g., monthly).
+        *   **Important:** This usage statistic now correctly includes the word and character counts from all previously processed documents, **including those that have been soft-deleted** but were assessed before deletion (i.e., have a `word_count` and `status` like `COMPLETED`).
+    *   **Calculate Projected Usage:** The worker calculates the teacher's *projected* usage if the current document were to be processed:
+        *   `projected_words = current_monthly_words + current_document_word_count`
+        *   `projected_chars = current_monthly_chars + current_document_character_count`
+    *   **Compare with Plan Limits:** The `projected_words` and `projected_chars` are compared against the limits defined for the teacher's current subscription plan (e.g., `FREE_PLAN_MONTHLY_WORD_LIMIT`).
+
+6.  **Outcome of Limit Check:**
+
+    *   **A. Limit Exceeded:**
+        *   If `projected_words` or `projected_chars` exceed the plan's limits:
+            *   The document's status is updated to `LIMIT_EXCEEDED`.
+            *   The associated `Result` record status is updated to `FAILED`, and an error message indicating the limit type (word or character) is stored.
+            *   **No ML API Call:** The document is **not** sent for AI content analysis.
+            *   The assessment task is removed from the queue.
+            *   Processing for this document stops.
+
+    *   **B. Within Limits:**
+        *   If `projected_words` and `projected_chars` are within the plan's limits:
+            *   **ML API Call:** The extracted text is sent to the AI detection ML endpoint.
+            *   **Process ML Response:** The response from the ML API (containing scores, classifications, etc.) is processed.
+            *   **Update Document (Completed):** The document's status is updated to `COMPLETED`, and the overall AI score is saved directly on the document record.
+            *   **Update Result (Completed):** The `Result` record is updated to `COMPLETED` with the detailed assessment (overall score, paragraph-level analysis, AI-generated label, etc.).
+            *   The assessment task is removed from the queue.
+
+## Summary of Key Logic for Usage Limits:
+
+*   Word and character counts are determined **before** any ML processing.
+*   The system checks if processing the **current document** will cause the user to exceed their quota.
+*   Usage statistics accurately reflect counts from **all previously processed documents, including soft-deleted ones** that had their words/chars counted.
+*   If a document would push a user over their limit, its status is set to `LIMIT_EXCEEDED`, and it is **not** sent for ML analysis.

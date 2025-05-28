@@ -1103,12 +1103,24 @@ async def get_all_documents(
     
     try:
         cursor = collection.find(query, session=session)
-        if sort_by:
+        if sort_by and sort_order is not None: # Check both sort_by and sort_order
             cursor = cursor.sort(sort_by, sort_order)
         cursor = cursor.skip(skip).limit(limit)
         
         async for doc_data in cursor:
             try:
+                # +++ Log raw data before Pydantic conversion +++
+                raw_score = doc_data.get('score')
+                raw_word_count = doc_data.get('word_count')
+                raw_char_count = doc_data.get('character_count')
+                raw_status = doc_data.get('status')
+                logger.info(f"[crud.get_all_documents] Raw DB data for doc {doc_data.get('_id')}: score='{raw_score}' (type: {type(raw_score)}), word_count='{raw_word_count}' (type: {type(raw_word_count)}), char_count='{raw_char_count}' (type: {type(raw_char_count)}), status='{raw_status}' (type: {type(raw_status)})")
+                # +++ End logging +++
+
+                # Ensure '_id' is mapped to 'id' for Pydantic model compatibility if it's not already handled
+                # by an alias in the Pydantic model itself (which it often is via `Field(alias='_id')`).
+                if "_id" in doc_data: doc_data["id"] = doc_data.pop("_id")
+
                 # --- Populate student_details ---
                 student_details_data = None
                 if doc_data.get("student_id"):
@@ -2259,10 +2271,40 @@ async def get_usage_stats_for_period(
         logger.error("Documents collection not found.")
         return None
 
-    match_query: Dict[str, Any] = {
-        "teacher_id": teacher_id,
-        "is_deleted": {"$ne": True}
+    # Base query for documents belonging to the teacher
+    base_teacher_query = {"teacher_id": teacher_id}
+
+    # Query for active (not deleted) documents or processed soft-deleted documents
+    # These are the documents whose word/char counts should contribute to usage limits.
+    match_query_for_counts: Dict[str, Any] = {
+        **base_teacher_query,
+        "$or": [
+            {"is_deleted": {"$ne": True}}, # Active documents
+            {
+                "is_deleted": True, # Soft-deleted documents
+                "$or": [ # That were processed
+                    {"status": DocumentStatus.COMPLETED.value},
+                    {"word_count": {"$exists": True, "$ne": None}}
+                ]
+            }
+        ]
     }
+
+    # Specific query for counting all soft-deleted documents (for all-time stats breakdown)
+    match_query_for_deleted_count_only: Dict[str, Any] = {
+        **base_teacher_query,
+        "is_deleted": True
+    }
+
+    # Apply date filters to the match_query_for_counts if period and target_date are provided
+    # The date filter should apply to 'upload_timestamp' for periodic calculations.
+    # We assume assessed (and thus counted) documents contribute to the period they were uploaded in.
+    # If a document was processed much later, this might need refinement based on business logic
+    # (e.g., count towards the processing month vs. upload month).
+    # For now, sticking to upload_timestamp for simplicity of period definition.
+
+    period_start_str: Optional[str] = None
+    period_end_str: Optional[str] = None
 
     if period and target_date:
         start_datetime: Optional[datetime] = None
@@ -2308,7 +2350,7 @@ async def get_usage_stats_for_period(
 
         if start_datetime and end_datetime:
             # Ensure end_datetime is inclusive for the query by going to the very end of the target day
-            match_query["upload_timestamp"] = {
+            match_query_for_counts["upload_timestamp"] = {
                 "$gte": start_datetime,
                 "$lte": end_datetime # up to 23:59:59.999999 of the end_datetime's day
             }
@@ -2320,21 +2362,25 @@ async def get_usage_stats_for_period(
             # For now, let's assume this means all-time if dates weren't set.
             # However, the logic above should ensure start_datetime/end_datetime are set if period is valid.
             # This path is more of a safeguard.
-            period_start_str = None # Indicates all-time
-            period_end_str = None   # Indicates all-time
+            # period_start_str = None # Indicates all-time - ALREADY SET TO NONE
+            # period_end_str = None   # Indicates all-time - ALREADY SET TO NONE
+            pass # period_start_str and period_end_str remain None
     else:
         # No period and target_date provided, so calculate for all time
         logger.info(f"Calculating all-time usage stats for teacher_id: {teacher_id}")
-        period_start_str = None # Indicates all-time
-        period_end_str = None   # Indicates all-time
+        # period_start_str and period_end_str are already None by default
 
-        # For all-time, also get deleted documents count
-        deleted_documents_count = await collection.count_documents({"teacher_id": teacher_id, "is_deleted": True})
-        # The main match_query for the pipeline already targets current documents
+    # Initialize deleted_documents_count for all-time stats scenario
+    deleted_documents_count_for_all_time_stats = 0
+    if not period and not target_date: # Only calculate for all-time stats
+        deleted_documents_count_for_all_time_stats = await collection.count_documents(match_query_for_deleted_count_only)
+
 
     pipeline = [
         {
-            "$match": match_query
+            # Match documents based on whether they are active or processed-and-deleted,
+            # and within the date range if specified.
+            "$match": match_query_for_counts # Use the refined match query for counts
         },
         {
             "$group": {
@@ -2374,10 +2420,14 @@ async def get_usage_stats_for_period(
             }
             # If all-time, add specific breakdown
             if not period and not target_date:
-                response_payload["current_documents"] = stats.get("document_count", 0) # current documents
-                response_payload["deleted_documents"] = deleted_documents_count
-                response_payload["total_processed_documents"] = stats.get("document_count", 0) + deleted_documents_count
-                # document_count will still hold current_documents for backward compatibility / other uses of this field
+                response_payload["current_documents"] = stats.get("document_count", 0) # This is count from the aggregation based on match_query_for_counts
+                response_payload["deleted_documents"] = deleted_documents_count_for_all_time_stats
+                # total_processed_documents should reflect documents that ever had counts, so sum of current (counted) + deleted (counted)
+                # The current `stats.get("document_count", 0)` already reflects this due to the $or in match_query_for_counts.
+                # However, to be explicit about total *distinct* documents processed (active or deleted but processed):
+                # We might need a separate count for "active_processed" and "deleted_processed" if the definition of document_count becomes ambiguous.
+                # For now, assume document_count from pipeline is sufficient as it includes processed deleted docs.
+                response_payload["total_processed_documents"] = stats.get("document_count", 0)
 
         else: # No documents found matching the criteria
             logger.info(f"No documents found for usage stats (teacher: {teacher_id}, period: {period or 'all-time'}, target: {target_date})")
@@ -2391,8 +2441,8 @@ async def get_usage_stats_for_period(
             # If all-time and no documents found, also set breakdown to 0
             if not period and not target_date:
                 response_payload["current_documents"] = 0
-                response_payload["deleted_documents"] = deleted_documents_count # could be > 0 if only deleted ones exist
-                response_payload["total_processed_documents"] = deleted_documents_count
+                response_payload["deleted_documents"] = deleted_documents_count_for_all_time_stats # could be > 0 if only deleted ones exist
+                response_payload["total_processed_documents"] = deleted_documents_count_for_all_time_stats # If no active/processed-deleted, then it's just this.
 
         # Add period-specific fields if they were used for the query
         if period and target_date and period_start_str and period_end_str: # period_start_str/end_str are set if period/target_date are valid

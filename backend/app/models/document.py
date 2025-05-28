@@ -16,7 +16,7 @@ class DocumentAssignStudentRequest(BaseModel):
 # --- Base Model ---
 class DocumentBase(BaseModel):
     original_filename: str = Field(..., description="Original name of the uploaded file")
-    storage_blob_path: str = Field(..., description="Path to the file in blob storage")
+    storage_blob_path: Optional[str] = Field(None, description="Path to the file in blob storage")
     file_type: FileType = Field(..., description="Detected type of the file (PDF, DOCX, TXT)")
     upload_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp of when the document was uploaded")
     student_id: Optional[uuid.UUID] = Field(None, description="Internal ID of the student associated with the document")

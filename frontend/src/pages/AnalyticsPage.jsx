@@ -4,6 +4,7 @@ import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 // Assuming you have Lucide icons installed for React
 // npm install lucide-react
 import { Calendar as CalendarIcon, TrendingUp, FileText, Users, BarChart2, AlertTriangle, ListChecks } from 'lucide-react';
+import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid';
 
 // --- Authentication Placeholder Removed ---
 // Removed the placeholder getAuthToken function
@@ -57,6 +58,10 @@ function AnalyticsPage() {
   const [activityError, setActivityError] = useState(null);
   const [dashboardError, setDashboardError] = useState(null);
 
+  // Sorting state for Recent Activity table
+  const [activitySortField, setActivitySortField] = useState('upload_timestamp'); // Default sort field
+  const [activitySortOrder, setActivitySortOrder] = useState('desc'); // Default sort order
+
   // --- Get Current User ---
   // Now using the user object from useKindeAuth hook
   const currentUser = user; // Kinde's user object often has an 'id' property
@@ -74,6 +79,18 @@ function AnalyticsPage() {
   }
 
   // --- API Fetching Functions ---
+
+  const handleActivitySort = (field) => {
+    if (activitySortField === field) {
+      setActivitySortOrder(activitySortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setActivitySortField(field);
+      // Default sort order for new field:
+      // 'desc' for dates like upload_timestamp
+      // 'asc' for text fields like original_filename
+      setActivitySortOrder(field === 'upload_timestamp' ? 'desc' : 'asc');
+    }
+  };
 
   // Fetch Usage Stats Function (Using Kinde Auth)
   const fetchUsageData = useCallback(async () => {
@@ -142,6 +159,33 @@ function AnalyticsPage() {
     } finally { setIsLoadingActivity(false); }
    }, [currentUser?.id, getToken, isAuthLoading]); // Added dependencies
 
+
+  // Sort recentActivity before rendering
+  const sortedRecentActivity = React.useMemo(() => {
+    if (!recentActivity || recentActivity.length === 0) return [];
+    return [...recentActivity].sort((a, b) => {
+      const fieldA = a[activitySortField];
+      const fieldB = b[activitySortField];
+
+      if (fieldA == null && fieldB == null) return 0;
+      if (fieldA == null) return activitySortOrder === 'asc' ? 1 : -1;
+      if (fieldB == null) return activitySortOrder === 'asc' ? -1 : 1;
+
+      let comparison = 0;
+      if (activitySortField === 'upload_timestamp') {
+        // Date comparison
+        comparison = new Date(fieldA) - new Date(fieldB);
+      } else if (typeof fieldA === 'string' && typeof fieldB === 'string') {
+        // String comparison
+        comparison = fieldA.localeCompare(fieldB);
+      } else {
+        // Basic comparison for numbers or other types
+        if (fieldA < fieldB) comparison = -1;
+        if (fieldA > fieldB) comparison = 1;
+      }
+      return activitySortOrder === 'asc' ? comparison : comparison * -1;
+    });
+  }, [recentActivity, activitySortField, activitySortOrder]);
 
   // Effect Hook for Usage Stats (Runs when date or period changes)
   useEffect(() => { if (isAuthenticated) { fetchUsageData(); } else { setUsageStats(null); } }, [fetchUsageData, isAuthenticated]);
@@ -255,61 +299,55 @@ function AnalyticsPage() {
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th scope="col" className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Filename</th>
-                      <th scope="col" className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                      <th scope="col" className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">AI Score</th>
-                      <th scope="col" className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Characters</th>
-                      <th scope="col" className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Words</th>
-                      <th scope="col" className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Processed At</th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer" onClick={() => handleActivitySort('original_filename')}>
+                        Filename
+                        {activitySortField === 'original_filename' ? (
+                          activitySortOrder === 'asc' ? <ChevronUpIcon className="h-3 w-3 inline ml-1" /> : <ChevronDownIcon className="h-3 w-3 inline ml-1" />
+                        ) : <ArrowsUpDownIcon className="h-3 w-3 inline ml-1 text-gray-400" />}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer" onClick={() => handleActivitySort('upload_timestamp')}>
+                        Uploaded
+                        {activitySortField === 'upload_timestamp' ? (
+                          activitySortOrder === 'asc' ? <ChevronUpIcon className="h-3 w-3 inline ml-1" /> : <ChevronDownIcon className="h-3 w-3 inline ml-1" />
+                        ) : <ArrowsUpDownIcon className="h-3 w-3 inline ml-1 text-gray-400" />}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">AI Score</th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Words</th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Chars</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                      {isLoadingActivity ? ( [...Array(3)].map((_, i) => ( <tr key={`loading-${i}`} className="animate-pulse"><td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> <td className="px-4 sm:px-6 py-4 whitespace-nowrap"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div></td> </tr> )))
-                      : recentActivity.length > 0 ? ( recentActivity.map((activity) => {
-                            // Add Debug Logging Inside the Map
-                            console.log('Mapping activity item for Recent Activity:', activity); // Enhanced log
-                            // Prepare Filename Display Logic
-                            const displayFilename = activity.original_filename ? activity.original_filename : 'N/A'; // Ensure fallback
-                            
-                            // AI Score Display Logic
-                            let scoreDisplay = 'N/A';
-                            if (typeof activity.score === 'number') { // Check if score is a number
-                                scoreDisplay = `${(activity.score * 100).toFixed(1)}%`;
-                            }
-
-                            return (
-                                <tr key={activity.id || activity._id}> {/* Use _id as fallback key */}
-                                    {/* Update the Table Cell (td) for Filename */}
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 truncate max-w-xs" title={displayFilename}>
-                                        {displayFilename}
-                                    </td>
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeClass(activity.status)}`}>
-                                            {activity.status || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                        {scoreDisplay} {/* MODIFIED: Use prepared scoreDisplay variable */}
-                                    </td>
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                        {activity.character_count?.toLocaleString() ?? 'N/A'}
-                                    </td>
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                        {activity.word_count?.toLocaleString() ?? 'N/A'}
-                                    </td>
-                                    <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                        {formatDateTime(activity.updated_at || activity.upload_timestamp)} {/* Prefer updated_at */}
-                                    </td>
-                                </tr>
-                            );
-                        })
-                    ) : (
-                        <tr>
-                            <td colSpan="6" className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
-                                No recent activity to display.
+                      {isLoadingActivity ? (
+                        <tr><td colSpan="6" className="text-center py-4"><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse w-1/2 mx-auto"></div></td></tr>
+                      ) : sortedRecentActivity.length > 0 ? (
+                        sortedRecentActivity.map((item, index) => (
+                          <tr key={item.id || item._id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{item.original_filename || 'N/A'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatDateTime(item.upload_timestamp)}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeClass(item.status)}`}>
+                                {item.status || 'N/A'}
+                              </span>
                             </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {item.score ? `${(item.score * 100).toFixed(1)}%` : 'N/A'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {item.word_count?.toLocaleString() ?? 'N/A'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {item.character_count?.toLocaleString() ?? 'N/A'}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6" className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
+                            No recent activity to display.
+                          </td>
                         </tr>
-                    )}
+                      )}
                   </tbody>
               </table>
           </div>

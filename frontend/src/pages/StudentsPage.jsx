@@ -11,7 +11,9 @@ import {
   InformationCircleIcon,
   ExclamationTriangleIcon,
   ArrowUpTrayIcon,
+  ArrowPathIcon,
 } from '@heroicons/react/24/outline';
+import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -46,6 +48,10 @@ function StudentsPage() {
   const [createClassError, setCreateClassError] = useState(null);
   const [tempPreviousClassToAddId, setTempPreviousClassToAddId] = useState('');
 
+  // Sorting state for students table
+  const [studentSortField, setStudentSortField] = useState('last_name'); // Default: last_name
+  const [studentSortOrder, setStudentSortOrder] = useState('asc'); // Default: asc
+
   // New state for student documents
   const [studentDocuments, setStudentDocuments] = useState([]);
   const [isLoadingStudentDocuments, setIsLoadingStudentDocuments] = useState(false);
@@ -61,6 +67,15 @@ function StudentsPage() {
   };
 
   const [formData, setFormData] = useState(initialStudentData);
+
+  const handleStudentSort = (field) => {
+    if (studentSortField === field) {
+      setStudentSortOrder(studentSortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setStudentSortField(field);
+      setStudentSortOrder('asc'); // Default to ascending for new fields
+    }
+  };
 
   const fetchStudents = useCallback(async () => {
     if (!isAuthenticated) {
@@ -768,6 +783,28 @@ function StudentsPage() {
     return assignedNames.length > 0 ? assignedNames.join(', ') : '-';
   };
 
+  // Sort students before rendering
+  const sortedStudents = React.useMemo(() => {
+    if (!students || students.length === 0) return [];
+    return [...students].sort((a, b) => {
+      const fieldA = a[studentSortField];
+      const fieldB = b[studentSortField];
+
+      if (fieldA == null && fieldB == null) return 0;
+      if (fieldA == null) return studentSortOrder === 'asc' ? 1 : -1;
+      if (fieldB == null) return studentSortOrder === 'asc' ? -1 : 1;
+
+      let comparison = 0;
+      if (typeof fieldA === 'string' && typeof fieldB === 'string') {
+        comparison = fieldA.localeCompare(fieldB);
+      } else {
+        if (fieldA < fieldB) comparison = -1;
+        if (fieldA > fieldB) comparison = 1;
+      }
+      return studentSortOrder === 'asc' ? comparison : comparison * -1;
+    });
+  }, [students, studentSortField, studentSortOrder]);
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -970,9 +1007,20 @@ function StudentsPage() {
                   <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_documents_heading', 'Student Documents')}</h4>
                   <div className="card bg-base-100 shadow-xl">
                     <div className="card-body p-4">
-                      <h2 className="card-title text-lg">Student Documents</h2>
-                      {isLoadingStudentDocuments && <p className="text-sm text-gray-500">{t('messages_loading_studentDocuments')}</p>}
-                      {studentDocumentsError && <p className="text-sm text-error">{studentDocumentsError}</p>}
+                      <div className="flex justify-between items-center">
+                        <h2 className="card-title text-lg">Student Documents</h2>
+                        <button
+                          type="button"
+                          onClick={() => fetchStudentDocuments(editingStudent.id)}
+                          disabled={isLoadingStudentDocuments}
+                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                        >
+                          <ArrowPathIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
+                          {isLoadingStudentDocuments ? t('studentsPage.refreshingDocuments') : t('studentsPage.refreshDocuments')}
+                        </button>
+                      </div>
+                      {isLoadingStudentDocuments && <p className="text-sm text-gray-500 mt-2">{t('studentsPage.loadingDocuments')}</p>}
+                      {studentDocumentsError && <p className="text-sm text-red-600 mt-2">{studentDocumentsError}</p>}
                       {!isLoadingStudentDocuments && !studentDocumentsError && studentDocuments.length === 0 && (
                         <p className="text-sm text-gray-500">{t('messages_info_noDocumentsFound')}</p>
                       )}
@@ -1086,52 +1134,68 @@ function StudentsPage() {
                     </div>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="table w-full">
+                    <table className="table table-zebra w-full">
                       <thead>
                         <tr>
-                          <th>{t('students_form_label_name')}</th>
-                          <th>{t('students_form_label_email')}</th>
-                          <th>{t('students_list_header_classGroups')}</th>
-                          <th>{t('common_actions')}</th>
+                          <th className="cursor-pointer" onClick={() => handleStudentSort('first_name')}>
+                            {t('students_column_firstName')}
+                            {studentSortField === 'first_name' ? (
+                              studentSortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
+                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                          </th>
+                          <th className="cursor-pointer" onClick={() => handleStudentSort('last_name')}>
+                            {t('students_column_lastName')}
+                            {studentSortField === 'last_name' ? (
+                              studentSortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
+                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                          </th>
+                          <th className="cursor-pointer" onClick={() => handleStudentSort('email')}>
+                            {t('students_column_email')}
+                            {studentSortField === 'email' ? (
+                              studentSortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
+                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                          </th>
+                          <th>{t('students_column_externalId')}</th>
+                          <th>{t('students_column_yearGroup')}</th>
+                          <th>{t('students_column_classes')}</th>
+                          <th>{t('common_label_actions')}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {students.map(student => (
-                          <tr key={student.id || student._id} className="hover">
-                            <td>{student.first_name} {student.last_name}</td>
-                            <td>{student.email || '-'}</td>
-                            <td>
-                              {(student.class_group_ids && student.class_group_ids.length > 0 && classGroups.length > 0) ? (
-                                student.class_group_ids.map(cgId => {
-                                  const classGroup = classGroups.find(cg => cg.id === cgId || cg._id === cgId);
-                                  return classGroup ? (
-                                    <div key={cgId}>{classGroup.class_name}</div>
-                                  ) : (
-                                    <div key={cgId} className="italic text-gray-500">{t('common_status_unknown_class')}</div>
-                                  );
-                                })
-                              ) : (
-                                <div>-</div>
-                              )}
-                            </td>
-                            <td className="space-x-1">
-                              <button
-                                onClick={() => handleShowEditForm(student)}
-                                className="btn btn-ghost btn-sm p-1"
-                                title={t('students_list_button_edit_title')}
-                              >
-                                <PencilSquareIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
-                                className="btn btn-ghost btn-sm p-1"
-                                title={t('students_list_button_delete_title')}
-                              >
-                                <TrashIcon className="h-5 w-5 text-red-600 hover:text-red-800" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {isLoading ? (
+                          <tr><td colSpan="7" className="text-center"><span className="loading loading-dots loading-md"></span></td></tr>
+                        ) : sortedStudents.length === 0 ? (
+                          <tr><td colSpan="7" className="text-center py-4">{error ? error : t('messages_students_noStudents')}</td></tr>
+                        ) : (
+                          sortedStudents.map(student => (
+                            <tr key={student.id} className="hover">
+                              <td>{student.first_name}</td>
+                              <td>{student.last_name}</td>
+                              <td>{student.email || '-'}</td>
+                              <td>{student.external_student_id || '-'}</td>
+                              <td>{student.year_group || '-'}</td>
+                              <td>
+                                {getStudentClassNames(student)}
+                              </td>
+                              <td className="space-x-1">
+                                <button
+                                  onClick={() => handleShowEditForm(student)}
+                                  className="btn btn-ghost btn-sm p-1"
+                                  title={t('students_list_button_edit_title')}
+                                >
+                                  <PencilSquareIcon className="h-5 w-5 text-blue-600 hover:text-blue-800" />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(student.id, `${student.first_name} ${student.last_name}`)}
+                                  className="btn btn-ghost btn-sm p-1"
+                                  title={t('students_list_button_delete_title')}
+                                >
+                                  <TrashIcon className="h-5 w-5 text-red-600 hover:text-red-800" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>

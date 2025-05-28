@@ -9,6 +9,7 @@ import {
     EyeIcon,
     ArrowPathIcon // Assuming this is for the refresh button, keep if used elsewhere
 } from '@heroicons/react/24/outline';
+import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid'; // <-- Import sorting icons
 
 function ClassesPage() {
     const { t } = useTranslation();
@@ -26,9 +27,25 @@ function ClassesPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedClassForView, setSelectedClassForView] = useState(null); 
 
+    // Sorting state
+    const [sortField, setSortField] = useState('class_name'); // Default sort field
+    const [sortOrder, setSortOrder] = useState('asc'); // Default sort order
+
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     const clearPageMessage = () => setTimeout(() => setPageMessage({ text: '', type: '' }), 5000);
+
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            // Default sort order for new field:
+            // 'asc' for text fields like class_name, academic_year
+            // Potentially 'desc' for date fields if any were added
+            setSortOrder('asc');
+        }
+    };
 
     const fetchClassGroups = useCallback(async () => {
         if (!isAuthenticated) {
@@ -79,6 +96,30 @@ function ClassesPage() {
     useEffect(() => {
         fetchClassGroups();
     }, [fetchClassGroups]);
+
+    // Sort classGroups before rendering
+    const sortedClassGroups = React.useMemo(() => {
+        if (!classGroups || classGroups.length === 0) return [];
+        return [...classGroups].sort((a, b) => {
+            const fieldA = a[sortField];
+            const fieldB = b[sortField];
+
+            // Handle null or undefined values, placing them at the end for asc, start for desc
+            if (fieldA == null && fieldB == null) return 0;
+            if (fieldA == null) return sortOrder === 'asc' ? 1 : -1;
+            if (fieldB == null) return sortOrder === 'asc' ? -1 : 1;
+
+            let comparison = 0;
+            if (typeof fieldA === 'string' && typeof fieldB === 'string') {
+                comparison = fieldA.localeCompare(fieldB);
+            } else {
+                // Basic comparison for numbers or other types
+                if (fieldA < fieldB) comparison = -1;
+                if (fieldA > fieldB) comparison = 1;
+            }
+            return sortOrder === 'asc' ? comparison : comparison * -1;
+        });
+    }, [classGroups, sortField, sortOrder]);
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -268,45 +309,58 @@ function ClassesPage() {
                     {!isLoading && !error && classGroups.length > 0 && (
                         <div className="overflow-x-auto">
                             <table className="table w-full">
-                                <thead className="bg-base-200">
+                                <thead>
                                     <tr>
-                                        <th>{t('common_label_className')}</th>
-                                        <th>{t('common_label_academicYear')}</th>
-                                        <th>{t('common_label_studentsCount')}</th>
+                                        <th>#</th>
+                                        <th className="cursor-pointer" onClick={() => handleSort('class_name')}>
+                                            {t('classes_form_label_className')}
+                                            {sortField === 'class_name' ? (
+                                                sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
+                                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                                        </th>
+                                        <th className="cursor-pointer" onClick={() => handleSort('academic_year')}>
+                                            {t('classes_form_label_academicYear')}
+                                            {sortField === 'academic_year' ? (
+                                                sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
+                                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                                        </th>
+                                        <th>{t('classes_column_studentCount')}</th>
                                         <th>{t('common_label_actions')}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {classGroups.map(cg => {
-                                        console.log(`Rendering row for class: ${cg.class_name}, ID: ${cg._id}, Type: ${typeof cg._id}`); 
-                                        return (
-                                            <tr key={cg._id} className="hover">
+                                    {isLoading ? (
+                                        <tr><td colSpan="5" className="text-center"><span className="loading loading-dots loading-md"></span></td></tr>
+                                    ) : !sortedClassGroups || sortedClassGroups.length === 0 ? (
+                                        <tr><td colSpan="5" className="text-center py-4">{error ? error : t('messages_classes_noClasses')}</td></tr>
+                                    ) : (
+                                        sortedClassGroups.map((cg, index) => (
+                                            <tr key={cg.id || index} className="hover">
+                                                <td>{index + 1}</td>
                                                 <td>{cg.class_name}</td>
-                                                <td>{cg.academic_year || t('common_text_notApplicable')}</td>
-                                                <td>{cg.student_ids ? cg.student_ids.length : (cg.student_count !== undefined ? cg.student_count : t('common_text_notApplicable' ))}</td>
-                                                <td className="text-right">
-                                                    <div className="flex justify-end space-x-1">
-                                                        <button 
-                                                            onClick={() => handleShowEditForm(cg)}
-                                                            title={t('classes_list_button_edit_title')}
-                                                            disabled={isSubmitting}
-                                                            className="btn btn-ghost btn-xs p-1"
-                                                        >
-                                                            <PencilSquareIcon className="w-5 h-5" />
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => handleDelete(cg._id, cg.class_name)}
-                                                            title={t('classes_list_button_delete_title')}
-                                                            disabled={isSubmitting}
-                                                            className="btn btn-ghost btn-xs p-1"
-                                                        >
-                                                            <TrashIcon className="w-5 h-5 text-red-500 hover:text-red-700" />
-                                                        </button>
-                                                    </div>
+                                                <td>{cg.academic_year || 'N/A'}</td>
+                                                <td>{cg.student_ids ? cg.student_ids.length : 0}</td>
+                                                <td className="space-x-2 whitespace-nowrap">
+                                                    <button 
+                                                        onClick={() => handleShowEditForm(cg)}
+                                                        title={t('classes_list_button_edit_title')}
+                                                        disabled={isSubmitting}
+                                                        className="btn btn-ghost btn-xs p-1"
+                                                    >
+                                                        <PencilSquareIcon className="w-5 h-5" />
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleDelete(cg._id, cg.class_name)}
+                                                        title={t('classes_list_button_delete_title')}
+                                                        disabled={isSubmitting}
+                                                        className="btn btn-ghost btn-xs p-1"
+                                                    >
+                                                        <TrashIcon className="w-5 h-5 text-red-500 hover:text-red-700" />
+                                                    </button>
                                                 </td>
                                             </tr>
-                                        );
-                                    })}
+                                        ))
+                                    )}
                                 </tbody>
                             </table>
                         </div>
