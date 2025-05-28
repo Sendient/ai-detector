@@ -46,6 +46,11 @@ function StudentsPage() {
   const [createClassError, setCreateClassError] = useState(null);
   const [tempPreviousClassToAddId, setTempPreviousClassToAddId] = useState('');
 
+  // New state for student documents
+  const [studentDocuments, setStudentDocuments] = useState([]);
+  const [isLoadingStudentDocuments, setIsLoadingStudentDocuments] = useState(false);
+  const [studentDocumentsError, setStudentDocumentsError] = useState(null);
+
   const initialStudentData = {
     first_name: '',
     last_name: '',
@@ -115,7 +120,7 @@ function StudentsPage() {
     try {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!response.ok) {
@@ -140,6 +145,43 @@ function StudentsPage() {
     }
     return fetchedClasses;
   }, [isAuthenticated, getToken, t]);
+
+  const fetchStudentDocuments = useCallback(async (currentStudentId) => {
+    if (!isAuthenticated || !currentStudentId) {
+        setStudentDocuments([]);
+        setStudentDocumentsError(null); // Clear previous errors
+        setIsLoadingStudentDocuments(false); // Ensure loading is stopped
+        return;
+    }
+    setIsLoadingStudentDocuments(true);
+    setStudentDocumentsError(null);
+    try {
+        const token = await getToken();
+        if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+        // Ensure API_BASE_URL is defined, fallback if necessary.
+        const baseUrl = API_BASE_URL || 'http://localhost:8000';
+        const response = await fetch(`${baseUrl}/api/v1/documents/?student_id=${currentStudentId}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+            // Use a more generic error message if detail is not specific
+            const detail = (typeof errorData.detail === 'string' && errorData.detail) ? errorData.detail : response.statusText;
+            throw new Error(t('messages_students_documents_fetchError', { studentName: editingStudent?.first_name || 'student', detail }));
+        }
+        const data = await response.json();
+        // console.log('Student Documents API Response:', data); // Removed console.log
+        setStudentDocuments(data || []);
+    } catch (err) {
+        console.error("Error fetching student documents:", err);
+        setStudentDocumentsError(err.message || t('messages_error_unexpected'));
+        setStudentDocuments([]);
+    } finally {
+        setIsLoadingStudentDocuments(false);
+    }
+  }, [isAuthenticated, getToken, t, API_BASE_URL, editingStudent]); // Added editingStudent to deps for the error message
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -182,6 +224,10 @@ function StudentsPage() {
     setIsCreatingClass(false);
     setCreateClassError(null);
     setTempPreviousClassToAddId('');
+    // Reset student documents state
+    setStudentDocuments([]);
+    setIsLoadingStudentDocuments(false);
+    setStudentDocumentsError(null);
   };
 
   const handleInputChange = (event) => {
@@ -390,6 +436,14 @@ function StudentsPage() {
     setAvailableClassesForAdding(available);
     setClassToAddId('');
 
+    // Fetch documents for this student
+    if (studentToEdit && studentToEdit.id) {
+      fetchStudentDocuments(studentToEdit.id);
+    } else {
+      setStudentDocuments([]); // Clear if no valid student
+      setStudentDocumentsError(null);
+    }
+
     setShowEditForm(true);
     setShowCreateForm(false);
   };
@@ -453,13 +507,12 @@ function StudentsPage() {
 
   const handleAddStudentToSelectedClass = async () => {
     if (!editingStudent || !editingStudent.id || !classToAddId) {
-      setFormError(t('messages_error_unexpected', { detail: 'Student or class not selected for addition.'}));
+      setFormError(t('messages_students_form_error_selectClassAndStudent'));
+      setTimeout(() => setFormError(null), 3000);
       return;
     }
-    if (!isAuthenticated) {
-      setFormError(t('messages_error_loginRequired_form'));
-      return;
-    }
+
+    console.log('handleAddStudentToSelectedClass - Student ID:', editingStudent?.id, 'Class ID:', classToAddId);
 
     setIsClassMembershipProcessing(true);
     setFormError(null);
@@ -468,7 +521,7 @@ function StudentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/${classToAddId}/students/${editingStudent.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups/${classToAddId}/students/${editingStudent.id}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -841,43 +894,41 @@ function StudentsPage() {
                   <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_classes_heading', 'Class Assignments')}</h4>
                   
                   {/* "Add to Another Class" section */}
-                  {availableClassesForAdding.length > 0 && (
-                    <div className="mt-0 pt-0">
-                      <label htmlFor="addClassDropdown" className="label-text text-sm font-medium">
-                        {t('students_form_label_addToAnotherClass', 'Assign to Additional Class:')}
-                      </label>
-                      <div className="flex items-center gap-2 mt-1 mb-4 pb-3 border-b border-base-300">
-                        <select 
-                          id="addClassDropdown"
-                          value={classToAddId}
-                          onChange={handleClassToAddChange}
-                          className="select select-bordered select-sm w-full max-w-xs"
-                          disabled={isClassMembershipProcessing}
-                        >
-                          <option value="">{t('students_form_select_aClass', '-- Select a class --')}</option>
-                          {availableClassesForAdding.map(cg => (
-                            <option key={cg.id} value={cg.id}>
-                              {cg.class_name}{cg.academic_year ? ` (${cg.academic_year})` : ''}
-                            </option>
-                          ))}
-                          <option value="CREATE_NEW_CLASS" className="font-semibold text-secondary">
-                            {t('students_form_select_createNewClassAndAssign', 'Create New Class & Assign...')}
+                  <div className="mt-0 pt-0">
+                    <label htmlFor="addClassDropdown" className="label-text text-sm font-medium">
+                      {t('students_form_label_assignToClass', 'Assign to Class:')}
+                    </label>
+                    <div className="flex items-center gap-2 mt-1 mb-4 pb-3 border-b border-base-300">
+                      <select 
+                        id="addClassDropdown"
+                        value={classToAddId}
+                        onChange={handleClassToAddChange}
+                        className="select select-bordered select-sm w-full max-w-xs"
+                        disabled={isClassMembershipProcessing}
+                      >
+                        <option value="">{t('students_form_select_aClass', '-- Select a class --')}</option>
+                        {availableClassesForAdding.map(cg => (
+                          <option key={cg.id} value={cg.id}>
+                            {cg.class_name}{cg.academic_year ? ` (${cg.academic_year})` : ''}
                           </option>
-                        </select>
-                        <button 
-                          type="button"
-                          onClick={handleAddStudentToSelectedClass}
-                          className="btn btn-sm btn-outline btn-primary"
-                          disabled={!classToAddId || isClassMembershipProcessing}
-                        >
-                          {isClassMembershipProcessing && classToAddId ? 
-                            <span className="loading loading-spinner loading-xs"></span> :
-                            t('students_form_button_addToClass', 'Assign to Selected Class')
-                          }
-                        </button>
-                      </div>
+                        ))}
+                        <option value="CREATE_NEW_CLASS" className="font-semibold text-secondary">
+                          {t('students_form_select_createNewClassAndAssign', 'Create New Class & Assign...')}
+                        </option>
+                      </select>
+                      <button 
+                        type="button"
+                        onClick={handleAddStudentToSelectedClass}
+                        className="btn btn-sm btn-outline btn-primary"
+                        disabled={!classToAddId || isClassMembershipProcessing}
+                      >
+                        {isClassMembershipProcessing && classToAddId ? 
+                          <span className="loading loading-spinner loading-xs"></span> :
+                          t('students_form_button_addToClass', 'Assign to Selected Class')
+                        }
+                      </button>
                     </div>
-                  )}
+                  </div>
 
                   {/* "Currently Assigned Classes" list */}
                   {assignedClassesForEdit.length > 0 ? (
@@ -917,8 +968,44 @@ function StudentsPage() {
               {showEditForm && editingStudent && (
                 <div className="card w-full bg-base-100 shadow-md p-4 mt-4">
                   <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_documents_heading', 'Student Documents')}</h4>
-                  {/* Document content will go here later */}
-                  <p className="text-sm text-base-content/70 italic">{t('students_form_documents_placeholder', 'Document management will be available here soon.')}</p>
+                  <div className="card bg-base-100 shadow-xl">
+                    <div className="card-body p-4">
+                      <h2 className="card-title text-lg">Student Documents</h2>
+                      {isLoadingStudentDocuments && <p className="text-sm text-gray-500">{t('messages_loading_studentDocuments')}</p>}
+                      {studentDocumentsError && <p className="text-sm text-error">{studentDocumentsError}</p>}
+                      {!isLoadingStudentDocuments && !studentDocumentsError && studentDocuments.length === 0 && (
+                        <p className="text-sm text-gray-500">{t('messages_info_noDocumentsFound')}</p>
+                      )}
+                      {!isLoadingStudentDocuments && !studentDocumentsError && studentDocuments.length > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="table table-sm w-full">
+                            <thead>
+                              <tr>
+                                <th>{t('documents_table_header_filename', 'Filename')}</th>
+                                <th>{t('documents_table_header_uploadedDate', 'Uploaded Date')}</th>
+                                <th>{t('documents_table_header_status', 'Status')}</th>
+                                <th>{t('documents_table_header_aiScore', 'AI Score')}</th>
+                                <th>{t('documents_table_header_wordCount', 'Word Count')}</th>
+                                <th>{t('documents_table_header_charCount', 'Char Count')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {studentDocuments.map(doc => (
+                                <tr key={doc.id || doc._id}>
+                                  <td>{doc.original_filename || 'N/A'}</td>
+                                  <td>{doc.upload_timestamp ? new Date(doc.upload_timestamp).toLocaleDateString() : 'N/A'}</td>
+                                  <td>{doc.status || 'N/A'}</td>
+                                  <td>{doc.ai_score !== undefined && doc.ai_score !== null ? `${doc.ai_score}%` : 'N/A'}</td>
+                                  <td>{doc.word_count !== undefined ? doc.word_count : 'N/A'}</td>
+                                  <td>{doc.character_count !== undefined ? doc.character_count : 'N/A'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 

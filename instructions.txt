@@ -180,3 +180,114 @@ Database structure
 -students: Manages student profiles, linking them to their respective teachers.
 
 -users: Appears to be an unused or deprecated collection, as its corresponding model file (user.py) is entirely commented out. Teacher-related user management is handled by the teachers collection.
+
+# Document Status Process Flows (Frontend: DocumentsPage.jsx)
+
+This document outlines the various statuses a document can have within the application, how each status is triggered, and the typical process flow involved.
+
+## 1. `UPLOADED`
+
+*   **Description:** This is the initial status of a document immediately after a successful upload.
+*   **Triggered By:**
+    *   A user successfully uploads one or more files using the single or bulk upload feature.
+*   **Process Flow:**
+    1.  **User Action:** Selects a file (or multiple files) and clicks the "Upload" button.
+    2.  **Frontend (`performUpload`):** The selected file(s) are sent to the backend API endpoint (e.g., `/api/v1/documents/upload`).
+    3.  **Backend:** The backend receives the file, creates a new document record in the database, and assigns it an initial status (which is recognized as `UPLOADED` by the frontend).
+    4.  **Frontend (`fetchDocuments`):** After the upload attempt, the frontend refreshes its list of documents from the backend.
+    5.  **UI Display:** The newly uploaded document(s) appear in the table with the status "UPLOADED". At this stage, actions like "Assess" are typically available.
+
+## 2. `QUEUED`
+
+*   **Description:** The document has been submitted for assessment and is waiting in a queue to be processed by a backend worker.
+*   **Triggered By:**
+    *   User clicks "Assess" on a document with status `UPLOADED`.
+    *   User clicks "Retry" on a document with status `ERROR` or `LIMIT_EXCEEDED`.
+    *   User clicks "Reprocess" on a document (the frontend optimistically updates the UI to `QUEUED` in this specific scenario before backend confirmation).
+*   **Process Flow (e.g., via `handleAssess` or `handleReprocessDocument`):**
+    1.  **User Action:** Clicks the "Assess", "Retry", or "Reprocess" button for a document.
+    2.  **Frontend:**
+        *   An API request is sent to the appropriate backend endpoint (e.g., `/documents/{id}/assess` or `/documents/{id}/reprocess`).
+        *   The UI might show a temporary loading indicator on the action button.
+    3.  **Backend:**
+        *   The backend receives the request.
+        *   It places the document into a processing queue and updates the document's status to `QUEUED` in the database.
+    4.  **Frontend (`fetchDocuments`):** The frontend, either through a direct call after the action or via its polling mechanism, retrieves the updated list of documents.
+    5.  **UI Display:** The document's status in the table changes to "QUEUED".
+
+## 3. `PROCESSING`
+
+*   **Description:** A backend worker has picked up the document from the queue and is actively analyzing it.
+*   **Triggered By:**
+    *   A backend assessment worker takes a document with the `QUEUED` status from the processing queue.
+*   **Process Flow:**
+    1.  **Backend:** An assessment worker dequeues a document.
+    2.  **Backend:** The worker updates the document's status in the database to `PROCESSING`.
+    3.  **Frontend (Polling):** The `useEffect` hook in `DocumentsPage.jsx` periodically calls `fetchDocuments(true)`, which fetches the latest document statuses.
+    4.  **UI Display:** If the document's status has changed from `QUEUED` to `PROCESSING`, the UI updates to show "PROCESSING". A spinner icon is typically displayed, and a "Cancel" button becomes available.
+
+## 4. `COMPLETED`
+
+*   **Description:** The backend assessment worker has successfully finished processing and analyzing the document.
+*   **Triggered By:**
+    *   The backend worker successfully completes all analysis tasks for the document.
+*   **Process Flow:**
+    1.  **Backend:** The assessment worker finishes its tasks (e.g., calculates AI score, word count, character count).
+    2.  **Backend:** The worker updates the document's status to `COMPLETED` in the database and saves the assessment results.
+    3.  **Frontend (Polling & Results Fetch):**
+        *   The polling mechanism (`fetchDocuments(true)`) retrieves the new `COMPLETED` status.
+        *   The `fetchResultsForDocuments` function is then typically called to get the detailed assessment results (like the AI score) for this document if they aren't already present in the frontend's state.
+    4.  **UI Display:** The document's status changes to "COMPLETED". The AI score is displayed, and the "View Report" action becomes the primary interaction.
+
+## 5. `ERROR`
+
+*   **Description:** An error occurred during the document's processing, or an ongoing assessment was successfully cancelled by the user.
+*   **Triggered By:**
+    *   **Backend Processing Failure:** The assessment worker encounters an unrecoverable issue while analyzing the document.
+    *   **Successful User-Initiated Cancellation:** A user clicks "Cancel" for a `PROCESSING` document, and the backend confirms the cancellation was successful. The frontend then updates the status locally.
+*   **Process Flow (Backend Processing Failure):**
+    1.  **Backend:** The assessment worker fails during processing.
+    2.  **Backend:** The worker updates the document's status in the database to `ERROR` and may log specific error details.
+    3.  **Frontend (Polling):** `fetchDocuments(true)` retrieves the `ERROR` status. Specific error messages, if provided by the API, might be stored in `assessmentErrors` and displayed.
+    4.  **UI Display:** The status shows "ERROR". A "Retry" action usually becomes available.
+*   **Process Flow (Successful User-Initiated Cancellation via `handleCancelAssessment`):**
+    1.  **User Action:** Clicks the "Cancel" button for a `PROCESSING` document.
+    2.  **Frontend:** The `handleCancelAssessment` function sends a cancellation request to the backend.
+    3.  **Backend:** Successfully processes the cancellation request and responds affirmatively.
+    4.  **Frontend (Local Update):** Upon receiving a successful cancellation response, the frontend *itself* updates the document's status to `ERROR_STATUS` within its local `documents` state. This is an optimistic update to reflect that the task is no longer active and is considered an error/aborted state from the user's perspective of a completed assessment.
+    5.  **UI Display:** The status changes to "ERROR".
+
+## 6. `LIMIT_EXCEEDED`
+
+*   **Description:** The document exceeded a predefined processing limit (e.g., word count, file size) and could not be fully processed.
+*   **Triggered By:**
+    *   The backend assessment worker determines during analysis that the document breaches a configured processing limit.
+*   **Process Flow:**
+    1.  **Backend:** The assessment worker detects the limit breach.
+    2.  **Backend:** The worker updates the document's status in the database to `LIMIT_EXCEEDED`.
+    3.  **Frontend (Polling):** `fetchDocuments(true)` retrieves this new status.
+    4.  **UI Display:** The status shows "LIMIT_EXCEEDED". A "Retry" action is typically available, though it might encounter the same limit if the document hasn't changed.
+
+---
+
+## Transient UI States (Not persistent backend statuses, but UI representations)
+
+These are states shown temporarily in the UI based on ongoing actions or frontend-detected issues during an action.
+
+### "Cancelling..." (UI Badge)
+
+*   **Description:** Displayed in the status column while the frontend is waiting for a response from the backend after a user initiates an assessment cancellation.
+*   **Triggered By:** User clicks the "Cancel" button on a document with the `PROCESSING` status.
+*   **Process Flow:**
+    1.  **Frontend (`handleCancelAssessment`):** This function is called.
+    2.  **Frontend State:** It sets a loading state for cancellation for that specific document (e.g., `cancellingStatus[doc.id] = 'loading'`).
+    3.  **UI Display:** The `statusBadge` logic detects this loading state and displays "Cancelling..." along with a spinner icon. This persists until the API call to the backend returns.
+
+### "Cancel Failed" (UI Badge)
+
+*   **Description:** Displayed in the status column if the frontend's API call to cancel an assessment fails.
+*   **Triggered By:** The API request made by `handleCancelAssessment` (e.g., to `/documents/{id}/cancel-assessment`) fails due to a network issue or an error response from the backend.
+*   **Process Flow:**
+    1.  **Frontend (`handleCancelAssessment`):** The API call to the backend fails.
+    2.  **Frontend Error Handling:** The `catch` block or error handling logic within `handleCancelAssessment` is executed. An error message is typically stored in the component's state (e.g., `assessmentErrors[doc.id]`).
+    3.  **UI Display:** The `statusBadge` logic checks for this error state and, if present after a cancellation attempt, displays "Cancel Failed". The document's actual status in the backend (likely still `PROCESSING` if the cancellation command itself failed) might remain unchanged.

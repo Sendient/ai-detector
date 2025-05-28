@@ -13,6 +13,9 @@ import {
   XCircleIcon,
   StopCircleIcon,
   UserPlusIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+  ArrowsUpDownIcon
 } from '@heroicons/react/24/outline';
 
 function DocumentsPage() {
@@ -54,6 +57,8 @@ function DocumentsPage() {
   const [assignStudentModalError, setAssignStudentModalError] = useState(null);
   const [assignStudentModalSuccess, setAssignStudentModalSuccess] = useState(null);
   const [isAssigningStudent, setIsAssigningStudent] = useState(false);
+  const [sortField, setSortField] = useState('upload_timestamp');
+  const [sortOrder, setSortOrder] = useState('desc');
 
   const bulkFileInputRef = useRef(null);
 
@@ -789,6 +794,13 @@ function DocumentsPage() {
     };
   }, [documents, isAuthenticated, fetchDocuments]);
 
+  // --- Sorting Logic ---
+  const handleSort = (field) => {
+    const newSortOrder = sortField === field && sortOrder === 'asc' ? 'desc' : 'asc';
+    setSortField(field);
+    setSortOrder(newSortOrder);
+  };
+
   return (
     <div>
       <h1 className="text-3xl font-semibold text-base-content mb-4">{t('documents_heading')}</h1>
@@ -854,8 +866,26 @@ function DocumentsPage() {
               <table className="table w-full">
                 <thead>
                   <tr>
-                    <th className="text-sm font-semibold">{t('documents_list_header_filename')}</th>
-                    <th className="text-sm font-semibold">{t('common_label_uploaded')}</th>
+                    <th className="text-sm font-semibold">
+                      <button onClick={() => handleSort('original_filename')} className="btn btn-ghost btn-xs p-0 hover:bg-transparent normal-case font-semibold flex items-center">
+                        {t('documents_list_header_filename')}
+                        <span className="ml-2">
+                          {sortField === 'original_filename' ? 
+                            (sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />) : 
+                            <ArrowsUpDownIcon className="h-4 w-4 text-gray-400" />}
+                        </span>
+                      </button>
+                    </th>
+                    <th className="text-sm font-semibold">
+                      <button onClick={() => handleSort('upload_timestamp')} className="btn btn-ghost btn-xs p-0 hover:bg-transparent normal-case font-semibold flex items-center">
+                        {t('common_label_uploaded')}
+                        <span className="ml-2">
+                          {sortField === 'upload_timestamp' ? 
+                            (sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />) : 
+                            <ArrowsUpDownIcon className="h-4 w-4 text-gray-400" />}
+                        </span>
+                      </button>
+                    </th>
                     <th className="text-sm font-semibold">{t('documents_list_header_status')}</th>
                     <th className="text-sm font-semibold">{t('common_label_actions')}</th>
                     <th className="text-sm font-semibold">{t('documents_list_header_assignedStudent')}</th>
@@ -866,7 +896,18 @@ function DocumentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {documents.map((doc) => {
+                  {documents.sort((a, b) => {
+                    if (!sortField) return 0;
+                    let valA = a[sortField];
+                    let valB = b[sortField];
+                    if (sortField === 'upload_timestamp') {
+                      valA = new Date(a.upload_timestamp || a.created_at);
+                      valB = new Date(b.upload_timestamp || b.created_at);
+                    }
+                    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+                    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+                    return 0;
+                  }).map((doc) => {
                     const currentAssessmentStatus = assessmentStatus[doc.id];
                     const currentResultScore = assessmentResults[doc.id];
                     const currentAssessmentError = assessmentErrors[doc.id];

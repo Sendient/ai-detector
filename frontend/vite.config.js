@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from 'tailwindcss'
 import autoprefixer from 'autoprefixer'
 import tailwindConfig from './tailwind.config.js' // Import the config object
+import path from 'path' // Import the 'path' module
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -13,6 +14,11 @@ export default defineConfig({
         tailwindcss(tailwindConfig), // Pass the imported config object
         autoprefixer,
       ],
+    },
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
     },
   },
   server: {

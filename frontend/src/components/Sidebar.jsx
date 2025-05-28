@@ -17,7 +17,7 @@ import {
     UserPlus,
     LogOut
 } from 'lucide-react';
-import AppLogoDark from './Ai_DETECTOR_STRAPLINE_DARK.png'; // Import the logo
+import AppLogoDark from '../img/SMARTDETECTOR_STRAPLINE_DARK.png'; // Import the new logo
 import UpgradeSideImage from '../img/Upgrade-side-image.png'; // Import the new upgrade image
 
 // -> Remove the old PlaceholderIcon, LoginIcon, etc. component definitions
@@ -53,7 +53,7 @@ function Sidebar() {
             {/* -> Updated logo area classes: text, border */}
             <div className="p-4 py-5 border-b border-base-300 flex justify-center items-center"> {/* Added flex for centering */}
                 {/* Replace text with image */}
-                <img src={AppLogoDark} alt="AI Detector Logo" className="h-20" /> {/* Adjust height as needed */}
+                <img src={AppLogoDark} alt="Smart Detector Logo" /> {/* Removed className="h-20" */}
                 {/* <h1 className="text-xl font-bold text-primary tracking-tight">{t('sidebar_app_title')}</h1>
                 <p className="text-xs text-neutral mt-1">{t('sidebar_app_tagline')}</p> */}
             </div>

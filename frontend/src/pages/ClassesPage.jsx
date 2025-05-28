@@ -53,7 +53,7 @@ function ClassesPage() {
                 setIsLoadingInitial(false);
                 return;
             }
-            const response = await fetch(`${API_URL}/api/v1/classgroups/`, {
+            const response = await fetch(`${API_URL}/api/v1/class-groups`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!response.ok) {
@@ -136,7 +136,7 @@ function ClassesPage() {
         const method = editingClassGroup ? 'PUT' : 'POST';
         const url = editingClassGroup
             ? `${API_URL}/api/v1/class-groups/${editingClassGroup.id}`
-            : `${API_URL}/api/v1/class-groups/`;
+            : `${API_URL}/api/v1/class-groups`;
 
         const payload = {
             class_name: formData.class_name,
@@ -301,14 +301,6 @@ function ClassesPage() {
                                                             className="btn btn-ghost btn-xs p-1"
                                                         >
                                                             <TrashIcon className="w-5 h-5 text-red-500 hover:text-red-700" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleShowView(cg)}
-                                                            title={t('classes_list_button_view_title')}
-                                                            disabled={isSubmitting}
-                                                            className="btn btn-ghost btn-xs p-1"
-                                                        >
-                                                            <EyeIcon className="w-5 h-5 text-blue-600 hover:text-blue-800" />
                                                         </button>
                                                     </div>
                                                 </td>

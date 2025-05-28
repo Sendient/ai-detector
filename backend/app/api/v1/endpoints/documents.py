@@ -78,6 +78,16 @@ async def upload_document(
     original_filename = file.filename or "unknown_file"
     logger.info(f"User {user_kinde_id} attempting to upload document '{original_filename}' for student {student_id}, assignment {assignment_id}")
 
+    # --- Validate Student Ownership ---
+    student = await crud.get_student_by_id(student_internal_id=student_id, teacher_id=user_kinde_id)
+    if not student:
+        logger.warning(f"User {user_kinde_id} attempting to upload document for non-existent or unauthorized student {student_id}.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student with ID {student_id} not found or not associated with your account."
+        )
+    # --- End Student Ownership Validation ---
+
     # --- Authorization Check ---
     # TODO: Implement proper authorization. Can this user upload a document for this student/assignment?
     logger.warning(f"Authorization check needed for user {user_kinde_id} uploading for student {student_id} / assignment {assignment_id}")

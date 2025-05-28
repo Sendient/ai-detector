@@ -18,7 +18,10 @@ import {
   EyeIcon,
   XCircleIcon,
   InformationCircleIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+  ArrowsUpDownIcon
 } from '@heroicons/react/24/outline';
 
 // Define the default ranges outside components
@@ -126,6 +129,8 @@ function DashboardPage() {
   const [recentAssessments, setRecentAssessments] = useState([]);
   const [debugInfo, setDebugInfo] = useState({});
   const [userName, setUserName] = useState('');
+  const [sortField, setSortField] = useState('upload_timestamp');
+  const [sortOrder, setSortOrder] = useState('desc');
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -274,6 +279,13 @@ function DashboardPage() {
     }
   }, [isAuthenticated, isAuthLoading, fetchDashboardData, navigate]);
 
+  // --- Sorting Logic ---
+  const handleSort = (field) => {
+    const newSortOrder = sortField === field && sortOrder === 'asc' ? 'desc' : 'asc';
+    setSortField(field);
+    setSortOrder(newSortOrder);
+  };
+
   // Quick Start Button Handler
   const handleQuickStart = () => {
     navigate('/quickstart');
@@ -333,6 +345,27 @@ function DashboardPage() {
 
   // --- Render Dashboard Grid ---
   console.log('[DashboardPage] Rendering. Current keyStats:', keyStats);
+
+  const sortedAssessments = [...recentAssessments].sort((a, b) => {
+    if (!sortField) return 0;
+
+    let valA = a[sortField];
+    let valB = b[sortField];
+
+    // Handle date sorting for upload_timestamp
+    if (sortField === 'upload_timestamp') {
+      valA = new Date(a.upload_timestamp || a.created_at);
+      valB = new Date(b.upload_timestamp || b.created_at);
+    }
+
+    if (valA < valB) {
+      return sortOrder === 'asc' ? -1 : 1;
+    }
+    if (valA > valB) {
+      return sortOrder === 'asc' ? 1 : -1;
+    }
+    return 0;
+  });
 
   return (
     <div className="space-y-6">
@@ -410,12 +443,30 @@ function DashboardPage() {
             <button className="btn btn-sm btn-ghost" onClick={() => navigate('/documents')}>View All</button>
           </div>
           <div className="overflow-x-auto">
-            {recentAssessments && recentAssessments.length > 0 ? (
+            {sortedAssessments.length > 0 ? (
               <table className="min-w-full divide-y divide-base-300">
                 <thead className="bg-base-200">
                   <tr>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_filename')}</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_date')}</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">
+                      <button onClick={() => handleSort('original_filename')} className="btn btn-ghost btn-xs p-0 hover:bg-transparent normal-case font-medium flex items-center">
+                        {t('dashboard_table_filename')}
+                        <span className="ml-2">
+                          {sortField === 'original_filename' ? 
+                            (sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />) : 
+                            <ArrowsUpDownIcon className="h-4 w-4 text-gray-400" />}
+                        </span>
+                      </button>
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">
+                       <button onClick={() => handleSort('upload_timestamp')} className="btn btn-ghost btn-xs p-0 hover:bg-transparent normal-case font-medium flex items-center">
+                        {t('dashboard_table_date')}
+                        <span className="ml-2">
+                          {sortField === 'upload_timestamp' ? 
+                            (sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />) : 
+                            <ArrowsUpDownIcon className="h-4 w-4 text-gray-400" />}
+                        </span>
+                      </button>
+                    </th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_status')}</th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-base-content uppercase tracking-wider">{t('dashboard_table_ai_score')}</th>
                     <th scope="col" className="relative px-4 py-3">
@@ -424,7 +475,7 @@ function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-base-100 divide-y divide-base-300">
-                  {recentAssessments.map((doc) => (
+                  {sortedAssessments.map((doc) => (
                     <tr key={doc.id || doc._id} className="hover:bg-base-200 transition-colors duration-150">
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-base-content truncate max-w-xs" title={doc.original_filename}>
                         {doc.original_filename}

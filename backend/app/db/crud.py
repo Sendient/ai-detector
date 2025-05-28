@@ -804,8 +804,14 @@ async def get_student_by_id(
     logger.info(f"Getting student: {student_internal_id} for teacher: {teacher_id}") # Update log
     query = {"_id": student_internal_id, "teacher_id": teacher_id}
     query.update(soft_delete_filter(include_deleted))
+    
+    logger.debug(f"[crud.get_student_by_id] Executing find_one with query: {query}") # DETAIL LOG 1
+
     try:
         student_doc = await collection.find_one(query, session=session)
+        
+        logger.debug(f"[crud.get_student_by_id] Raw student_doc from find_one: {student_doc}") # DETAIL LOG 2
+        
         if student_doc:
             mapped_data = {**student_doc}
             if "_id" in mapped_data: mapped_data["id"] = mapped_data.pop("_id")

@@ -1,3 +1,4 @@
+print(f"<<<<< LOADING CLASS_GROUPS.PY FROM: {__file__} >>>>>")
 # app/api/v1/endpoints/class_groups.py
 
 import uuid # Corrected Indentation
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Create the router instance
 router = APIRouter(
-    prefix="/classgroups",
+    prefix="/class-groups",
     tags=["Class Groups"]
 )
 
@@ -408,41 +409,59 @@ async def add_student_to_group(
 ):
     """Adds a student to a specific class group."""
     user_kinde_id_str = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id_str} attempting to add student {student_id} to class group {class_group_id}")
+    logger.info(f"[add_student_to_group] User {user_kinde_id_str} attempting to add student {student_id} to class group {class_group_id}")
 
-    # --- Authorization Check (Uses Restored Helper) ---
-    existing_class_group = await crud.get_class_group_by_id(class_group_id=class_group_id)
-    if existing_class_group is None:
+    # --- Get Class Group (Step 1: Fetch the class group) ---
+    class_group = await crud.get_class_group_by_id(
+        class_group_id=class_group_id
+        # REMOVED: teacher_kinde_id=user_kinde_id_str 
+    )
+    if not class_group:
+        logger.error(f"[add_student_to_group] CLASS GROUP NOT FOUND. User: {user_kinde_id_str}, Class Group ID: {class_group_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Class group with ID {class_group_id} not found."
+            detail="ADD_STUDENT_ERR:CG_NOT_FOUND" # Modified detail code
         )
-    # Use the restored async auth check
-    await _check_user_is_teacher_of_group(existing_class_group, current_user_payload, action="add student to")
+    
+    # --- Authorization Check (Step 2: Verify teacher owns the class group) ---
+    try:
+        await _check_user_is_teacher_of_group(class_group, current_user_payload, action="add student to")
+    except HTTPException as auth_exc:
+        logger.error(f"[add_student_to_group] AUTHORIZATION FAILED. User: {user_kinde_id_str} for Class Group ID: {class_group_id}. Detail: {auth_exc.detail}")
+        # Re-raise the auth exception (it already has status code and detail)
+        raise auth_exc 
+    
+    logger.info(f"[add_student_to_group] Class group {class_group.id} (name: {class_group.class_name}) confirmed and authorized for user {user_kinde_id_str}.")
     # --- End Authorization Check ---
 
     # --- Validate Student Exists (and belongs to the same teacher) ---
-    # Use the teacher_id from the class group, which we know matches the authenticated user
+    logger.info(f"[add_student_to_group] Attempting to get student. Student ID from URL: {student_id} (type: {type(student_id)}), Teacher Kinde ID from token: '{user_kinde_id_str}' (type: {type(user_kinde_id_str)})") # Keep this log
     student = await crud.get_student_by_id(
         student_internal_id=student_id,
-        teacher_id=user_kinde_id_str # <<< Use Kinde ID for student check
+        teacher_id=user_kinde_id_str # Use Kinde ID for student check
     )
     if student is None:
         # Student doesn't exist OR doesn't belong to this teacher
-        logger.warning(f"Attempt to add non-existent or unauthorized student {student_id} to class group {class_group_id} by user {user_kinde_id_str}")
+        logger.error(f"[add_student_to_group] STUDENT NOT FOUND or not authorized. User: {user_kinde_id_str}, Student ID: {student_id}. crud.get_student_by_id returned None.") # Error log
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with ID {student_id} not found or you do not have access."
+            detail="ADD_STUDENT_ERR:S_NOT_FOUND_OR_UNAUTHORIZED" # Unique detail 2
         )
+    logger.info(f"[add_student_to_group] Student {student.id} (name: {student.first_name} {student.last_name}) confirmed for user {user_kinde_id_str}.")
     # --- End Student Validation ---
 
     # Attempt to add the student ID to the class group's student_ids list
-    success = await crud.add_student_to_class_group(class_group_id=class_group_id, student_id=student_id)
+    success = await crud.add_student_to_class_group(
+        class_group_id=class_group_id,
+        student_id=student_id
+    )
 
     if not success:
+        # Log the failure at an error level
+        logger.error(f"[add_student_to_group] CRUD FAILED to add student {student_id} to class group {class_group_id} for user {user_kinde_id_str}.")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to add student {student_id} to class group {class_group_id}."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, # Potentially a 404 if student was already in group and not handled, or other specific error
+            detail="ADD_STUDENT_ERR:CRUD_FAILED" # Unique detail 3
         )
 
     return {"message": f"Student {student_id} added to class group {class_group_id}."}
