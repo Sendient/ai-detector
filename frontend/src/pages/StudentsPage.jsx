@@ -305,7 +305,7 @@ function StudentsPage() {
     try {
       token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

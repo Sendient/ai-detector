@@ -4,11 +4,23 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
-# Base model for ClassGroup attributes
+# Model for the request payload from the client (API input for POST)
+# This model does NOT include teacher_id, student_ids, is_deleted as these
+# will be derived/set by the backend or have defaults.
+class ClassGroupClientCreate(BaseModel): 
+    class_name: str = Field(..., min_length=1, max_length=200, description="Name of the class group")
+    academic_year: Optional[str] = Field(None, max_length=50, description="Academic year, e.g., '2024-2025'")
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()}
+    )
+
+# Base model for ClassGroup attributes - teacher_id is required here as it's fundamental to the object
 class ClassGroupBase(BaseModel):
     class_name: str = Field(..., min_length=1, max_length=200, description="Name of the class group")
     academic_year: Optional[str] = Field(None, max_length=50, description="Academic year, e.g., '2024-2025'")
-    teacher_id: Union[UUID, str] = Field(..., description="UUID or Kinde ID of the teacher associated with the class")
+    teacher_id: Union[UUID, str] = Field(..., description="UUID of the teacher associated with the class") # Keep as UUID for internal consistency
     student_ids: List[UUID] = Field(default_factory=list, description="List of student UUIDs in the class")
     is_deleted: bool = Field(default=False, description="Flag to mark class group as deleted")
 
@@ -19,8 +31,10 @@ class ClassGroupBase(BaseModel):
         arbitrary_types_allowed=True # Allow custom types like UUID
     )
 
-# Model for creating a new class group (API input)
+# Model for creating a new class group - This is what's used internally and passed to CRUD.
+# It includes all necessary fields for DB storage.
 class ClassGroupCreate(ClassGroupBase):
+    # Inherits all fields from ClassGroupBase including required teacher_id
     pass
 
 # Model for updating an existing class group (API input)
@@ -28,8 +42,12 @@ class ClassGroupCreate(ClassGroupBase):
 class ClassGroupUpdate(BaseModel):
     class_name: Optional[str] = Field(None, min_length=1, max_length=200)
     academic_year: Optional[str] = Field(None, max_length=50)
-    teacher_id: Optional[Union[UUID, str]] = None
-    student_ids: Optional[List[UUID]] = None
+    # teacher_id should generally not be updatable directly by client here,
+    # class ownership changes might be a separate, more controlled process.
+    # student_ids can be updated via dedicated add/remove student endpoints.
+    # is_deleted is handled by the DELETE endpoint.
+    # For now, keeping them as optional if direct update is intended.
+    student_ids: Optional[List[UUID]] = None 
     is_deleted: Optional[bool] = None
 
     model_config = ConfigDict(
@@ -47,10 +65,10 @@ class ClassGroupInDBBase(ClassGroupBase):
     updated_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of last update")
     
     model_config = ConfigDict(
-        populate_by_name=True, # Allows using field name or alias, e.g. 'id' for '_id'
-        from_attributes=True,  # Allows ORM mode (reading data from ORM objects)
+        populate_by_name=True, 
+        from_attributes=True,
         json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()},
-        arbitrary_types_allowed=True # Allow custom types like UUID
+        arbitrary_types_allowed=True
     )
 
 # Final model representing a ClassGroup read from DB (returned by API)

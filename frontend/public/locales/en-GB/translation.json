@@ -127,6 +127,7 @@
     "classes_modal_label_academicYear": "Academic Year",
     "classes_modal_placeholder_academicYear": "e.g., 2024-2025",
     "classes_modal_button_create": "Create Class",
+    "classes_column_studentCount": "Students",
   
     "students_heading": "Students",
     "students_list_heading": "Student List",
@@ -609,5 +610,13 @@
     "students_column_externalId": "External ID",
     "students_column_yearGroup": "Year Group",
     "students_column_classes": "Class(es)",
-    "messages_students_noStudents": "No students have been added yet. Click 'Add Student' or 'Bulk Upload Students' to get started."
+    "messages_students_noStudents": "No students have been added yet. Click 'Add Student' or 'Bulk Upload Students' to get started.",
+    "documentsPage_action_reprocess": "Reprocess",
+    "messages_students_form_success": "Student form submitted successfully.",
+    "students_form_label_assignToClass": "Assign to Class:",
+    "studentsPage.refreshingDocuments": "Refreshing documents...",
+    "studentsPage.loadingDocuments": "Loading documents...",
+    "studentsPage.refreshDocuments": "Refresh Documents",
+    "messages_info_noDocumentsFound": "No documents found.",
+    "messages_classes_modal_error_createFailed": "Failed to create class."
 }

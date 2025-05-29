@@ -10,6 +10,7 @@ from pydantic import ValidationError # Added ValidationError
 # Import Pydantic models for ClassGroup
 from ....models.class_group import (
     ClassGroup, 
+    ClassGroupClientCreate, # Added for client payload
     ClassGroupCreate, 
     ClassGroupUpdate,
 )
@@ -176,12 +177,12 @@ async def read_all_class_groups_admin(
     description="Creates a new class group record. Requires authentication. The teacher ID is taken from the authenticated user's internal ID."
 )
 async def create_new_class_group(
-    class_group_in: ClassGroupCreate,
+    class_group_payload: ClassGroupClientCreate, # Changed from ClassGroupCreate
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
     # current_teacher: models.Teacher = Depends(deps.get_current_active_teacher) # Example if you had such a dep
 ):
     """Creates a new class group, assigning the authenticated user as the teacher."""
-    logger.info(f"Attempting to create new class group. User payload: {current_user_payload.get('sub')}")
+    logger.info(f"Attempting to create new class group. User payload: {current_user_payload.get('sub')}, Client Data: {class_group_payload.model_dump()}")
 
     user_kinde_id_str = current_user_payload.get("sub")
     if not user_kinde_id_str:
@@ -207,16 +208,19 @@ async def create_new_class_group(
          )
 
     # Prepare the data for creating the class group, using the internal teacher_id
+    # Construct ClassGroupCreate from ClassGroupClientCreate and teacher_id
     class_group_to_create = ClassGroupCreate(
-        **class_group_in.model_dump(), 
+        class_name=class_group_payload.class_name,
+        academic_year=class_group_payload.academic_year,
         teacher_id=teacher_internal_id
+        # student_ids and is_deleted will take defaults from ClassGroupBase via ClassGroupCreate
     )
     
     # Check for existing class with same name, year, for this teacher
     existing_class = await crud.get_class_group_by_name_year_and_teacher(
         class_name=class_group_to_create.class_name,
         academic_year=class_group_to_create.academic_year,
-        teacher_id=teacher_internal_id
+        teacher_id=teacher_internal_id # Ensure this is the UUID
     )
     if existing_class:
         logger.warning(f"Class group '{class_group_to_create.class_name}' with year '{class_group_to_create.academic_year}' already exists for teacher ID {teacher_internal_id}")
