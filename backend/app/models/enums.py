@@ -71,6 +71,12 @@ class ResultStatus(str, Enum):
     DELETED = "DELETED"     # ADDED: For soft-deleted results
     # Add other statuses as needed, e.g., CANCELED if applicable to results
 
+class UserRoleEnum(str, Enum):
+    STUDENT = "student"
+    TEACHER = "teacher"
+    ADMIN = "Admin"
+    # Add other roles as necessary, e.g., SCHOOL_ADMIN, SYSTEM_ADMIN
+
 class BatchStatus(str, Enum):
     CREATED = "CREATED"               # Batch record created, files may not be uploaded yet
     UPLOADING = "UPLOADING"           # Files are being uploaded

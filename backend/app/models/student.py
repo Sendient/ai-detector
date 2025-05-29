@@ -58,8 +58,8 @@ class StudentInDBBase(StudentBase):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         # Inherit others by default, but can re-declare if needed
-        # populate_by_name=True,
-        # from_attributes=True,
+        populate_by_name=True,
+        from_attributes=True,
     )
 
 

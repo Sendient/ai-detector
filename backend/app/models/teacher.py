@@ -114,6 +114,7 @@ class TeacherUpdate(BaseModel):
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)
     school_name: Optional[str] = Field(None, min_length=1, max_length=200)
     role: Optional[TeacherRole] = None
+    is_administrator: Optional[bool] = None
     description: Optional[str] = Field(None)
     country: Optional[str] = Field(None)
     state_county: Optional[str] = Field(None)

@@ -11,9 +11,7 @@ from pydantic import ValidationError # Added ValidationError
 from ....models.class_group import (
     ClassGroup, 
     ClassGroupCreate, 
-    ClassGroupCreateRequest,
-    ClassGroupUpdate, 
-    ClassGroupWithStudents
+    ClassGroupUpdate,
 )
 # Import CRUD functions for ClassGroup
 from ....db import crud
@@ -121,7 +119,7 @@ async def _check_user_is_teacher_of_group( # Needs async to call crud.get_teache
     description="Creates a new class group record. Requires authentication. The teacher ID is taken from the authenticated user's internal ID."
 )
 async def create_new_class_group(
-    class_group_in: ClassGroupCreateRequest, # Changed to ClassGroupCreateRequest
+    class_group_in: ClassGroupCreate,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
     # current_teacher: models.Teacher = Depends(deps.get_current_active_teacher) # Example if you had such a dep
 ):

@@ -385,7 +385,7 @@ _original_fastapi_app.include_router(documents_router, prefix=settings.API_V1_PR
 _original_fastapi_app.include_router(results_router, prefix=settings.API_V1_PREFIX, tags=["Results"])
 _original_fastapi_app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX, tags=["Dashboard"])
 _original_fastapi_app.include_router(analytics_router, prefix=settings.API_V1_PREFIX, tags=["Analytics"])
-_original_fastapi_app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
+_original_fastapi_app.include_router(admin_router, prefix=settings.API_V1_PREFIX, tags=["Admin"])
 
 # --- NEW: Include Stripe Subscription and Webhook Routers ---
 _original_fastapi_app.include_router(

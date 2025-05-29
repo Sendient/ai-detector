@@ -16,7 +16,7 @@ from ....db import crud
 # Import the authentication dependency
 from ....core.security import get_current_user_payload
 from ....core.config import settings
-from ....models.enums import SubscriptionPlan
+from ....models.enums import SubscriptionPlan, UserRoleEnum
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -87,14 +87,13 @@ async def read_current_user_profile(
         logger.info(f"  - Kinde roles from token: {kinde_roles_from_token}")
 
         is_sendient_email = email_from_token.endswith("@sendient.ai")
-        # Robust check for 'Admin' role, case-insensitive, checking 'key' if roles are objects
+        # MODIFIED: Standardized admin role check
         has_kinde_admin_role = any(
-            (isinstance(role, str) and role.lower() == "admin") or
-            (isinstance(role, dict) and role.get("key", "").lower() == "admin")
+            isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value
             for role in kinde_roles_from_token
         )
         
-        logger.info(f"  - Has 'Admin' role in Kinde: {has_kinde_admin_role}")
+        logger.info(f"  - Has '{UserRoleEnum.ADMIN.value}' role in Kinde: {has_kinde_admin_role}")
         logger.info(f"  - Is Sendient email (@sendient.ai): {is_sendient_email}")
 
         authoritative_is_administrator = has_kinde_admin_role and is_sendient_email
@@ -199,8 +198,9 @@ async def update_or_create_current_user_profile(
     # --- BEGIN RBAC Sync Logic for PUT /me ---
     email_from_token = current_user_payload.get("email")
     kinde_roles = current_user_payload.get("roles", [])
-    has_admin_role_in_kinde = any(role.get('key') == 'Admin' for role in kinde_roles if isinstance(role, dict))
-    is_sendient_email = email_from_token and email_from_token.endswith('@sendient.ai')
+    # MODIFIED: Standardized admin role check
+    has_admin_role_in_kinde = any(role.get('key') == UserRoleEnum.ADMIN.value for role in kinde_roles if isinstance(role, dict))
+    is_sendient_email = email_from_token and email_from_token.lower().endswith('@sendient.ai') # Make email check case-insensitive here too for consistency
     
     # This is the authoritative is_administrator status based on Kinde role and email policy
     authoritative_is_administrator = has_admin_role_in_kinde and is_sendient_email

@@ -1,92 +1,67 @@
 # app/models/class_group.py
-from pydantic import BaseModel, Field, ConfigDict, model_validator
-from typing import Optional, List
-from datetime import datetime, timezone
-import uuid
+from typing import List, Optional, Union
+from uuid import UUID
+from datetime import datetime
+from pydantic import BaseModel, Field, ConfigDict
 
-# Core schema for class_name and academic_year with validation
-class ClassGroupCoreSchema(BaseModel):
-    class_name: Optional[str] = Field(None, description="Name of the class (e.g., 'Math 101', '9th Grade English'). Must be provided if academic_year is present and must be more than just the academic year.")
-    academic_year: Optional[str] = Field(None, description="Academic year (e.g., '2024-2025'). Can be omitted if class_name is also omitted.")
+# Base model for ClassGroup attributes
+class ClassGroupBase(BaseModel):
+    class_name: str = Field(..., min_length=1, max_length=200, description="Name of the class group")
+    academic_year: Optional[str] = Field(None, max_length=50, description="Academic year, e.g., '2024-2025'")
+    teacher_id: Union[UUID, str] = Field(..., description="UUID or Kinde ID of the teacher associated with the class")
+    student_ids: List[UUID] = Field(default_factory=list, description="List of student UUIDs in the class")
+    is_deleted: bool = Field(default=False, description="Flag to mark class group as deleted")
 
     model_config = ConfigDict(
-        from_attributes=True,
+        populate_by_name=True, # Allows using field name or alias
+        from_attributes=True,  # Allows ORM mode (reading data from ORM objects)
+        json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()},
+        arbitrary_types_allowed=True # Allow custom types like UUID
+    )
+
+# Model for creating a new class group (API input)
+class ClassGroupCreate(ClassGroupBase):
+    pass
+
+# Model for updating an existing class group (API input)
+# All fields are optional for partial updates
+class ClassGroupUpdate(BaseModel):
+    class_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    academic_year: Optional[str] = Field(None, max_length=50)
+    teacher_id: Optional[Union[UUID, str]] = None
+    student_ids: Optional[List[UUID]] = None
+    is_deleted: Optional[bool] = None
+
+    model_config = ConfigDict(
         populate_by_name=True,
+        from_attributes=True,
+        json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()},
+        arbitrary_types_allowed=True
     )
 
-    @model_validator(mode='before') # mode='before' applies to input data before model creation
-    @classmethod
-    def validate_class_name_and_academic_year(cls, values):
-        # Ensure values is a dict, which it should be in 'before' mode for model_dump or direct dict input
-        if not isinstance(values, dict):
-            # If it's already a model instance (e.g. during model_validate), access fields via getattr
-            # This case should ideally not be hit if used purely for input validation.
-            class_name = getattr(values, 'class_name', None)
-            academic_year = getattr(values, 'academic_year', None)
-        else:
-            class_name, academic_year = values.get('class_name'), values.get('academic_year')
-
-        if academic_year is not None:
-            if class_name is None:
-                raise ValueError('class_name is required if academic_year is provided.')
-            if not isinstance(class_name, str) or not class_name.strip(): # Ensure class_name is a non-empty string
-                 raise ValueError('class_name must be a non-empty string if academic_year is provided.')
-            if class_name.strip() == academic_year.strip():
-                raise ValueError('class_name cannot consist only of the academic_year.')
-        # Allow both to be None or class_name to be provided without academic_year
-        return values
-
-# Model for the request payload from the client (only core fields)
-class ClassGroupCreateRequest(ClassGroupCoreSchema):
-    pass
-
-# Model used internally for creating the DB record, includes teacher_id
-class ClassGroupCreate(ClassGroupCoreSchema):
-    teacher_id: uuid.UUID = Field(..., description="Internal Database ID of the Teacher who owns this class")
-    # student_ids are typically managed after the class is created, so not included here by default.
-    # school_id is not used.
-
-# Shared base properties including teacher_id, used by DB and response models
-class ClassGroupBase(ClassGroupCoreSchema):
-    teacher_id: uuid.UUID = Field(..., description="Internal Database ID of the Teacher who owns this class")
-    # No model_config here, will be inherited or overridden
-
-# Properties stored in DB
+# Model for representing a class group stored in the DB, inherits from Base
+# Includes fields that are auto-generated or managed by the DB
 class ClassGroupInDBBase(ClassGroupBase):
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, alias="_id", description="Unique identifier for the class group")
-    is_deleted: bool = Field(default=False, description="Flag for soft delete status")
-    student_ids: List[uuid.UUID] = Field(default_factory=list, description="List of student IDs enrolled in the class")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the class group was created")
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the class group was last updated")
-
+    id: UUID = Field(..., alias='_id', description="MongoDB document ID")
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of creation")
+    updated_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of last update")
+    
     model_config = ConfigDict(
-        populate_by_name=True, # Allows using alias _id for id
-        from_attributes=True,  # Allows ORM mode (though Beanie uses Pydantic models directly)
-        arbitrary_types_allowed=True # For uuid and datetime
+        populate_by_name=True, # Allows using field name or alias, e.g. 'id' for '_id'
+        from_attributes=True,  # Allows ORM mode (reading data from ORM objects)
+        json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()},
+        arbitrary_types_allowed=True # Allow custom types like UUID
     )
 
-# Final model representing a ClassGroup read from DB (for responses)
+# Final model representing a ClassGroup read from DB (returned by API)
 class ClassGroup(ClassGroupInDBBase):
-    # Inherits all fields. This is the primary model for API responses.
     pass
 
-# Model for updating an existing ClassGroup
-class ClassGroupUpdate(ClassGroupCoreSchema): # Inherits class_name and academic_year
-    # teacher_id should not be updatable directly via this model by a general update endpoint.
-    # student_ids are typically managed by dedicated endpoints.
-    # is_deleted is usually handled by a delete endpoint.
-    class_name: Optional[str] = None # Make fields optional for updates
-    academic_year: Optional[str] = None
+# Model for a list of ClassGroups (e.g., for /admin/classgroups GET endpoint)
+class ClassGroupList(BaseModel):
+    items: List[ClassGroup]
+    total: int
 
     model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        from_attributes=True # If updating from an ORM model instance
+        json_encoders={UUID: str, datetime: lambda dt: dt.isoformat()}
     )
-
-# Model for responses that include student details (if needed in future)
-class ClassGroupWithStudents(ClassGroup):
-    # This is a placeholder; actual student objects would be defined elsewhere
-    # and potentially fetched/resolved separately.
-    # For now, student_ids are in ClassGroupInDBBase.
-    # students: Optional[List[Any]] = Field(None, description="Full student objects, if populated")
-    pass

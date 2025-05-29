@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext'; // Assuming AuthContext provides user info
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheckIcon } from '@heroicons/react/24/outline';
 import { useTranslation } from 'react-i18next';
 // You might want to create a specific API service for admin actions
@@ -88,14 +88,9 @@ const AdminPage = () => {
                             <h2 className="card-title text-xl font-semibold">{t(card.titleKey, `Manage ${card.id.charAt(0).toUpperCase() + card.id.slice(1)}`)}</h2>
                             <p className="text-sm text-base-content/80">{t(card.descriptionKey, `Manage all ${card.id}.`)}</p>
                             <div className="card-actions justify-end mt-4">
-                                {/* Link to the specific admin section */}
-                                {/* For now, it's a button, can be a Link from react-router-dom later */}
-                                <button 
-                                    className="btn btn-primary btn-sm"
-                                    onClick={() => alert(`Navigate to ${card.linkTo}`)}
-                                >
+                                <Link to={card.linkTo} className="btn btn-primary btn-sm">
                                     {t('admin_card_button_go', 'Go to ' + card.id)}
-                                </button>
+                                </Link>
                             </div>
                         </div>
                     </div>

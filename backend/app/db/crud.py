@@ -988,6 +988,54 @@ async def get_all_students(
     
     return students_list
 
+async def get_all_students_admin(
+    skip: int = 0,
+    limit: int = 1000,  # Default to a higher limit for admin view
+    include_deleted: bool = False, # Allow viewing soft-deleted for admin
+    session=None
+) -> List[Student]:
+    """
+    Admin version to get all students, bypassing teacher_id ownership.
+    Allows higher limit and option to include deleted students.
+    """
+    collection = _get_collection(STUDENT_COLLECTION)
+    students_list: List[Student] = []
+    if collection is None:
+        logger.error("Student collection not found for admin.")
+        return students_list
+
+    query = soft_delete_filter(include_deleted)
+    # No teacher_id filter for admin
+
+    logger.info(f"Admin getting all students (deleted={include_deleted}) skip={skip} limit={limit}")
+    try:
+        cursor = collection.find(query, session=session).skip(skip).limit(limit) # REMOVED .sort("created_at", -1)
+        async for doc in cursor:
+            try:
+                # Manually map _id to id if necessary for Pydantic model
+                mapped_data = {**doc}
+                if "_id" in mapped_data and "id" not in mapped_data:
+                    mapped_data["id"] = mapped_data.pop("_id")
+                elif "_id" not in mapped_data and "id" in mapped_data: # if 'id' is UUID and '_id' is not there
+                    pass # id is already correctly populated
+                elif "_id" in mapped_data and "id" in mapped_data and mapped_data["id"] is None : # if id is None but _id exists
+                     mapped_data["id"] = mapped_data.pop("_id")
+                elif "_id" not in mapped_data and "id" not in mapped_data:
+                    logger.warning(f"Student doc missing both '_id' and 'id': {doc}")
+                    continue
+
+                students_list.append(Student(**mapped_data))
+            except ValidationError as validation_err:
+                logger.error(f"Pydantic validation failed for student doc (admin) {doc.get('id', doc.get('_id', 'UNKNOWN ID'))}: {validation_err}")
+            except Exception as e: # Catch other potential errors during processing
+                logger.error(f"Error processing student doc (admin) {doc.get('id', doc.get('_id', 'UNKNOWN ID'))}: {e}", exc_info=True)
+
+    except PyMongoError as e:
+        logger.error(f"MongoDB error getting all students for admin: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Unexpected error getting all students for admin: {e}", exc_info=True)
+    return students_list
+
 @with_transaction
 async def update_student(student_internal_id: uuid.UUID, teacher_id: str, student_in: StudentUpdate, session=None) -> Optional[Student]:
     collection = _get_collection(STUDENT_COLLECTION); now = datetime.now(timezone.utc)
@@ -1043,6 +1091,78 @@ async def delete_student(student_internal_id: uuid.UUID, teacher_id: str, hard_d
         return True
     else: 
         logger.warning(f"Student {student_internal_id} not found for teacher {teacher_id} or already deleted.")
+        return False
+
+@with_transaction
+async def delete_student_admin(student_id: uuid.UUID, hard_delete: bool = False, session=None) -> bool:
+    """
+    Admin version to delete a student by their internal ID.
+    Does not require teacher_id for authorization at CRUD level.
+    """
+    collection = _get_collection(STUDENT_COLLECTION)
+    if collection is None:
+        logger.error(f"Student collection not found for admin delete operation on student {student_id}.")
+        return False
+
+    logger.info(f"Admin {'Hard' if hard_delete else 'Soft'} deleting student {student_id}")
+    count = 0
+    query_base = {"_id": student_id} # Query by internal ID only
+
+    try:
+        if hard_delete:
+            # Check if any documents reference this student_id before hard delete
+            # Example: Check documents collection
+            # doc_collection = _get_collection(DOCUMENT_COLLECTION)
+            # if doc_collection:
+            #     docs_referencing_student = await doc_collection.count_documents({"student_id": student_id, "is_deleted": {"$ne": True}}, session=session)
+            #     if docs_referencing_student > 0:
+            #         logger.warning(f"Attempted to hard delete student {student_id} who is still referenced by {docs_referencing_student} document(s). Aborting hard delete.")
+            #         # Optionally, raise an HTTPException here or return a specific status
+            #         return False # Prevent hard delete if referenced
+
+            result = await collection.delete_one(query_base, session=session)
+            count = result.deleted_count
+        else: # Soft delete
+            now = datetime.now(timezone.utc)
+            # For soft delete, also ensure it's not already soft-deleted to get accurate modified_count
+            soft_delete_query = {**query_base, "is_deleted": {"$ne": True}}
+            update_payload = {"is_deleted": True, "updated_at": now}
+            
+            # Soft delete the student
+            result = await collection.update_one(
+                soft_delete_query,
+                {"$set": update_payload},
+                session=session
+            )
+            count = result.modified_count
+
+            # If soft delete was successful (student was found and modified),
+            # also disassociate student from class groups.
+            if count == 1:
+                cg_collection = _get_collection(CLASSGROUP_COLLECTION)
+                if cg_collection:
+                    # Pull the student_id from any class group's student_ids array
+                    # This operation doesn't strictly need to be part of the student's transaction
+                    # but can be if desired. For now, performing it after successful student soft delete.
+                    # No specific teacher_id is used here for class group update, as this is an admin action
+                    # affecting potentially multiple class groups across teachers.
+                    update_cg_result = await cg_collection.update_many(
+                        {"student_ids": student_id, "is_deleted": {"$ne": True}}, # Find class groups containing this student
+                        {"$pull": {"student_ids": student_id}, "$set": {"updated_at": now}},
+                        session=session # Use the same session if transactions are critical here
+                    )
+                    logger.info(f"Admin soft delete: Pulled student {student_id} from {update_cg_result.modified_count} class group(s).")
+
+    except Exception as e:
+        logger.error(f"Error during admin delete operation for student {student_id}: {e}", exc_info=True)
+        return False # Return False on any exception during the delete process
+
+    if count == 1:
+        logger.info(f"Admin successfully {'hard' if hard_delete else 'soft'} deleted student {student_id}")
+        return True
+    else:
+        # This could mean student not found, or for soft delete, already soft-deleted.
+        logger.warning(f"Admin delete operation for student {student_id}: Student not found or no change made (e.g., already deleted).")
         return False
 
 

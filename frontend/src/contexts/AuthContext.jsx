@@ -28,7 +28,9 @@ export const AuthProvider = ({ children }) => {
                     let profileData;
                     try {
                         profileData = await apiService.get('/api/v1/teachers/me');
-                        console.log("AuthProvider: Initial /teachers/me GET successful:", profileData);
+                        // console.log("AuthProvider: Initial /teachers/me GET successful:", profileData);
+                        console.log("AuthProvider: Initial /teachers/me GET successful. Full Profile Data:", JSON.parse(JSON.stringify(profileData)));
+                        console.log("AuthProvider: profileData.is_administrator directly after fetch:", profileData?.is_administrator);
                     } catch (initialError) {
                         if (initialError.response && initialError.response.status === 404) {
                             console.warn("AuthProvider: Initial /teachers/me call failed with 404. Attempting to create/update profile via PUT, then retrying GET.");
@@ -168,7 +170,9 @@ export const AuthProvider = ({ children }) => {
 
     // This effect logs when currentUser changes, for debugging
     useEffect(() => {
-        console.log("AuthProvider: currentUser state updated:", currentUser);
+        // console.log("AuthProvider: currentUser state updated:", currentUser);
+        console.log("AuthProvider: currentUser state updated. Full currentUser:", JSON.parse(JSON.stringify(currentUser)));
+        console.log("AuthProvider: currentUser.is_administrator from state:", currentUser?.is_administrator);
         window.currentUserForDebug = currentUser; // Temporarily expose for debugging
     }, [currentUser]);
     
