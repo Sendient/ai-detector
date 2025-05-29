@@ -3,7 +3,7 @@ import logging
 import psutil # For system metrics in health check
 import time   # For uptime calculation
 import sys    # For sys.stdout in logging configuration
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone # For uptime calculation
@@ -30,6 +30,7 @@ from .api.v1.endpoints.documents import router as documents_router
 from .api.v1.endpoints.results import router as results_router
 from .api.v1.endpoints.dashboard import router as dashboard_router
 from .api.v1.endpoints.analytics import router as analytics_router
+from .api.v1.endpoints.admin import router as admin_router
 # --- NEW: Import Stripe subscription and webhook routers ---
 from .api.v1.endpoints.subscriptions import router as subscriptions_router
 from .api.v1.webhooks.stripe import router as stripe_webhook_router
@@ -104,6 +105,22 @@ _original_fastapi_app.state.assessment_worker_instance = None
 _original_fastapi_app.state.assessment_worker_task = None
 _original_fastapi_app.state.batch_processor_instance = None
 _original_fastapi_app.state.batch_processor_task = None
+
+# +++ TEMPORARY DEBUG ROUTE +++
+# @_original_fastapi_app.put("/api/v1/put-test")
+# async def temp_put_test_route(request: Request):
+#     logger.info("!!!! TEMPORARY DEBUG: /api/v1/put-test endpoint was reached via PUT !!!!")
+#     body = await request.json()
+#     logger.info(f"!!!! TEMPORARY DEBUG: /api/v1/put-test PAYLOAD: {body} !!!!")
+#     return {"message": "PUT request to /api/v1/put-test received successfully", "payload": body}
+# +++ END TEMPORARY DEBUG ROUTE +++
+
+# +++ NEW TEMPORARY PING ROUTE for /api/v1/teachers/ping +++
+@_original_fastapi_app.get("/api/v1/teachers/ping")
+async def temp_teachers_ping():
+    logger.info("!!!! TEMPORARY DEBUG: /api/v1/teachers/ping endpoint was reached via GET !!!!")
+    return {"message": "pong from /api/v1/teachers/ping"}
+# +++ END NEW TEMPORARY PING ROUTE +++
 
 # Add CORS middleware
 if origins_to_use:
@@ -368,6 +385,7 @@ _original_fastapi_app.include_router(documents_router, prefix=settings.API_V1_PR
 _original_fastapi_app.include_router(results_router, prefix=settings.API_V1_PREFIX, tags=["Results"])
 _original_fastapi_app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX, tags=["Dashboard"])
 _original_fastapi_app.include_router(analytics_router, prefix=settings.API_V1_PREFIX, tags=["Analytics"])
+_original_fastapi_app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
 
 # --- NEW: Include Stripe Subscription and Webhook Routers ---
 _original_fastapi_app.include_router(

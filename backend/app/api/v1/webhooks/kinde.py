@@ -78,7 +78,8 @@ async def handle_user_created_webhook(payload: Dict[str, Any]):
     """
     Handles the 'user.created' event from Kinde.
     """
-    logger.info("Received Kinde webhook payload.")
+    logger.info("<<<< START: Kinde user.created webhook processing. >>>>")
+    logger.info(f"Received Kinde webhook payload at endpoint /webhooks/kinde/user-created.")
     logger.debug(f"Webhook payload: {payload}")
 
     event_type = payload.get("type")
@@ -87,6 +88,7 @@ async def handle_user_created_webhook(payload: Dict[str, Any]):
     if event_type != "user.created":
         logger.warning(f"Received unexpected webhook event type: {event_type}")
         # Return success to Kinde even if it's not the event we handle here
+        logger.info("<<<< END: Kinde user.created webhook processing (early exit due to unexpected event type). >>>>")
         return
 
     # Extract necessary data from the 'data' part of the payload
@@ -95,10 +97,13 @@ async def handle_user_created_webhook(payload: Dict[str, Any]):
     email = user_data.get("email")
     first_name = user_data.get("first_name")
     last_name = user_data.get("last_name")
+    roles_from_webhook = user_data.get("roles")
+    logger.info(f"Extracted roles from webhook payload (if any): {roles_from_webhook}")
 
     if not kinde_id or not email:
         logger.error(f"Webhook payload missing required fields: kinde_id={kinde_id}, email={email}")
         # Still return success to Kinde to prevent retries, but log the error
+        logger.info("<<<< END: Kinde user.created webhook processing (early exit due to missing fields). >>>>")
         return
 
     logger.info(f"Processing user.created event for Kinde ID: {kinde_id}, Email: {email}")
@@ -114,6 +119,7 @@ async def handle_user_created_webhook(payload: Dict[str, Any]):
     except ValidationError as e:
          logger.error(f"Failed to validate data from Kinde webhook for {kinde_id}: {e.errors()}")
          # Return success to Kinde, but log error
+         logger.info("<<<< END: Kinde user.created webhook processing (early exit due to validation error). >>>>")
          return
 
     # Check if teacher already exists (should ideally not happen for user.created, but good safeguard)
@@ -121,6 +127,7 @@ async def handle_user_created_webhook(payload: Dict[str, Any]):
     if existing_teacher:
         logger.warning(f"Teacher profile already exists for Kinde ID {kinde_id} during user.created webhook processing.")
         # Return success as the desired state (user exists) is achieved
+        logger.info("<<<< END: Kinde user.created webhook processing (user already existed). >>>>")
         return
 
     # Create the teacher record in the database
@@ -137,7 +144,8 @@ async def handle_user_created_webhook(payload: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Exception during crud.create_teacher for webhook event, Kinde ID: {kinde_id}: {e}", exc_info=True)
         # Don't raise HTTPException
-
+    
+    logger.info("<<<< END: Kinde user.created webhook processing (finished). >>>>")
     # Return No Content to Kinde to acknowledge receipt
     return
 

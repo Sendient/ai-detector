@@ -1,4 +1,5 @@
 # app/api/v1/endpoints/teachers.py
+print("<<<<< LOADING TEACHERS.PY MODULE AT START OF FILE >>>>")
 
 import uuid
 import logging
@@ -44,24 +45,85 @@ router = APIRouter(
     }
 )
 async def read_current_user_profile(
+    request: Request,
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
     """
     Retrieves the current user's teacher profile. Returns 404 if not found.
-    Does NOT create the profile automatically.
+    Ensures is_administrator flag is synchronized with Kinde role and email policy.
     """
+    logger.info("-----------------------------------------------------")
+    logger.info("GET /me: Endpoint called.")
+    
+    auth_header = request.headers.get("Authorization")
+    logger.info(f"GET /me: Received Authorization header: {auth_header}")
+    
+    logger.info(f"GET /me: Result of get_current_user_payload (already decoded by dependency): {current_user_payload}")
+
     user_kinde_id_str = current_user_payload.get("sub")
+    logger.info(f"GET /me: Extracted Kinde ID (sub) from payload: {user_kinde_id_str}")
+
     if not user_kinde_id_str:
-        logger.error("Kinde 'sub' claim missing from token payload.")
+        logger.error("GET /me: Kinde 'sub' claim missing from token payload. Raising 400.")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User identifier missing from token.")
 
-    logger.info(f"Attempting to retrieve profile for Kinde ID: {user_kinde_id_str}")
-
-    # 1. Try to get the existing teacher profile
-    teacher = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id_str)
+    logger.info(f"GET /me: Attempting to retrieve profile from DB for Kinde ID: {user_kinde_id_str}")
+    
+    try:
+        teacher = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id_str)
+        logger.info(f"GET /me: crud.get_teacher_by_kinde_id returned: {teacher}")
+    except Exception as e:
+        logger.error(f"GET /me: Exception during crud.get_teacher_by_kinde_id: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error retrieving teacher profile from database.")
 
     if teacher:
-        logger.info(f"Found existing teacher profile for Kinde ID: {user_kinde_id_str}, Internal ID: {teacher.id}")
+        # Ensure is_administrator flag is synchronized based on Kinde role and email policy
+        # This logic should be authoritative.
+        email_from_token = current_user_payload.get("email", "").lower()
+        kinde_roles_from_token = current_user_payload.get("roles", [])
+        
+        logger.info(f"GET /me (User Profile Exists): Admin status determination for Kinde ID {user_kinde_id_str}:")
+        logger.info(f"  - Email from token: {email_from_token}")
+        logger.info(f"  - Kinde roles from token: {kinde_roles_from_token}")
+
+        is_sendient_email = email_from_token.endswith("@sendient.ai")
+        # Robust check for 'Admin' role, case-insensitive, checking 'key' if roles are objects
+        has_kinde_admin_role = any(
+            (isinstance(role, str) and role.lower() == "admin") or
+            (isinstance(role, dict) and role.get("key", "").lower() == "admin")
+            for role in kinde_roles_from_token
+        )
+        
+        logger.info(f"  - Has 'Admin' role in Kinde: {has_kinde_admin_role}")
+        logger.info(f"  - Is Sendient email (@sendient.ai): {is_sendient_email}")
+
+        authoritative_is_administrator = has_kinde_admin_role and is_sendient_email
+        logger.info(f"  - Authoritative is_administrator status: {authoritative_is_administrator}")
+
+        if teacher.is_administrator != authoritative_is_administrator:
+            logger.info(f"GET /me: Discrepancy found. DB is_administrator: {teacher.is_administrator}, Authoritative: {authoritative_is_administrator}. Attempting to update DB.")
+            try:
+                updated_teacher_data = TeacherUpdate(is_administrator=authoritative_is_administrator)
+                # Use a method that only updates specific fields or fetches and then updates
+                # For simplicity, assuming crud.update_teacher can handle partial updates based on model
+                updated_teacher = await crud.update_teacher(
+                    kinde_id=user_kinde_id_str, 
+                    teacher_in=updated_teacher_data,
+                    authoritative_is_admin_status=authoritative_is_administrator,
+                    is_sync_update=True # Flag to indicate this is an internal sync
+                )
+                if updated_teacher:
+                    teacher = updated_teacher # Use the updated teacher object
+                    logger.info(f"GET /me: Successfully updated is_administrator in DB for Kinde ID {user_kinde_id_str} to {teacher.is_administrator}")
+                else:
+                    logger.error(f"GET /me: Failed to update is_administrator in DB for Kinde ID {user_kinde_id_str} during sync.")
+                    # Potentially raise an error or handle, but for now, proceed with originally fetched teacher
+            except Exception as e_update:
+                logger.error(f"GET /me: Exception during is_administrator sync update for Kinde ID {user_kinde_id_str}: {e_update}", exc_info=True)
+                # Proceed with the originally fetched teacher data if update fails
+
+        logger.info(f"GET /me: Found existing teacher profile for Kinde ID: {user_kinde_id_str}, Internal ID: {teacher.id}, is_admin (after sync attempt): {teacher.is_administrator}")
+        # --- END RBAC Sync Logic for GET /me ---
         
         # MODIFIED: Populate plan limits
         word_limit = None
@@ -83,14 +145,13 @@ async def read_current_user_profile(
             current_plan_word_limit=word_limit,
             current_plan_char_limit=char_limit
         )
+        logger.info(f"GET /me: Returning teacher profile: {teacher_profile_response}")
+        logger.info("-----------------------------------------------------")
         return teacher_profile_response
     else:
-        # 2. Profile not found, return 404
-        logger.warning(f"Teacher profile not found for Kinde ID: {user_kinde_id_str}. Returning 404.")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Teacher profile not found. Please complete your profile." # Keep message consistent with frontend expectation
-        )
+        logger.warning(f"GET /me: Teacher profile not found in DB for Kinde ID: {user_kinde_id_str}. Raising 404.")
+        logger.info("-----------------------------------------------------")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher profile not found.")
 
 # --- PUT /me endpoint (Update or Create - Upsert Logic - CORRECTED for User Version) ---
 @router.put(
@@ -120,14 +181,39 @@ async def update_or_create_current_user_profile(
     Protected endpoint to update the current user's teacher profile.
     If the profile doesn't exist, it creates it using the provided data.
     """
+    logger.info("-----------------------------------------------------")
+    logger.info("PUT /me: Endpoint called.")
+    
+    auth_header = request.headers.get("Authorization")
+    logger.info(f"PUT /me: Received Authorization header: {auth_header}")
+    
+    logger.info(f"PUT /me: Result of get_current_user_payload (already decoded by dependency): {current_user_payload}")
+
     user_kinde_id_str = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id_str} attempting to update or create their profile.")
-    # Use exclude_unset=True to only log fields explicitly sent by the client
-    logger.debug(f"Received profile data (TeacherUpdate model): {teacher_data.model_dump(exclude_unset=True)}")
+    logger.info(f"PUT /me: Extracted Kinde ID (sub) from payload: {user_kinde_id_str}")
 
     if not user_kinde_id_str:
-        logger.error("Kinde 'sub' claim missing from token payload during profile update/create.")
+        logger.error("PUT /me: Kinde 'sub' claim missing. Raising 400.")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User identifier missing from token.")
+
+    # --- BEGIN RBAC Sync Logic for PUT /me ---
+    email_from_token = current_user_payload.get("email")
+    kinde_roles = current_user_payload.get("roles", [])
+    has_admin_role_in_kinde = any(role.get('key') == 'Admin' for role in kinde_roles if isinstance(role, dict))
+    is_sendient_email = email_from_token and email_from_token.endswith('@sendient.ai')
+    
+    # This is the authoritative is_administrator status based on Kinde role and email policy
+    authoritative_is_administrator = has_admin_role_in_kinde and is_sendient_email
+    # MODIFIED Log (and removed original less detailed log)
+    # +++ ADDED VERBOSE LOGGING +++
+    logger.info(f"PUT /me: Admin status determination for Kinde ID {user_kinde_id_str}:")
+    logger.info(f"  - Email from token: {email_from_token}")
+    logger.info(f"  - Kinde roles from token: {kinde_roles}")
+    logger.info(f"  - Has 'Admin' role in Kinde: {has_admin_role_in_kinde}")
+    logger.info(f"  - Is Sendient email (@sendient.ai): {is_sendient_email}")
+    logger.info(f"  - Authoritative is_administrator status: {authoritative_is_administrator}")
+    # +++ END ADDED VERBOSE LOGGING +++
+    # --- END RBAC Sync Logic ---
 
     # 1. Try to find the existing teacher
     existing_teacher = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id_str)
@@ -136,29 +222,28 @@ async def update_or_create_current_user_profile(
         # --- UPDATE PATH ---
         logger.info(f"Found existing profile for {user_kinde_id_str} (ID: {existing_teacher.id}). Proceeding with update.")
         try:
-            # Pass only fields that were actually set in the request to the CRUD function
-            # NOTE: Using teacher_data directly as per user's original code.
-            # Ensure crud.update_teacher handles TeacherUpdate model correctly,
-            # potentially ignoring unset fields internally or using model_dump(exclude_unset=True).
             update_payload_for_log = teacher_data.model_dump(exclude_unset=True)
-            if not update_payload_for_log:
-                 logger.warning(f"Update request for Kinde ID {user_kinde_id_str} contained no fields to update.")
-                 # Return existing teacher data if no changes were sent
+            if not update_payload_for_log and existing_teacher.is_administrator == authoritative_is_administrator: # If no data sent and admin status matches
+                 logger.warning(f"Update request for Kinde ID {user_kinde_id_str} contained no fields to update and admin status is already in sync.")
                  return existing_teacher
 
-            logger.debug(f"Calling crud.update_teacher for Kinde ID {user_kinde_id_str} with data: {update_payload_for_log}")
-            updated_teacher = await crud.update_teacher(kinde_id=user_kinde_id_str, teacher_in=teacher_data)
+            logger.debug(f"Calling crud.update_teacher for Kinde ID {user_kinde_id_str} with data: {update_payload_for_log} and authoritative_is_administrator: {authoritative_is_administrator}")
+            # We will modify crud.update_teacher to accept authoritative_is_administrator
+            updated_teacher = await crud.update_teacher(
+                kinde_id=user_kinde_id_str, 
+                teacher_in=teacher_data, 
+                # Pass the determined admin status to the CRUD function
+                authoritative_is_admin_status=authoritative_is_administrator 
+            )
 
             if updated_teacher is None:
-                 # This might happen if the record disappeared between check and update, or DB error
                  logger.error(f"Update failed unexpectedly for teacher Kinde ID {user_kinde_id_str}. Profile might not exist or DB error occurred.")
                  raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher profile not found during update attempt.")
 
-            logger.info(f"Teacher profile for Kinde ID {user_kinde_id_str} updated successfully.")
+            logger.info(f"Teacher profile for Kinde ID {user_kinde_id_str} updated successfully. Synced is_administrator to {updated_teacher.is_administrator}")
             return updated_teacher
 
         except ValidationError as e:
-            # This might occur if crud.update_teacher does internal validation that fails
             logger.error(f"Pydantic validation failed during teacher update for Kinde ID {user_kinde_id_str}: {e.errors()}", exc_info=False)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=e.errors())
         except Exception as e:
@@ -169,20 +254,15 @@ async def update_or_create_current_user_profile(
         # --- CREATE PATH ---
         logger.warning(f"No existing profile found for {user_kinde_id_str}. Proceeding with creation via PUT.")
 
-        # We MUST get email from token for creation.
-        email_from_token = current_user_payload.get("email")
-        if not email_from_token:
+        if not email_from_token: # Already fetched for RBAC sync
              logger.error(f"Cannot create profile for {user_kinde_id_str}: Email missing from token.")
              raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email missing from authentication token. Cannot create profile.")
 
-        # Validate that required fields for creation are present in the request body (teacher_data)
         required_fields_for_create = ['first_name', 'last_name', 'school_name', 'role', 'country', 'state_county']
         missing_required = []
-        payload_for_create = {} # This will hold data for the TeacherCreate model
+        payload_for_create = {} 
 
-        # Populate required fields from teacher_data (TeacherUpdate instance)
         for field in required_fields_for_create:
-            # Use getattr to safely access fields from the TeacherUpdate object
             value = getattr(teacher_data, field, None)
             if value is None or (isinstance(value, str) and not value.strip()):
                 missing_required.append(field)
@@ -193,45 +273,45 @@ async def update_or_create_current_user_profile(
              logger.error(f"Cannot create profile for {user_kinde_id_str}: Required fields missing from request body: {missing_required}")
              raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Missing required profile fields: {', '.join(missing_required)}")
 
-        # Add email from token
         payload_for_create['email'] = email_from_token
-
-        # *** CORRECTED: Safely add optional fields using getattr ***
+        
+        # Add optional fields
         how_did_you_hear_value = getattr(teacher_data, 'how_did_you_hear', None)
-        if how_did_you_hear_value: # Add only if value exists and is not empty/None
+        if how_did_you_hear_value:
             payload_for_create['how_did_you_hear'] = how_did_you_hear_value
-            logger.debug(f"Adding 'how_did_you_hear': {how_did_you_hear_value}")
-        else:
-             logger.debug("'how_did_you_hear' not provided or empty.")
-
-
+        
         description_value = getattr(teacher_data, 'description', None)
-        if description_value: # Add only if value exists and is not empty/None
+        if description_value:
             payload_for_create['description'] = description_value
-            logger.debug(f"Adding 'description': {description_value}")
-        else:
-            logger.debug("'description' not provided or empty.")
 
-        # is_active defaults to True in TeacherCreate model, so no need to set explicitly unless needed
-
+        # Add the determined is_administrator status to the creation payload
+        # This ensures the TeacherCreate model will have it if it's defined there.
+        # If TeacherCreate inherits it from TeacherBase, it's already there by default.
+        # We are explicitly setting it based on our logic.
+        payload_for_create['is_administrator'] = authoritative_is_administrator
         logger.debug(f"Constructing TeacherCreate payload: {payload_for_create}")
 
-        # Construct the TeacherCreate object
         try:
             teacher_create_payload = TeacherCreate(**payload_for_create)
         except ValidationError as e:
              logger.error(f"Pydantic validation failed constructing TeacherCreate for Kinde ID {user_kinde_id_str}: {e.errors()}", exc_info=False)
-             # Provide more specific error details if possible
              raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid profile data provided for creation: {e.errors()}")
 
-        # Call CRUD create function
         try:
-            # Pass kinde_id separately to the CRUD function
-            logger.debug(f"Calling crud.create_teacher for Kinde ID {user_kinde_id_str} with payload: {teacher_create_payload.model_dump()}")
-            created_teacher = await crud.create_teacher(teacher_in=teacher_create_payload, kinde_id=user_kinde_id_str)
+            logger.debug(f"Calling crud.create_teacher for Kinde ID {user_kinde_id_str} with payload: {teacher_create_payload.model_dump()} and authoritative_is_administrator: {authoritative_is_administrator}")
+            # We will modify crud.create_teacher to accept/use authoritative_is_administrator
+            # The authoritative_is_administrator is already part of teacher_create_payload if the model supports it.
+            # If TeacherCreate model does not explicitly have is_administrator but TeacherBase does,
+            # it should be inherited. Let's ensure create_teacher is aware.
+            created_teacher = await crud.create_teacher(
+                teacher_in=teacher_create_payload, 
+                kinde_id=user_kinde_id_str
+                # Assuming crud.create_teacher will use the is_administrator from teacher_in
+                # or we modify it to take an explicit authoritative_is_admin_status if needed
+            )
 
             if created_teacher:
-                logger.info(f"Successfully created new teacher profile via PUT for Kinde ID: {user_kinde_id_str}, Internal ID: {created_teacher.id}")
+                logger.info(f"Successfully created new teacher profile via PUT for Kinde ID: {user_kinde_id_str}, Internal ID: {created_teacher.id}. Synced is_administrator to {created_teacher.is_administrator}")
                 return created_teacher
             else:
                 # This case implies crud.create_teacher returned None.

@@ -196,6 +196,7 @@ async def validate_token(token: str) -> Dict[str, Any]: # Changed to async def
             issuer=KINDE_DOMAIN      
         )
         logger.info("Token successfully validated.")
+        logger.debug(f"Decoded JWT Payload: {payload}")
         return payload
 
     except jose_exceptions.ExpiredSignatureError:
@@ -261,6 +262,27 @@ async def get_current_user_payload( # Already async, which is good
     except Exception as e:
         logger.error(f"Unexpected error during authentication dependency: {e}", exc_info=True)
         raise internal_error_exception from e
+
+
+async def require_kinde_admin_role(
+    payload: Dict[str, Any] = Depends(get_current_user_payload)
+) -> Dict[str, Any]:
+    """
+    FastAPI dependency that requires the user to have the 'Admin' role in their Kinde JWT.
+    Raises HTTPException 403 if the role is not present.
+    Returns the payload if the user is an admin.
+    """
+    roles = payload.get("roles", [])
+    is_admin = any(role.get("key") == "Admin" for role in roles if isinstance(role, dict))
+
+    if not is_admin:
+        logger.warning(f"Admin access denied for user {payload.get('sub')}. Kinde roles: {roles}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not have admin privileges."
+        )
+    logger.info(f"Admin access GRANTED for user {payload.get('sub')}. Kinde roles: {roles}")
+    return payload
 
 
 # --- Cache Management Functions ---

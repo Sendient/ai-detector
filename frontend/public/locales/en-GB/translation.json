@@ -30,6 +30,7 @@
     "sidebar_menu_analytics": "Analytics",
     "sidebar_menu_profile": "Profile",
     "sidebar_menu_integrations": "Integrations",
+    "sidebar_menu_admin": "Admin",
     "sidebar_auth_loading": "Loading...",
     "sidebar_auth_sign_out": "Sign out",
     "sidebar_auth_sign_in": "Sign in",
@@ -305,6 +306,8 @@
     "profilePage_error_formValidation": "Please correct the errors in the form.",
     "profilePage_error_save": "Error saving profile: {{message}}",
     "profilePage_success_save": "Profile saved successfully!",
+    "profilePage_adminStatus_heading": "Administrator Account",
+    "profilePage_adminStatus_message": "This account has administrative privileges.",
   
     "country_afghanistan": "Afghanistan",
     "country_albania": "Albania",

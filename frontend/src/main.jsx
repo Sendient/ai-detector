@@ -13,6 +13,10 @@ import { BrowserRouter } from 'react-router-dom';
 import './i18n'; // This executes the i18n setup from src/i18n.js
 // ------------------------------------
 
+// --- ADDED: Import AuthProvider ---
+import { AuthProvider } from './contexts/AuthContext';
+// --------------------------------
+
 // Access environment variables provided by Vite
 const kindeDomain = import.meta.env.VITE_KINDE_DOMAIN;
 const kindeClientId = import.meta.env.VITE_KINDE_CLIENT_ID;
@@ -56,7 +60,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
              because translations might not be loaded yet when this fallback
              is needed. Keep it simple or use a non-text loading indicator.
           */}
-            <App />
+            <AuthProvider>
+              <App />
+            </AuthProvider>
           </Suspense>
           {/* ------------------------------------------------- */}
         </KindeProvider>

@@ -340,8 +340,11 @@ async def get_all_teachers(skip: int = 0, limit: int = 100, include_deleted: boo
     return teachers_list
 
 @with_transaction # Keep transaction for update as it modifies existing data
-async def update_teacher(kinde_id: str, teacher_in: TeacherUpdate, session=None) -> Optional[Teacher]:
-    """Updates a teacher's profile information identified by their Kinde ID."""
+async def update_teacher(kinde_id: str, teacher_in: TeacherUpdate, authoritative_is_admin_status: bool, session=None, **kwargs) -> Optional[Teacher]: # ADDED **kwargs
+    """
+    Updates a teacher's profile in the database.
+    If authoritative_is_admin_status is True, it ensures the teacher's is_administrator flag is set to True.
+    """
     collection = _get_collection(TEACHER_COLLECTION); now = datetime.now(timezone.utc)
     if collection is None: return None
 
@@ -351,21 +354,43 @@ async def update_teacher(kinde_id: str, teacher_in: TeacherUpdate, session=None)
         update_data['role'] = update_data['role'].value
 
     # Remove fields that should not be updated directly or are identifiers
-    update_data.pop("_id", None) # Should not be in TeacherUpdate anyway
-    update_data.pop("id", None)   # Should not be in TeacherUpdate anyway
-    update_data.pop("kinde_id", None) # kinde_id is the query key, not part of $set
+    update_data.pop("_id", None)
+    update_data.pop("id", None)
+    update_data.pop("kinde_id", None)
     update_data.pop("created_at", None)
     update_data.pop("how_did_you_hear", None)
-    update_data.pop("email", None) # Email not updatable via profile PUT /me
+    update_data.pop("email", None)
+    update_data.pop("is_administrator", None) # Remove if present from request, we use authoritative status
 
-    if not update_data:
-        logger.warning(f"No valid update data provided for teacher with Kinde ID {kinde_id}")
-        return await get_teacher_by_kinde_id(kinde_id=kinde_id, session=session)
+    # Set the authoritative admin status
+    update_data["is_administrator"] = authoritative_is_admin_status
+
+    # Only proceed if there's actual data to update OR if the admin status needs syncing
+    # This check is a bit more nuanced now that is_administrator is handled directly.
+    # The condition `if not update_data:` might need reconsideration if only admin status changes.
+    # However, since is_administrator is now always in update_data, this check effectively becomes
+    # "if no OTHER fields are being updated".
+    # Let's refine the condition for returning early:
+    # If the only change would be is_administrator and it's already what authoritative_is_admin_status dictates,
+    # and no other fields are in update_data (excluding is_administrator itself before this point).
+    
+    # Create a copy for checking if only admin status would change an already synced record
+    update_data_without_admin_for_check = update_data.copy()
+    update_data_without_admin_for_check.pop("is_administrator", None)
+    update_data_without_admin_for_check.pop("updated_at", None) # updated_at is always added
+
+    if not update_data_without_admin_for_check:
+        # If no other fields are to be updated, check if admin status needs to change
+        # This requires fetching the current teacher to see their current is_administrator status
+        current_teacher = await get_teacher_by_kinde_id(kinde_id=kinde_id, session=session)
+        if current_teacher and current_teacher.is_administrator == authoritative_is_admin_status:
+            logger.warning(f"No valid update data provided for teacher with Kinde ID {kinde_id}, and admin status is already in sync.")
+            return current_teacher 
 
     update_data["updated_at"] = now
     logger.info(f"Updating teacher with Kinde ID {kinde_id} with data: {update_data}")
 
-    query_filter = {"kinde_id": kinde_id, "is_deleted": {"$ne": True}} # Query by kinde_id field
+    query_filter = {"kinde_id": kinde_id, "is_deleted": {"$ne": True}}
 
     try:
         updated_doc = await collection.find_one_and_update(
