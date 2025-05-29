@@ -601,5 +601,13 @@
     "classes_modal_label_name": "Class Name",
     "classes_modal_label_year": "Academic Year",
     "messages_classes_modal_error_missingTeacher": "Cannot create class: Teacher information is missing.",
-    "messages_classes_modal_error_fieldsRequired": "Class Name and Academic Year are required."
+    "messages_classes_modal_error_fieldsRequired": "Class Name and Academic Year are required.",
+
+    "students_column_firstName": "First Name",
+    "students_column_lastName": "Last Name",
+    "students_column_email": "Email",
+    "students_column_externalId": "External ID",
+    "students_column_yearGroup": "Year Group",
+    "students_column_classes": "Class(es)",
+    "messages_students_noStudents": "No students have been added yet. Click 'Add Student' or 'Bulk Upload Students' to get started."
 }

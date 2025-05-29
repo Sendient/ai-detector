@@ -1137,23 +1137,20 @@ function StudentsPage() {
                     <table className="table table-zebra w-full">
                       <thead>
                         <tr>
-                          <th className="cursor-pointer" onClick={() => handleStudentSort('first_name')}>
+                          <th className="cursor-pointer hover:bg-base-200" onClick={() => handleStudentSort('first_name')}>
                             {t('students_column_firstName')}
-                            {studentSortField === 'first_name' ? (
-                              studentSortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
-                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                            {studentSortField === 'first_name' && (studentSortOrder === 'asc' ? <ChevronUpIcon className="inline h-4 w-4 ml-1" /> : <ChevronDownIcon className="inline h-4 w-4 ml-1" />)}
+                            {studentSortField !== 'first_name' && <ArrowsUpDownIcon className="inline h-4 w-4 ml-1 text-gray-400" />}
                           </th>
-                          <th className="cursor-pointer" onClick={() => handleStudentSort('last_name')}>
+                          <th className="cursor-pointer hover:bg-base-200" onClick={() => handleStudentSort('last_name')}>
                             {t('students_column_lastName')}
-                            {studentSortField === 'last_name' ? (
-                              studentSortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
-                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                            {studentSortField === 'last_name' && (studentSortOrder === 'asc' ? <ChevronUpIcon className="inline h-4 w-4 ml-1" /> : <ChevronDownIcon className="inline h-4 w-4 ml-1" />)}
+                            {studentSortField !== 'last_name' && <ArrowsUpDownIcon className="inline h-4 w-4 ml-1 text-gray-400" />}
                           </th>
-                          <th className="cursor-pointer" onClick={() => handleStudentSort('email')}>
+                          <th className="cursor-pointer hover:bg-base-200" onClick={() => handleStudentSort('email')}>
                             {t('students_column_email')}
-                            {studentSortField === 'email' ? (
-                              studentSortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1" /> : <ChevronDownIcon className="h-4 w-4 inline ml-1" />
-                            ) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400" />}
+                            {studentSortField === 'email' && (studentSortOrder === 'asc' ? <ChevronUpIcon className="inline h-4 w-4 ml-1" /> : <ChevronDownIcon className="inline h-4 w-4 ml-1" />)}
+                            {studentSortField !== 'email' && <ArrowsUpDownIcon className="inline h-4 w-4 ml-1 text-gray-400" />}
                           </th>
                           <th>{t('students_column_externalId')}</th>
                           <th>{t('students_column_yearGroup')}</th>
