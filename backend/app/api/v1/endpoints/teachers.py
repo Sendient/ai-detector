@@ -124,7 +124,7 @@ async def read_current_user_profile(
         logger.info(f"GET /me: Found existing teacher profile for Kinde ID: {user_kinde_id_str}, Internal ID: {teacher.id}, is_admin (after sync attempt): {teacher.is_administrator}")
         # --- END RBAC Sync Logic for GET /me ---
         
-        # MODIFIED: Populate plan limits
+        # Populate plan limits (word_limit and char_limit are local variables here)
         word_limit = None
         char_limit = None
         
@@ -135,16 +135,26 @@ async def read_current_user_profile(
             word_limit = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
             char_limit = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
         elif teacher.current_plan == SubscriptionPlan.SCHOOLS:
-            word_limit = None # Or some indicator of "unlimited"
-            char_limit = None # Or some indicator of "unlimited"
+            word_limit = None # Represents unlimited
+            char_limit = None # Represents unlimited
             
-        # Create the TeacherProfile response
+        # Calculate remaining words for the current cycle
+        # teacher.words_used_current_cycle is now expected to be populated from the DB
+        # word_limit is the allowance for the current plan
+        remaining_words = None
+        if word_limit is not None and teacher.words_used_current_cycle is not None:
+            remaining_words = max(0, word_limit - teacher.words_used_current_cycle)
+        elif word_limit is None: # Case for unlimited plans (e.g., Schools plan)
+            remaining_words = None # Or a special value like -1 if you prefer to indicate unlimited explicitly
+
+        # Create the TeacherProfile response, including the new fields
         teacher_profile_response = TeacherProfile(
-            **teacher.model_dump(),
-            current_plan_word_limit=word_limit,
-            current_plan_char_limit=char_limit
+            **teacher.model_dump(), # This will include words_used_current_cycle and documents_processed_current_cycle from the teacher object
+            current_plan_word_limit=word_limit, # This is the allowance
+            current_plan_char_limit=char_limit,
+            remaining_words_current_cycle=remaining_words
         )
-        logger.info(f"GET /me: Returning teacher profile: {teacher_profile_response}")
+        logger.info(f"GET /me: Returning teacher profile: {teacher_profile_response.model_dump_json(indent=2)}") # Enhanced logging
         logger.info("-----------------------------------------------------")
         return teacher_profile_response
     else:

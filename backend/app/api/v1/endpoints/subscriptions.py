@@ -103,7 +103,8 @@ async def create_checkout_session(
                 # The @with_transaction decorator in your crud.py will handle session if needed.
                 updated_teacher_db_record = await crud.update_teacher(
                     kinde_id=current_teacher.kinde_id,
-                    teacher_in=teacher_update_model
+                    teacher_in=teacher_update_model,
+                    authoritative_is_admin_status=current_teacher.is_administrator
                     # session=db # Not passing db as session, as crud.update_teacher expects Motor session or None
                 )
                 if updated_teacher_db_record:

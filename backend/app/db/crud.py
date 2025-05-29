@@ -502,6 +502,65 @@ async def update_teacher_by_stripe_customer_id(
         logger.error(f"Error during teacher update by stripe_customer_id {stripe_customer_id}: {e}", exc_info=True)
         return None
 
+# --- START: Function to increment teacher usage cycle counts ---
+async def increment_teacher_usage_cycle_counts(
+    kinde_id: str, 
+    words_to_add: int, 
+    documents_to_add: int, 
+    session=None
+) -> bool:
+    """
+    Atomically increments the words_used_current_cycle and 
+    documents_processed_current_cycle for a teacher.
+    """
+    collection = _get_collection(TEACHER_COLLECTION)
+    if collection is None:
+        logger.error(f"Teacher collection not found. Cannot increment usage for kinde_id: {kinde_id}")
+        return False
+
+    if words_to_add < 0 or documents_to_add < 0:
+        logger.warning(f"Attempted to increment usage with negative values for kinde_id {kinde_id}. words_to_add: {words_to_add}, documents_to_add: {documents_to_add}. Aborting.")
+        return False
+
+    query_filter = {"kinde_id": kinde_id, "is_deleted": {"$ne": True}}
+    update_operation = {
+        "$inc": {
+            "words_used_current_cycle": words_to_add,
+            "documents_processed_current_cycle": documents_to_add
+        },
+        "$set": {
+            "updated_at": datetime.now(timezone.utc)
+        }
+    }
+
+    logger.info(f"Attempting to increment usage for teacher kinde_id {kinde_id} by words: {words_to_add}, documents: {documents_to_add}")
+    try:
+        result = await collection.update_one(query_filter, update_operation, session=session)
+        if result.matched_count == 1 and result.modified_count == 1:
+            logger.info(f"Successfully incremented usage counts for teacher kinde_id: {kinde_id}")
+            return True
+        elif result.matched_count == 1 and result.modified_count == 0:
+            # This case might happen if the $inc operation results in no change (e.g. adding 0), 
+            # or if only updated_at was changed. Given we check for negative values,
+            # adding 0 words and 0 documents is a valid scenario that should still return True if the user exists.
+            # However, our primary goal is to increment. If modified_count is 0 with positive increments,
+            # it might indicate an issue, but $inc should always modify if values are >0 and user exists.
+            # For now, let's consider it a success if matched, as updated_at would still be set.
+            # A more robust check might be needed if strict increment is the only definition of success.
+            logger.info(f"Usage counts updated for teacher kinde_id: {kinde_id} (matched_count: 1, modified_count: 0). This might occur if only updated_at was modified or values to add were zero.")
+            return True # Consider successful if user was found and operation attempted.
+        elif result.matched_count == 0:
+            logger.warning(f"Teacher with kinde_id {kinde_id} not found. Cannot increment usage counts.")
+            return False
+        else:
+            # This case is problematic, log more details
+            logger.warning(f"Unexpected result when incrementing usage for kinde_id {kinde_id}. Matched: {result.matched_count}, Modified: {result.modified_count}, Acknowledged: {result.acknowledged}, Upserted ID: {result.upserted_id}")
+            return False
+    except Exception as e:
+        logger.error(f"Error incrementing usage counts for teacher kinde_id {kinde_id}: {e}", exc_info=True)
+        return False
+# --- END: Function to increment teacher usage cycle counts ---
+
 # --- ClassGroup CRUD Functions ---
 # --- REMOVED @with_transaction from create_class_group --- NO, it was already removed.
 async def create_class_group(

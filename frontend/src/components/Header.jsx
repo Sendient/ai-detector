@@ -6,11 +6,13 @@ import { useTranslation } from 'react-i18next';
 import LocaleSelector from './LocaleSelector.jsx';
 import { User, LogOut, CreditCard, ShieldCheck } from 'lucide-react';
 import { useTeacherProfile } from '../hooks/useTeacherProfile';
+import { useAuth } from '../contexts/AuthContext';
 
 function Header() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useKindeAuth();
     const { profile, isLoading: isLoadingProfile } = useTeacherProfile();
+    const { currentUser, loading: authLoading } = useAuth();
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
     const getInitials = () => {
@@ -28,11 +30,18 @@ function Header() {
         : t('header_default_user_name');
 
     const getPlanDisplayName = () => {
-        if (isLoadingProfile || !isAuthenticated) return null;
+        if (authLoading) return null;
+        if (currentUser && currentUser.current_plan && currentUser.current_plan.toLowerCase() !== 'free') {
+            return `${currentUser.current_plan} Plan`;
+        }
+        if (isLoadingProfile) return null;
         if (profile && profile.current_plan && profile.current_plan.toLowerCase() !== 'free') {
             return `${profile.current_plan} Plan`;
         }
-        return t('header_free_plan', 'Free Plan');
+        if (isAuthenticated) {
+            return t('header_free_plan', 'Free Plan');
+        }
+        return null;
     };
 
     const planDisplayName = getPlanDisplayName();

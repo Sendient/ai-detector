@@ -109,8 +109,7 @@ class AssessmentWorker:
         if not result:
             logger.warning(f"[AssessmentWorker] Result record not found for document {document_id} (task {task.id}). Creating one.")
             result = await crud.create_result(
-                document_id=document_id, 
-                teacher_id=teacher_id
+                result_in=ResultCreate(document_id=document_id, teacher_id=teacher_id)
             )
             if not result:
                 logger.error(f"[AssessmentWorker] Failed to create result record for document {document_id}. Aborting task {task.id}.")
@@ -198,63 +197,67 @@ class AssessmentWorker:
             if current_plan == SubscriptionPlan.SCHOOLS:
                 logger.info(f"[AssessmentWorker] Teacher {teacher_id} on SCHOOLS plan. Bypassing usage limit check for doc {document.id}.")
             else:
-                usage_stats = await crud.get_usage_stats_for_period(
-                    teacher_id=teacher_id,
-                    period='monthly',
-                    target_date=datetime.now(timezone.utc).date()
-                )
-                current_monthly_words = usage_stats.get("total_words", 0) if usage_stats else 0
-                current_monthly_chars = usage_stats.get("total_characters", 0) if usage_stats else 0
+                # Use direct cycle counts from the teacher model
+                current_cycle_words = teacher_db.words_used_current_cycle if teacher_db.words_used_current_cycle is not None else 0
+                # current_cycle_docs = teacher_db.documents_processed_current_cycle if teacher_db.documents_processed_current_cycle is not None else 0
+                # Character count limit check is not strictly enforced by teacher model fields yet,
+                # but word count is the primary metric.
+                # For character limits, if they become primary, we might need a teacher_db.chars_used_current_cycle
                 
+                # Fallback to settings for char limit if needed, but primary check is words
+                # For this change, we will focus on word limits as per the teacher model.
+                # The monthly aggregation for characters was a secondary check.
+
                 doc_word_count = word_count if word_count is not None else 0
-                doc_char_count = character_count if character_count is not None else 0
+                # doc_char_count = character_count if character_count is not None else 0 # Not used with teacher_db fields directly
 
                 limit_exceeded = False
                 exceeded_by = ""
 
                 if current_plan == SubscriptionPlan.FREE:
                     plan_word_limit_free = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
-                    plan_char_limit_free = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
-                    logger.info(f"[AssessmentWorker] FREE Plan: Current monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_free}")
-                    logger.info(f"[AssessmentWorker] FREE Plan: Current monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_free}")
+                    # plan_char_limit_free = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT # Secondary
+                    logger.info(f"[AssessmentWorker] FREE Plan: Current cycle words: {current_cycle_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_free}")
 
-                    if (current_monthly_words + doc_word_count) > plan_word_limit_free:
+                    if (current_cycle_words + doc_word_count) > plan_word_limit_free:
                         limit_exceeded = True
                         exceeded_by = "word"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed FREE plan monthly word limit of {plan_word_limit_free} (current usage: {current_monthly_words}). Projected total: {current_monthly_words + doc_word_count}")
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed FREE plan current cycle word limit of {plan_word_limit_free} (current usage: {current_cycle_words}). Projected total: {current_cycle_words + doc_word_count}")
                     
-                    if not limit_exceeded and (current_monthly_chars + doc_char_count) > plan_char_limit_free:
-                        limit_exceeded = True
-                        exceeded_by = "character"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FREE plan monthly char limit of {plan_char_limit_free} (current usage: {current_monthly_chars}). Projected total: {current_monthly_chars + doc_char_count}")
+                    # Character limit check can remain secondary or be removed if words_used_current_cycle is the single source of truth for quota
+                    # For now, let's keep it simple and rely on word count primarily.
+                    # if not limit_exceeded and (current_monthly_chars + doc_char_count) > plan_char_limit_free:
+                    #     limit_exceeded = True
+                    #     exceeded_by = "character"
+                    #     logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FREE plan monthly char limit of {plan_char_limit_free} (current usage: {current_monthly_chars}). Projected total: {current_monthly_chars + doc_char_count}")
                 
                 elif current_plan == SubscriptionPlan.PRO:
                     plan_word_limit_pro = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
-                    plan_char_limit_pro = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
-                    logger.info(f"[AssessmentWorker] PRO Plan: Current monthly words: {current_monthly_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_pro}")
-                    logger.info(f"[AssessmentWorker] PRO Plan: Current monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Char Limit: {plan_char_limit_pro}")
+                    # plan_char_limit_pro = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT # Secondary
+                    logger.info(f"[AssessmentWorker] PRO Plan: Current cycle words: {current_cycle_words}, Doc words: {doc_word_count}, Word Limit: {plan_word_limit_pro}")
 
-                    if (current_monthly_words + doc_word_count) > plan_word_limit_pro:
+                    if (current_cycle_words + doc_word_count) > plan_word_limit_pro:
                         limit_exceeded = True
                         exceeded_by = "word"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed PRO plan monthly word limit of {plan_word_limit_pro} (current usage: {current_monthly_words}). Projected total: {current_monthly_words + doc_word_count}")
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed PRO plan current cycle word limit of {plan_word_limit_pro} (current usage: {current_cycle_words}). Projected total: {current_cycle_words + doc_word_count}")
                     
-                    if not limit_exceeded and (current_monthly_chars + doc_char_count) > plan_char_limit_pro:
-                        limit_exceeded = True
-                        exceeded_by = "character"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed PRO plan monthly char limit of {plan_char_limit_pro} (current usage: {current_monthly_chars}). Projected total: {current_monthly_chars + doc_char_count}")
+                    # Similar to FREE, character limit is secondary
+                    # if not limit_exceeded and (current_monthly_chars + doc_char_count) > plan_char_limit_pro:
+                    #     limit_exceeded = True
+                    #     exceeded_by = "character"
+                    #     logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed PRO plan monthly char limit of {plan_char_limit_pro} (current usage: {current_monthly_chars}). Projected total: {current_monthly_chars + doc_char_count}")
 
-                else: # Fallback for any other unknown non-SCHOOLS plan - use FREE plan char limits
-                    plan_char_limit_fallback = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
-                    logger.warning(f"[AssessmentWorker] Unknown plan {current_plan} for teacher {teacher_id}. Applying default free character limit ({plan_char_limit_fallback}) as a fallback.")
-                    logger.info(f"[AssessmentWorker] FALLBACK Plan: Monthly chars: {current_monthly_chars}, Doc chars: {doc_char_count}, Limit: {plan_char_limit_fallback}")
-                    if current_monthly_chars > plan_char_limit_fallback:
+                else: # Fallback for any other unknown non-SCHOOLS plan - use FREE plan limits based on words
+                    plan_word_limit_fallback = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
+                    logger.warning(f"[AssessmentWorker] Unknown plan {current_plan} for teacher {teacher_id}. Applying default free word limit ({plan_word_limit_fallback}) as a fallback.")
+                    logger.info(f"[AssessmentWorker] FALLBACK Plan: Cycle words: {current_cycle_words}, Doc words: {doc_word_count}, Limit: {plan_word_limit_fallback}")
+                    if (current_cycle_words + doc_word_count) > plan_word_limit_fallback:
                         limit_exceeded = True
-                        exceeded_by = "character (fallback)"
-                        logger.warning(f"[AssessmentWorker] Document {document.id} (chars: {doc_char_count}) for teacher {teacher_id} would exceed FALLBACK (free) monthly char limit of {plan_char_limit_fallback} (current usage: {current_monthly_chars}).")
+                        exceeded_by = "word (fallback)"
+                        logger.warning(f"[AssessmentWorker] Document {document.id} (words: {doc_word_count}) for teacher {teacher_id} would exceed FALLBACK (free) cycle word limit of {plan_word_limit_fallback} (current usage: {current_cycle_words}).")
 
                 if limit_exceeded:
-                    error_message = f"Monthly {exceeded_by} limit exceeded."
+                    error_message = f"Cycle {exceeded_by} limit exceeded."
                     doc_limit_update_success = await crud.update_document_status(document_id=document_id, teacher_id=teacher_id, status=DocumentStatus.LIMIT_EXCEEDED)
                     res_limit_update_success = await crud.update_result_status(
                         result_id=result.id,
@@ -367,13 +370,33 @@ class AssessmentWorker:
             # --- End of NEW Enhanced Dummy ML API Response ---
             
             # Update Document status to COMPLETED and include the score
-            doc_update_completed = await crud.update_document_status(
+            doc_status_updated_to_completed = await crud.update_document_status(
                 document_id=document_id, 
                 teacher_id=teacher_id, 
                 status=DocumentStatus.COMPLETED,
                 score=overall_score 
             )
-            # REMOVED: dummy_ml_response = {} - No longer needed in this old form
+            if not doc_status_updated_to_completed:
+                logger.error(f"[AssessmentWorker] Failed to update document {document_id} status to COMPLETED for task {task.id} after ML processing. Result updated, but doc status stale. Continuing to task deletion.")
+                # Not re-queueing as the critical part (ML result update) succeeded.
+            
+            # <<< START EDIT: Increment teacher usage counts >>>
+            if doc_status_updated_to_completed and word_count is not None: # Ensure word_count is available
+                logger.info(f"[AssessmentWorker] Attempting to increment usage for teacher {teacher_id} by {word_count} words and 1 document.")
+                increment_successful = await crud.increment_teacher_usage_cycle_counts(
+                    kinde_id=teacher_id,
+                    words_to_add=word_count,
+                    documents_to_add=1
+                )
+                if increment_successful:
+                    logger.info(f"[AssessmentWorker] Successfully incremented usage cycle counts for teacher {teacher_id}.")
+                else:
+                    logger.error(f"[AssessmentWorker] Failed to increment usage counts for teacher {teacher_id} for document {document_id}. This might lead to incorrect billing/quota information.")
+                    # Decide if this is critical enough to prevent task deletion or re-queue.
+                    # For now, logging the error and proceeding.
+            elif word_count is None:
+                logger.error(f"[AssessmentWorker] Word count is None for document {document_id}. Cannot increment teacher usage. This is unexpected after successful processing.")
+            # <<< END EDIT >>>
 
             # Update Result with score and status
             # Ensure paragraph_results uses the list of ParagraphResult model instances
@@ -389,12 +412,12 @@ class AssessmentWorker:
                 # raw_response can be added here if/when _call_ml_api is implemented and returns a raw dict
             )
             
-            if not doc_update_completed or not final_res_update:
+            if not doc_status_updated_to_completed or not final_res_update:
                 logger.error(f"[AssessmentWorker] Failed to update doc/result to COMPLETED/FAILED after ML processing for task {task.id}. Re-queueing task.")
                 await self._update_task_for_retry(task, "RESULT_UPDATE_ML_DATA_FAILED")
                 return
 
-            logger.info(f"[AssessmentWorker] Successfully processed task {task.id} for document {document_id}. Final score: {overall_score}")
+            logger.info(f"[AssessmentWorker] Successfully processed task {task.id} for document {document_id}. Overall AI score: {overall_score:.2f}")
             await self._delete_assessment_task(task.id) # Delete task after successful processing
 
         except FileNotFoundError as fnf_error:

@@ -50,6 +50,14 @@ router = APIRouter(
 )
 # --- End router definition ---
 
+# Define a mapping for BatchPriority enum to integer values
+BATCH_PRIORITY_TO_INT_MAP = {
+    BatchPriority.LOW: -1,
+    BatchPriority.NORMAL: 0,
+    BatchPriority.HIGH: 1,
+    BatchPriority.URGENT: 2,
+}
+
 # === Document API Endpoints (Protected) ===
 
 @router.post(
@@ -761,6 +769,7 @@ async def upload_batch(
     now = datetime.now(timezone.utc)
     batch_data = BatchCreate(
         teacher_id=user_kinde_id,
+        total_files=len(files),
         student_id=student_id,
         assignment_id=assignment_id,
         priority=priority,
@@ -819,7 +828,8 @@ async def upload_batch(
                 teacher_id=user_kinde_id,
                 batch_id=created_batch.id,
                 character_count=file_data["char_count"],
-                word_count=file_data["word_count"]
+                word_count=file_data["word_count"],
+                processing_priority=BATCH_PRIORITY_TO_INT_MAP.get(priority, 0) # Set integer priority
             )
             created_document = await crud.create_document(document_in=document_data)
             if not created_document:
@@ -832,8 +842,7 @@ async def upload_batch(
 
             # 2c. Create initial Result record
             created_result = await crud.create_result(
-                document_id=created_document.id, 
-                teacher_id=user_kinde_id
+                result_in=ResultCreate(document_id=created_document.id, teacher_id=user_kinde_id)
             )
             if not created_result:
                 logger.error(f"Failed to create initial result for document {created_document.id} in batch {created_batch.id}. Document status set to ERROR.")
@@ -845,7 +854,7 @@ async def upload_batch(
                 AssessmentTask(
                     document_id=created_document.id,
                     user_id=user_kinde_id, # teacher_id
-                    priority_level=created_document.processing_priority or BatchPriority.NORMAL.value # Use doc's priority
+                    priority_level=created_document.processing_priority # Use the integer priority from document
                 )
             )
         except Exception as e_doc_processing:
@@ -864,8 +873,9 @@ async def upload_batch(
             return BatchWithDocuments(
                 id=created_batch.id,
                 teacher_id=created_batch.teacher_id,
-                student_id=created_batch.student_id,
-                assignment_id=created_batch.assignment_id,
+                # student_id and assignment_id are not part of Batch model, removing them from response
+                # student_id=created_batch.student_id,
+                # assignment_id=created_batch.assignment_id,
                 priority=created_batch.priority,
                 status=BatchStatus.FAILED,
                 upload_timestamp=created_batch.upload_timestamp,
@@ -908,17 +918,17 @@ async def upload_batch(
                     break
     
     # 4. Update Batch status based on outcomes
-    final_batch_status = BatchStatus.COMPLETED_WITH_FAILURES
+    final_batch_status = BatchStatus.PARTIAL_FAILURE
     if successful_queues == len(tasks_to_enqueue) and len(tasks_to_enqueue) > 0:
-        final_batch_status = BatchStatus.COMPLETED_SUCCESSFULLY
+        final_batch_status = BatchStatus.COMPLETED
     elif successful_queues == 0 and len(tasks_to_enqueue) > 0 : # All tasks failed to enqueue
-        final_batch_status = BatchStatus.FAILED
+        final_batch_status = BatchStatus.ERROR
     elif not tasks_to_enqueue and not created_documents_list: # No files processed at all
-         final_batch_status = BatchStatus.FAILED # Already handled above, but as a safeguard
-    # else: remains COMPLETED_WITH_FAILURES if some succeeded, some failed, or some files skipped pre-task stage
+         final_batch_status = BatchStatus.ERROR
+    # else: remains PARTIAL_FAILURE if some succeeded, some failed, or some files skipped pre-task stage
 
     updated_batch_data = BatchUpdate(status=final_batch_status)
-    if final_batch_status == BatchStatus.FAILED and not created_documents_list:
+    if final_batch_status == BatchStatus.ERROR and not created_documents_list:
         updated_batch_data.error_message = "No valid files were processed from the batch."
 
     final_updated_batch = await crud.update_batch(batch_id=created_batch.id, batch_in=updated_batch_data)
@@ -935,8 +945,9 @@ async def upload_batch(
     return BatchWithDocuments(
         id=final_updated_batch.id if final_updated_batch else created_batch.id,
         teacher_id=final_updated_batch.teacher_id if final_updated_batch else created_batch.teacher_id,
-        student_id=final_updated_batch.student_id if final_updated_batch else created_batch.student_id,
-        assignment_id=final_updated_batch.assignment_id if final_updated_batch else created_batch.assignment_id,
+        # student_id and assignment_id are not part of Batch model, removing them from response
+        # student_id=final_updated_batch.student_id if final_updated_batch else created_batch.student_id,
+        # assignment_id=final_updated_batch.assignment_id if final_updated_batch else created_batch.assignment_id,
         priority=final_updated_batch.priority if final_updated_batch else created_batch.priority,
         status=final_updated_batch.status if final_updated_batch else BatchStatus.UNKNOWN, # provide a fallback
         upload_timestamp=final_updated_batch.upload_timestamp if final_updated_batch else created_batch.upload_timestamp,

@@ -92,6 +92,11 @@ class TeacherInDBBase(TeacherBase):
     )
     # --- STRIPE SUBSCRIPTION FIELDS END ---
 
+    # --- USAGE TRACKING FIELDS (Stored in DB) ---
+    words_used_current_cycle: Optional[int] = Field(default=0, description="Words used in the current billing cycle")
+    documents_processed_current_cycle: Optional[int] = Field(default=0, description="Documents processed in the current billing cycle")
+    # --- END USAGE TRACKING FIELDS ---
+
     model_config = ConfigDict(
         populate_by_name=True,
         from_attributes=True,
@@ -101,12 +106,14 @@ class TeacherInDBBase(TeacherBase):
 
 # Final model representing a Teacher read from DB (API Response)
 class Teacher(TeacherInDBBase):
-    # Inherits all fields including Stripe subscription fields
+    # Inherits all fields including Stripe subscription fields and new usage fields
     pass
 
 class TeacherProfile(Teacher):
-    current_plan_word_limit: Optional[int] = Field(None, description="Monthly word limit for the current plan")
+    current_plan_word_limit: Optional[int] = Field(None, description="Monthly word limit for the current plan (allowance)")
     current_plan_char_limit: Optional[int] = Field(None, description="Monthly character limit for the current plan")
+    # Derived field, calculated in the endpoint
+    remaining_words_current_cycle: Optional[int] = Field(None, description="Calculated remaining words in the current billing cycle")
 
 # Model for updating (Profile Page uses this, or admin updates)
 class TeacherUpdate(BaseModel):

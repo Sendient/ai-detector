@@ -5,6 +5,7 @@ import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import MainCardBackground2Image from '../img/maincard2.png'; // Import the new background image maincard2.png
+import { useAuth } from '../contexts/AuthContext'; // Corrected import path
 
 // --- Import Icons ---
 import {
@@ -113,6 +114,7 @@ function DashboardPage() {
   const { t } = useTranslation();
   const { isAuthenticated, isLoading: isAuthLoading, getToken, user } = useKindeAuth();
   const navigate = useNavigate();
+  const { currentUser, loading: authLoading } = useAuth(); // Added useAuth and authLoading
 
   // --- State for Dashboard Data ---
   const [isLoading, setIsLoading] = useState(true);
@@ -133,6 +135,19 @@ function DashboardPage() {
   const [sortOrder, setSortOrder] = useState('desc');
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
+  // Helper function to get plan display name
+  const getPlanDisplayName = (planString) => {
+    if (authLoading || isAuthLoading) return 'Loading...'; // Show loading state
+    if (planString) {
+        const formattedPlan = planString.charAt(0).toUpperCase() + planString.slice(1);
+        return `${formattedPlan} Plan`;
+    }
+    if (isAuthenticated) { // If authenticated but no plan string, default to Free Plan
+        return t('header_free_plan', 'Free Plan');
+    }
+    return 'Plan N/A'; // Fallback if not authenticated or no plan info
+  };
 
   // --- Effect to update user name from Kinde auth ---
   useEffect(() => {
@@ -377,18 +392,35 @@ function DashboardPage() {
         <div 
           className="p-6 rounded-lg shadow-md border border-base-300 bg-base-100 relative overflow-hidden"
         >
-          {/* Image as a layer, behind the content */}
-          <img 
-            src={MainCardBackground2Image}
-            alt="Welcome background" 
-            className="absolute inset-0 w-full h-full object-cover"
-          />
+          {/* Image as a layer, behind the content - REMOVED */}
           
           {/* Content - on top of the image. Added left padding to shift content right. */}
           <div className="relative z-10 space-y-4 pl-8">
             <h2 className="text-2xl font-semibold text-base-content mb-4">
               {t('dashboardPage_welcome')} {userName}
             </h2>
+            {currentUser && ( // Added plan display
+              <div className="text-sm text-base-content/80">
+                <p>
+                  You are on the '{getPlanDisplayName(currentUser.current_plan)}' plan.
+                </p>
+                {currentUser.current_plan !== 'schools' ? (
+                  <>
+                    <p>
+                      You have {currentUser.current_plan_word_limit?.toLocaleString() || 'N/A'} words to assess this month.
+                    </p>
+                    <p>
+                      You have {currentUser.remaining_words_current_cycle?.toLocaleString() || 'N/A'} words left on your plan.
+                    </p>
+                     <p>
+                      You have processed {currentUser.documents_processed_current_cycle?.toLocaleString() || '0'} documents this cycle.
+                    </p>
+                  </>
+                ) : (
+                  <p>You have unlimited words and document processing.</p>
+                )}
+              </div>
+            )}
             <div className="flex justify-start">
               <Link
                 to="/quickstart"

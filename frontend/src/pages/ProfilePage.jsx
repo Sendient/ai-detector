@@ -433,6 +433,67 @@ function ProfilePage() {
                 </div>
             </div>
 
+            {/* Usage Details Card - NEW */}
+            {currentUser && (
+                <div className="card bg-base-100 shadow-md mb-6">
+                    <div className="card-body">
+                        <h2 className="card-title text-lg">{t('profilePage_usageDetails_title', 'Usage Details')}</h2>
+                        <div className="divider my-1"></div>
+                        {currentUser.current_plan === 'SCHOOLS' ? (
+                            <p>{t('profilePage_usage_unlimited', "Your Schools plan includes unlimited word usage.")}</p>
+                        ) : (
+                            <div className="space-y-2">
+                                <div className="flex justify-between">
+                                    <span>{t('profilePage_usage_allowance', 'Monthly Word Allowance:')}</span>
+                                    <span className="font-semibold">{currentUser.current_plan_word_allowance?.toLocaleString() || t('common_not_applicable', 'N/A')}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>{t('profilePage_usage_used', 'Words Used This Cycle:')}</span>
+                                    <span className="font-semibold">{currentUser.words_used_current_cycle?.toLocaleString() || '0'}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>{t('profilePage_usage_remaining', 'Words Remaining This Cycle:')}</span>
+                                    <span className="font-semibold">{currentUser.remaining_words_current_cycle?.toLocaleString() || t('common_not_applicable', 'N/A')}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>{t('profilePage_usage_documentsProcessed', 'Documents Processed This Cycle:')}</span>
+                                    <span className="font-semibold">{currentUser.documents_processed_current_cycle?.toLocaleString() || '0'}</span>
+                                </div>
+                                {currentUser.current_plan_word_allowance && currentUser.current_plan_word_allowance > 0 && currentUser.current_plan !== 'SCHOOLS' && (
+                                    <progress 
+                                        className="progress progress-primary w-full mt-2" 
+                                        value={currentUser.words_used_current_cycle || 0} 
+                                        max={currentUser.current_plan_word_allowance}>
+                                    </progress>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Contact Information Card */}
+            <div className="card bg-base-100 shadow-md">
+                <div className="card-body">
+                    <h2 className="card-title text-lg">{t('profilePage_contactInfo_title', 'Contact Information')}</h2>
+                    <div className="divider my-1"></div>
+                    <div className="space-y-2">
+                        <div>
+                            <span className="font-medium">{t('profilePage_contactInfo_phone', 'Phone:')}</span>
+                            {currentUser?.phone || t('common_not_applicable', 'N/A')}
+                        </div>
+                        <div>
+                            <span className="font-medium">{t('profilePage_contactInfo_email', 'Email:')}</span>
+                            {currentUser?.email || t('common_not_applicable', 'N/A')}
+                        </div>
+                        <div>
+                            <span className="font-medium">{t('profilePage_contactInfo_address', 'Address:')}</span>
+                            {currentUser?.address || t('common_not_applicable', 'N/A')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     );
 }
