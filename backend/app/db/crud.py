@@ -39,6 +39,9 @@ from ..models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
 # --- Import for reprocess ---
 from ..queue import enqueue_assessment_task
 
+# --- Import TeacherAdminView ---
+from ..api.v1.endpoints.admin import TeacherAdminView # Added for get_all_teachers_admin_view
+
 # --- Service Imports --- ADD THIS SECTION IF IT DOESN'T EXIST
 from ..services.blob_storage import delete_blob as service_delete_blob # ADD THIS IMPORT
 
@@ -325,18 +328,52 @@ async def get_teacher_by_kinde_id(kinde_id: str, session=None) -> Optional[Teach
 async def get_all_teachers(skip: int = 0, limit: int = 100, include_deleted: bool = False, session=None) -> List[Teacher]:
     collection = _get_collection(TEACHER_COLLECTION); teachers_list: List[Teacher] = []
     if collection is None: return teachers_list
+
     query = soft_delete_filter(include_deleted)
-    logger.info(f"Getting all teachers skip={skip} limit={limit}")
+    logger.info(f"Getting all teachers (deleted={include_deleted}) skip={skip} limit={limit}")
+
     try:
-        # Fetch without session
-        cursor = collection.find(query).skip(skip).limit(limit)
+        cursor = collection.find(query, session=session).skip(skip).limit(limit)
         async for doc in cursor:
             try:
-                 teachers_list.append(Teacher(**doc))
+                teachers_list.append(Teacher(**doc))
             except Exception as validation_err:
                 logger.error(f"Pydantic validation failed for teacher doc {doc.get('_id', 'UNKNOWN')}: {validation_err}")
     except Exception as e:
         logger.error(f"Error getting all teachers: {e}", exc_info=True)
+    return teachers_list
+
+async def get_all_teachers_admin_view(skip: int = 0, limit: int = 100, session=None) -> List[TeacherAdminView]:
+    """
+    Retrieves a list of all teachers with all their attributes for admin view.
+    Supports pagination.
+    Does not filter by is_deleted by default, allowing admins to see all records.
+    """
+    collection = _get_collection(TEACHER_COLLECTION)
+    teachers_list: List[TeacherAdminView] = []
+    if collection is None:
+        logger.error("Teacher collection not found for get_all_teachers_admin_view.")
+        return teachers_list
+
+    # Admin view typically sees all records, including soft-deleted ones.
+    # If you want to allow filtering, add an `include_deleted` parameter.
+    query = {} # No soft_delete_filter applied by default for admin
+
+    logger.info(f"Admin getting all teachers. Skip: {skip}, Limit: {limit}")
+
+    try:
+        cursor = collection.find(query, session=session).skip(skip).limit(limit)
+        async for doc in cursor:
+            try:
+                # Assuming TeacherAdminView can be instantiated directly from the doc
+                # and handles aliasing like '_id' to 'id' if necessary via Pydantic config.
+                teachers_list.append(TeacherAdminView(**doc))
+            except ValidationError as validation_err:
+                logger.error(f"Pydantic validation failed for teacher doc {doc.get('_id', 'UNKNOWN')} in admin view: {validation_err}")
+            except Exception as e:
+                logger.error(f"Unexpected error processing teacher doc {doc.get('_id', 'UNKNOWN')} in admin view: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error getting all teachers for admin view: {e}", exc_info=True)
     return teachers_list
 
 @with_transaction # Keep transaction for update as it modifies existing data
@@ -613,6 +650,59 @@ async def get_all_class_groups( teacher_id: Optional[uuid.UUID] = None, school_i
             except Exception as validation_err: logger.error(f"Pydantic validation failed for class group doc {doc.get('_id', 'UNKNOWN')}: {validation_err}")
     except Exception as e: logger.error(f"Error getting all class groups: {e}", exc_info=True)
     return items_list
+
+async def get_all_class_groups_admin(skip: int = 0, limit: int = 1000, include_deleted: bool = False, session=None) -> List[ClassGroup]:
+    """Fetches all class groups from the database, for admin purposes. Does not filter by teacher_id."""
+    collection = _get_collection(CLASSGROUP_COLLECTION)
+    class_groups_list: List[ClassGroup] = []
+    if collection is None:
+        logger.error("ClassGroup collection not found for admin fetch.")
+        return class_groups_list
+
+    query = soft_delete_filter(include_deleted)
+    logger.info(f"[Admin] Getting all class groups (deleted={include_deleted}) skip={skip} limit={limit} with query {query}")
+
+    try:
+        cursor = collection.find(query, session=session).skip(skip).limit(limit)
+        async for doc in cursor:
+            try:
+                mapped_data = {**doc}
+                if "_id" in mapped_data:
+                    mapped_data["id"] = mapped_data.pop("_id")
+                else:
+                    logger.warning(f"ClassGroup doc missing '_id' in admin fetch: {doc}")
+                    # If ID is critical and missing, might want to skip or handle error
+                    continue
+                
+                # Ensure student_ids is a list of UUIDs if it exists, or default to empty list
+                student_ids_raw = mapped_data.get("student_ids")
+                valid_student_ids = []
+                if isinstance(student_ids_raw, list):
+                    for sid_raw in student_ids_raw:
+                        if sid_raw: # Ensure sid_raw is not None or empty string
+                            try:
+                                valid_student_ids.append(uuid.UUID(str(sid_raw)))
+                            except ValueError:
+                                logger.warning(f"Invalid UUID format for student_id '{sid_raw}' in ClassGroup {mapped_data.get('id')}. Skipping this student_id.")
+                        else:
+                            logger.warning(f"Empty or None student_id found in list for ClassGroup {mapped_data.get('id')}. Skipping.")
+                elif student_ids_raw is None:
+                    logger.debug(f"student_ids is None for ClassGroup {mapped_data.get('id')}. Defaulting to empty list.")
+                else: # Unexpected type for student_ids
+                    logger.warning(f"Unexpected type for student_ids in ClassGroup {mapped_data.get('id')}: {type(student_ids_raw)}. Setting to empty list.")
+                
+                mapped_data["student_ids"] = valid_student_ids
+                    
+                class_groups_list.append(ClassGroup(**mapped_data))
+            except ValidationError as validation_err:
+                logger.error(f"Pydantic validation failed for ClassGroup doc {doc.get('_id', 'UNKNOWN')} during admin fetch: {validation_err}")
+            except Exception as e:
+                logger.error(f"Error processing individual ClassGroup doc {doc.get('_id', 'UNKNOWN')} during admin fetch: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error getting all class groups for admin: {e}", exc_info=True)
+    
+    logger.info(f"[Admin] Retrieved {len(class_groups_list)} class groups.")
+    return class_groups_list
 
 async def get_class_group_by_name_year_and_teacher(
     class_name: str, 

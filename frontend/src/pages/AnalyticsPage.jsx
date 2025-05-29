@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 // Import Kinde auth hook
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
+// Import useAuth to access currentUser for usage stats
+import { useAuth } from '../contexts/AuthContext'; 
 // Assuming you have Lucide icons installed for React
 // npm install lucide-react
-import { Calendar as CalendarIcon, TrendingUp, FileText, Users, BarChart2, AlertTriangle, ListChecks } from 'lucide-react';
+import { Calendar as CalendarIcon, TrendingUp, FileText, Users, BarChart2, AlertTriangle, ListChecks, Link as LinkIcon } from 'lucide-react';
 import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid';
 
 // --- Authentication Placeholder Removed ---
@@ -44,17 +46,14 @@ const StatCard = ({ title, value, description, icon: Icon, isLoading, className 
 function AnalyticsPage() {
   // Kinde Auth Hook
   const { user, getToken, isAuthenticated, isLoading: isAuthLoading } = useKindeAuth();
+  // AuthContext Hook to get currentUser for usage stats
+  const { currentUser, loading: authContextLoading } = useAuth();
 
   // State Hooks
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [selectedPeriod, setSelectedPeriod] = useState('monthly');
-  const [usageStats, setUsageStats] = useState(null);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [recentActivity, setRecentActivity] = useState([]);
-  const [isLoadingUsage, setIsLoadingUsage] = useState(false);
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
   const [isLoadingActivity, setIsLoadingActivity] = useState(false);
-  const [usageError, setUsageError] = useState(null);
   const [activityError, setActivityError] = useState(null);
   const [dashboardError, setDashboardError] = useState(null);
 
@@ -62,23 +61,11 @@ function AnalyticsPage() {
   const [activitySortField, setActivitySortField] = useState('upload_timestamp'); // Default sort field
   const [activitySortOrder, setActivitySortOrder] = useState('desc'); // Default sort order
 
-  // --- Get Current User ---
-  // Now using the user object from useKindeAuth hook
-  const currentUser = user; // Kinde's user object often has an 'id' property
-
   // Format date for display and API
-  const formatDate = (date) => {
-      if (!(date instanceof Date)) { try { date = new Date(date); } catch (e) { console.error("Invalid date provided to formatDate:", date); return ''; } }
-      if (isNaN(date.getTime())) { console.error("Invalid date resulted after conversion:", date); return ''; }
-      return date.toISOString().split('T')[0];
-  }
-
   const formatDateTime = (dateString) => {
       if (!dateString) return 'N/A';
       try { return new Date(dateString).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short'}); } catch (e) { return 'Invalid Date'; }
   }
-
-  // --- API Fetching Functions ---
 
   const handleActivitySort = (field) => {
     if (activitySortField === field) {
@@ -92,27 +79,9 @@ function AnalyticsPage() {
     }
   };
 
-  // Fetch Usage Stats Function (Using Kinde Auth)
-  const fetchUsageData = useCallback(async () => {
-    if (isAuthLoading || !currentUser?.id || !selectedDate || !selectedPeriod) return;
-    setIsLoadingUsage(true); setUsageError(null); let token;
-    const targetDateFormatted = formatDate(selectedDate);
-    if (!targetDateFormatted) { setUsageError("Invalid date selected."); setIsLoadingUsage(false); return; }
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-    const apiUrl = `${API_BASE_URL}/api/v1/analytics/usage/${selectedPeriod}?target_date=${targetDateFormatted}`;
-    try {
-        token = await getToken(); if (!token) throw new Error("Authentication token not available.");
-        console.log(`Fetching Usage Stats from: ${apiUrl}`);
-        const response = await fetch(apiUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', }, });
-        if (!response.ok) { const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response' })); throw new Error(errorData.detail || `HTTP error! status: ${response.status}`); }
-        const data = await response.json(); setUsageStats(data);
-    } catch (err) { console.error("Failed to fetch usage stats:", err); setUsageError(err.message || "Failed to load usage statistics."); setUsageStats(null);
-    } finally { setIsLoadingUsage(false); }
-  }, [selectedDate, selectedPeriod, currentUser?.id, getToken, isAuthLoading]);
-
   // Fetch Dashboard Stats Function (Using Kinde Auth)
    const fetchDashboardData = useCallback(async () => {
-    if (isAuthLoading || !currentUser?.id) return;
+    if (isAuthLoading || !user?.id) return;
     setIsLoadingDashboard(true); setDashboardError(null); let token;
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
     const apiUrl = `${API_BASE_URL}/api/v1/dashboard/stats`;
@@ -124,11 +93,11 @@ function AnalyticsPage() {
         const data = await response.json(); setDashboardStats(data);
     } catch (err) { console.error("Failed to fetch dashboard stats:", err); setDashboardError(err.message || "Failed to load dashboard statistics."); setDashboardStats(null);
     } finally { setIsLoadingDashboard(false); }
-   }, [currentUser?.id, getToken, isAuthLoading]);
+   }, [user?.id, getToken, isAuthLoading]);
 
    // Fetch Recent Activity Function (Using Kinde Auth)
    const fetchActivityData = useCallback(async (limit = 5) => {
-    if (isAuthLoading || !currentUser?.id) return;
+    if (isAuthLoading || !user?.id) return;
     setIsLoadingActivity(true); setActivityError(null); let token;
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
     // Assuming your documents endpoint supports limit, sort_by, and sort_order query params
@@ -157,7 +126,7 @@ function AnalyticsPage() {
         }
     } catch (err) { console.error("Failed to fetch recent activity:", err); setActivityError(err.message || "Failed to load recent activity."); setRecentActivity([]);
     } finally { setIsLoadingActivity(false); }
-   }, [currentUser?.id, getToken, isAuthLoading]); // Added dependencies
+   }, [user?.id, getToken, isAuthLoading]);
 
 
   // Sort recentActivity before rendering
@@ -187,30 +156,12 @@ function AnalyticsPage() {
     });
   }, [recentActivity, activitySortField, activitySortOrder]);
 
-  // Effect Hook for Usage Stats (Runs when date or period changes)
-  useEffect(() => { if (isAuthenticated) { fetchUsageData(); } else { setUsageStats(null); } }, [fetchUsageData, isAuthenticated]);
-
   // Effect Hook for Dashboard Stats & Recent Activity (fetch on mount or when auth state changes)
   useEffect(() => { if (isAuthenticated) { fetchDashboardData(); fetchActivityData(5); } else { setDashboardStats(null); setRecentActivity([]); } }, [fetchDashboardData, fetchActivityData, isAuthenticated]);
 
 
-  // --- Helper to format usage stats display ---
-  const getUsagePeriodLabel = () => { /* ... (no changes) ... */
-    if (!usageStats) return "Selected Period";
-    switch (selectedPeriod) {
-      case 'daily': return `On ${usageStats.target_date}`;
-      case 'weekly': return `Week: ${usageStats.week_start_date} to ${usageStats.week_end_date}`;
-      case 'monthly':
-        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const monthIndex = usageStats.month - 1;
-        if (monthIndex >= 0 && monthIndex < 12) { return `For ${monthNames[monthIndex]} ${usageStats.year}`; }
-        return "Invalid Month";
-      default: return "Selected Period";
-    }
-  };
-
   // --- Helper to get status badge color ---
-  const getStatusBadgeClass = (status) => { /* ... (no changes) ... */
+  const getStatusBadgeClass = (status) => {
     switch (status?.toUpperCase()) {
         case 'COMPLETED': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
         case 'PROCESSING': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
@@ -221,11 +172,20 @@ function AnalyticsPage() {
   }
 
   // Handle Auth Loading State
-  if (isAuthLoading) { return <div className="p-8 text-center">Loading authentication...</div>; }
+  if (isAuthLoading || authContextLoading) { return <div className="p-8 text-center">Loading authentication...</div>; }
 
   // Handle Not Authenticated State
   if (!isAuthenticated) { return <div className="p-8 text-center">Please log in to view analytics.</div>; }
 
+  let integrationsValue = "No integrations active.";
+  let integrationsDescription = "Upgrade to Schools for integrations.";
+  let iconColorClass = "text-gray-400 dark:text-gray-500"; // Default grey icon
+
+  if (currentUser && currentUser.current_plan === 'SCHOOLS') {
+    integrationsValue = "Schools Plan Features Active";
+    integrationsDescription = "LMS & API access enabled.";
+    iconColorClass = "text-green-500 dark:text-green-400"; // Green icon for active
+  }
 
   return (
     // Using Tailwind classes for styling
@@ -233,40 +193,52 @@ function AnalyticsPage() {
       {/* Page Title */}
       <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-6">Analytics</h1>
 
-      {/* --- Time Period Selector Card --- */}
-      {/* ... (no changes) ... */}
-      <div className="mb-8 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex-1">
-            <label htmlFor="date-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select Date</label>
-            <input id="date-select" type="date" value={formatDate(selectedDate)} onChange={(e) => setSelectedDate(new Date(e.target.value))} className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-indigo-500 focus:border-indigo-500" aria-label="Select date for analytics period" />
-          </div>
-          <div className="flex-1">
-             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select Period</label>
-            <div className="flex space-x-2">
-              {['daily', 'weekly', 'monthly'].map((period) => ( <button key={period} onClick={() => setSelectedPeriod(period)} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${ selectedPeriod === period ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-500' }`} aria-pressed={selectedPeriod === period} > {period.charAt(0).toUpperCase() + period.slice(1)} </button> ))}
-            </div>
-          </div>
+      {/* Display general errors if any */}
+      {(dashboardError || activityError) && (
+        <div className="mb-8 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 rounded-md shadow-md">
+          {dashboardError && <p className="text-red-600 dark:text-red-400 text-sm font-medium">Dashboard Stats Error: {dashboardError}</p>}
+          {activityError && <p className="text-red-600 dark:text-red-400 text-sm font-medium">Activity Error: {activityError}</p>}
         </div>
-         {(usageError || dashboardError || activityError) && ( <div className="mt-4 space-y-1 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 rounded-md"> {usageError && <p className="text-red-600 dark:text-red-400 text-sm font-medium">Usage Stats Error: {usageError}</p>} {dashboardError && <p className="text-red-600 dark:text-red-400 text-sm font-medium">Dashboard Stats Error: {dashboardError}</p>} {activityError && <p className="text-red-600 dark:text-red-400 text-sm font-medium">Activity Error: {activityError}</p>} </div> )}
-      </div>
+      )}
 
       {/* --- Stats Grid --- */}
-      {/* ... (no changes to grid structure) ... */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-8">
-        {/* Usage Stats Card */}
+        {/* Usage Stats Card - MODIFIED to use currentUser from useAuth */}
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 col-span-1 flex flex-col min-h-[140px]">
-           <div className="flex items-center justify-between mb-4"> <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Usage ({selectedPeriod})</h3> <CalendarIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" /> </div>
-           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{getUsagePeriodLabel()}</p>
+           <div className="flex items-center justify-between mb-4"> <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Current Cycle Usage</h3> <CalendarIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" /> </div>
            <div className="flex-grow flex items-end">
-             {isLoadingUsage ? ( <div className="space-y-3 animate-pulse w-full"><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div></div>
-             ) : usageStats ? (
-              <div className="space-y-3 w-full">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Documents: <span className="font-semibold text-gray-900 dark:text-white">{usageStats.document_count?.toLocaleString() ?? 'N/A'}</span></p>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Characters: <span className="font-semibold text-gray-900 dark:text-white">{usageStats.total_characters?.toLocaleString() ?? 'N/A'}</span></p>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Words: <span className="font-semibold text-gray-900 dark:text-white">{usageStats.total_words?.toLocaleString() ?? 'N/A'}</span></p>
-              </div>
-             ) : ( <p className="text-sm text-gray-500 dark:text-gray-400">No usage data available.</p> )}
+             {authContextLoading ? ( <div className="space-y-3 animate-pulse w-full"><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div><div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div></div>
+             ) : currentUser ? (
+                currentUser.current_plan === 'SCHOOLS' ? (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">Your Schools plan includes unlimited word usage.</p>
+                ) : (
+                  <div className="space-y-2 w-full">
+                      <div className="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                          <span>Monthly Word Limit:</span>
+                          <span className="font-semibold text-gray-900 dark:text-white">{currentUser.current_plan_word_limit?.toLocaleString() ?? 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                          <span>Words Used This Cycle:</span>
+                          <span className="font-semibold text-gray-900 dark:text-white">{currentUser.words_used_current_cycle?.toLocaleString() ?? '0'}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                          <span>Words Remaining:</span>
+                          <span className="font-semibold text-gray-900 dark:text-white">{currentUser.remaining_words_current_cycle?.toLocaleString() ?? 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                          <span>Documents Processed:</span>
+                          <span className="font-semibold text-gray-900 dark:text-white">{currentUser.documents_processed_current_cycle?.toLocaleString() ?? '0'}</span>
+                      </div>
+                      {currentUser.current_plan_word_allowance && currentUser.current_plan_word_allowance > 0 && currentUser.current_plan !== 'SCHOOLS' && (
+                          <progress 
+                              className="progress progress-primary w-full mt-2" 
+                              value={currentUser.words_used_current_cycle || 0} 
+                              max={currentUser.current_plan_word_allowance}>
+                          </progress>
+                      )}
+                  </div>
+                )
+             ) : ( <p className="text-sm text-gray-500 dark:text-gray-400">Usage data not available. Ensure you are logged in.</p> )}
            </div>
         </div>
         {/* Other Stat Cards */}
@@ -287,12 +259,19 @@ function AnalyticsPage() {
         />
         <StatCard title="Average AI Score" value={dashboardStats?.avgScore !== null && dashboardStats?.avgScore !== undefined ? `${(dashboardStats.avgScore * 100).toFixed(1)}%` : 'N/A'} description="Across all assessed" icon={TrendingUp} isLoading={isLoadingDashboard} className="col-span-1" />
         <StatCard title="Pending Documents" value={dashboardStats?.pending?.toLocaleString()} description="In queue or processing" icon={Users} isLoading={isLoadingDashboard} className="col-span-1" />
-        <StatCard title="Score Distribution" value={"See Chart"} description="Breakdown of AI scores" icon={BarChart2} isLoading={false} className="col-span-1" />
+        {/* MODIFIED StatCard for Active Integrations */}
+        <StatCard 
+          title="Active Integrations"
+          value={authContextLoading ? null : integrationsValue} 
+          description={authContextLoading ? null : integrationsDescription}
+          icon={() => <LinkIcon className={`h-5 w-5 ${iconColorClass}`} />} // Custom icon rendering with color
+          isLoading={authContextLoading} 
+          className="col-span-1" 
+        />
         <StatCard title="Recently Flagged" value={dashboardStats?.flaggedRecent?.toLocaleString()} description="In the last 7 days (example)" icon={AlertTriangle} isLoading={isLoadingDashboard} className="col-span-1" />
       </div>
 
       {/* --- Recent Activity Table --- */}
-      {/* ... (no changes) ... */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700"> <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center"> <ListChecks className="h-5 w-5 mr-2 text-gray-500 dark:text-gray-400" /> Recent Activity </h2> <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Your last 5 processed documents.</p> </div>
           <div className="overflow-x-auto">

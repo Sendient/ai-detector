@@ -111,6 +111,63 @@ async def _check_user_is_teacher_of_group( # Needs async to call crud.get_teache
 
 # === ClassGroup API Endpoints ===
 
+# --- GET /classgroups/all-admin (ADMIN ONLY) ---
+@router.get(
+    "/all-admin",
+    response_model=List[ClassGroup],
+    status_code=status.HTTP_200_OK,
+    summary="Get all class groups (Admin Only)",
+    description="Retrieves a list of all class groups in the system. Requires administrator privileges."
+)
+async def read_all_class_groups_admin(
+    skip: int = Query(0, ge=0, description="Records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Max records to return"), # Increased limit for admin
+    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+):
+    logger.info("<<<<< read_all_class_groups_admin: ENTRY POINT >>>>>") # MODIFIED Log statement
+    try:
+        logger.info(f"read_all_class_groups_admin: User payload sub: {current_user_payload.get('sub')}, Skip: {skip}, Limit: {limit}") # MODIFIED Log statement
+        user_kinde_id = current_user_payload.get("sub")
+        logger.info(f"[ADMIN CLASS GROUPS] User Kinde ID: {user_kinde_id}, attempting to read all class groups (skip={skip}, limit={limit}).")
+
+        # --- Check for Administrator Privileges ---
+        teacher_db = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id)
+        if not teacher_db:
+            logger.error(f"[ADMIN CLASS GROUPS] Teacher profile not found in DB for Kinde ID: {user_kinde_id}. Denying access.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Teacher profile not found. Access denied."
+            )
+        
+        if not teacher_db.is_administrator:
+            logger.warning(f"[ADMIN CLASS GROUPS] User {user_kinde_id} (DB ID: {teacher_db.id}) attempted to access admin endpoint /class-groups/all-admin without sufficient privileges (is_administrator: {teacher_db.is_administrator}).")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access this resource."
+            )
+        logger.info(f"[ADMIN CLASS GROUPS] Admin user {user_kinde_id} (DB ID: {teacher_db.id}) granted access to /all-admin.")
+        # --- End Check ---
+
+        class_groups = await crud.get_all_class_groups_admin(skip=skip, limit=limit, include_deleted=False)
+        
+        logger.info(f"[ADMIN CLASS GROUPS] Successfully retrieved {len(class_groups)} class groups for admin user {user_kinde_id}.")
+        return class_groups
+    except HTTPException as http_exc:
+        logger.error(f"[ADMIN CLASS GROUPS] HTTPException in /all-admin: {http_exc.status_code} - {http_exc.detail}", exc_info=True)
+        raise # Re-raise HTTPException to let FastAPI handle it
+    except ValidationError as val_exc:
+        logger.error(f"[ADMIN CLASS GROUPS] Pydantic ValidationError in /all-admin: {str(val_exc)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Data validation error: {str(val_exc)}"
+        ) # Raise as 422 to be more specific
+    except Exception as e:
+        logger.error(f"[ADMIN CLASS GROUPS] Unexpected error in /all-admin for user {user_kinde_id if 'user_kinde_id' in locals() else 'Unknown User'}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected server error occurred: {str(e)}"
+        )
+
 @router.post(
     "/",
     response_model=ClassGroup,

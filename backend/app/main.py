@@ -384,19 +384,19 @@ _original_fastapi_app.include_router(students_router, prefix=settings.API_V1_PRE
 _original_fastapi_app.include_router(documents_router, prefix=settings.API_V1_PREFIX, tags=["Documents"])
 _original_fastapi_app.include_router(results_router, prefix=settings.API_V1_PREFIX, tags=["Results"])
 _original_fastapi_app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX, tags=["Dashboard"])
-_original_fastapi_app.include_router(analytics_router, prefix=settings.API_V1_PREFIX, tags=["Analytics"])
-_original_fastapi_app.include_router(admin_router, prefix=settings.API_V1_PREFIX, tags=["Admin"])
+_original_fastapi_app.include_router(analytics_router, prefix=f"{settings.API_V1_PREFIX}/analytics", tags=["Analytics"])
+_original_fastapi_app.include_router(admin_router, prefix=f"{settings.API_V1_PREFIX}", tags=["Admin"])
 
 # --- NEW: Include Stripe Subscription and Webhook Routers ---
 _original_fastapi_app.include_router(
     subscriptions_router,
     prefix=f"{settings.API_V1_PREFIX}/subscriptions", # Ensure this matches your API structure
-    tags=["Subscriptions - Stripe"]
+    tags=["Subscriptions"]
 )
 _original_fastapi_app.include_router(
     stripe_webhook_router,
-    prefix="/webhooks",  # This prefix + "/stripe" from the webhook router itself = /webhooks/stripe
-    tags=["Webhooks - Stripe"]
+    prefix=f"{settings.API_V1_PREFIX}/webhooks/stripe", # This prefix + "/stripe" from the webhook router itself = /webhooks/stripe
+    tags=["Stripe Webhooks"]
 )
 # --- END NEW ROUTER INCLUSIONS ---
 

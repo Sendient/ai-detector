@@ -18,11 +18,15 @@ i18n
   .init({
     // --- Core Settings ---
     // Define the languages you want to support
-    supportedLngs: ['en-GB', 'en-US', 'fr-FR'],
+    supportedLngs: ['en', 'en-GB', 'en-US', 'fr-FR'],
 
     // The default language to use if detection fails or a key is missing
     // This is CRUCIAL for fallback behavior.
-    fallbackLng: 'en-GB',
+    fallbackLng: {
+      'en': ['en-GB', 'en-US'], // If 'en' is detected, try 'en-GB', then 'en-US'
+      'fr': ['fr-FR'],         // If 'fr' is detected, try 'fr-FR'
+      'default': ['en-GB']    // For any other unsupported language, fallback to 'en-GB'
+    },
 
     // Default namespace for your translations. You can have multiple namespaces (files)
     // but 'translation' is standard for the main set.
@@ -40,6 +44,10 @@ i18n
 
       // The specific key to use in localStorage for saving the language
       lookupLocalStorage: 'appLocale', // You can name this whatever you like
+
+      // Add these options to better handle generic language codes like 'en'
+      nonExplicitSupportedLngs: true,
+      checkWhitelist: true,
     },
 
     // --- Backend Loading Settings (i18next-http-backend) ---
@@ -69,7 +77,7 @@ i18n
     // Set to true to see detailed logs in the browser console during development
     // Helps troubleshoot loading issues or missing keys. Turn off for production.
     // debug: process.env.NODE_ENV === 'development',
-    debug: false, // Keep it false unless actively debugging i18n issues
+    debug: true, // Keep it false unless actively debugging i18n issues
   });
 
 // Export the configured i18n instance so it can be imported elsewhere (e.g., index.js)

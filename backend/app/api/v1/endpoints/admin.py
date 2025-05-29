@@ -8,8 +8,9 @@ import uuid # Added for student_id path parameter
 from ....core.security import require_kinde_admin_role, get_current_user_payload
 from ....db import crud # For DB operations
 from ....models.student import Student # Changed from TeacherProfile to Student
-# If you create a specific AdminTeacherView model later, you can use that.
-from ....models.enums import UserRoleEnum
+from ....models.teacher import Teacher, TeacherProfile  # Assuming a Teacher model to represent the data, IMPORT TeacherProfile
+from ....models.enums import UserRoleEnum, SubscriptionPlan # Added SubscriptionPlan
+from ....core.config import settings # Added settings
 
 logger = logging.getLogger(__name__)
 
@@ -116,5 +117,96 @@ async def delete_student_admin(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred while deleting student {student_id}."
         )
+
+# Pydantic model for the response. We might need a more detailed one later.
+# For now, using the existing Teacher model, but it might miss some fields from your example.
+# We will need to create a TeacherAdminView model that includes ALL fields.
+class TeacherAdminView(TeacherProfile): # This will need to be expanded or replaced
+    # Add any fields from your MongoDB example that are not in the base Teacher model
+    # For example:
+    # kinde_id: Optional[str] = None # If not already in Teacher
+    # stripe_customer_id: Optional[str] = None
+    # subscription_status: Optional[str] = None
+    # pro_plan_activated_at: Optional[datetime] = None
+    # last_login_date: Optional[datetime] = None # Placeholder for potential addition
+    pass
+
+@router.get(
+    "/teachers/all",
+    response_model=List[TeacherAdminView], # Will be List[TeacherAdminView]
+    summary="Get all teacher profiles (Admin Only)",
+    description="Retrieves a comprehensive list of all teacher profiles in the system, including all MongoDB attributes."
+)
+async def get_all_teachers_admin(
+    skip: int = Query(0, ge=0, description="Records to skip for pagination"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    # current_user_payload: Dict[str, Any] = Depends(get_current_user_payload) # Handled by router dependency
+):
+    """
+    Admin-only endpoint to retrieve all teacher records with all their attributes.
+    Supports pagination via skip and limit query parameters.
+    """
+    logger.info(f"GET /admin/teachers/all called. Skip: {skip}, Limit: {limit}")
+    try:
+        teachers_db_models = await crud.get_all_teachers_admin_view(skip=skip, limit=limit)
+        
+        if not teachers_db_models:
+            logger.info("GET /admin/teachers/all: No teachers found.")
+            return []
+            
+        response_teachers = []
+        for teacher_db_model in teachers_db_models:
+            word_limit = None
+            char_limit = None # Initialize char_limit
+
+            # Determine word_limit and char_limit based on the teacher's current plan
+            if teacher_db_model.current_plan == SubscriptionPlan.FREE:
+                word_limit = settings.FREE_PLAN_MONTHLY_WORD_LIMIT
+                char_limit = settings.FREE_PLAN_MONTHLY_CHAR_LIMIT
+            elif teacher_db_model.current_plan == SubscriptionPlan.PRO:
+                word_limit = settings.PRO_PLAN_MONTHLY_WORD_LIMIT
+                char_limit = settings.PRO_PLAN_MONTHLY_CHAR_LIMIT
+            elif teacher_db_model.current_plan == SubscriptionPlan.SCHOOLS:
+                word_limit = None # Unlimited
+                char_limit = None # Unlimited
+
+            # Calculate remaining_words
+            remaining_words = None
+            words_used = teacher_db_model.words_used_current_cycle if teacher_db_model.words_used_current_cycle is not None else 0
+            
+            if word_limit is not None: # For Free or Pro plans
+                remaining_words = max(0, word_limit - words_used)
+            # For SCHOOLS plan, remaining_words stays None, which is handled by TeacherAdminView and frontend.
+
+            # Prepare data for TeacherAdminView instance
+            teacher_data_for_view = teacher_db_model.model_dump()
+            teacher_data_for_view['current_plan_word_limit'] = word_limit
+            teacher_data_for_view['remaining_words_current_cycle'] = remaining_words
+            teacher_data_for_view['current_plan_char_limit'] = char_limit # Add char_limit
+
+            # Create TeacherAdminView instance with all data including calculated fields
+            teacher_admin_view = TeacherAdminView(**teacher_data_for_view)
+            response_teachers.append(teacher_admin_view)
+
+        logger.info(f"GET /admin/teachers/all: Returning {len(response_teachers)} teacher records with calculated usage.")
+        return response_teachers
+
+    except HTTPException as http_exc:
+        logger.error(f"GET /admin/teachers/all: HTTPException - {http_exc.status_code} - {http_exc.detail}", exc_info=True)
+        raise http_exc
+    except Exception as e:
+        logger.error(f"GET /admin/teachers/all: An unexpected error occurred: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while fetching teacher data."
+        )
+
+# TODO:
+# 1. Define the TeacherAdminView Pydantic model fully, incorporating all fields from the user's MongoDB example.
+#    Ensure it inherits or aligns with the base Teacher model as appropriate.
+# 2. Implement the crud.get_all_teachers_admin_view function in backend/app/db/crud.py.
+#    This function should fetch all specified fields from MongoDB and handle pagination.
+# 3. Add this new admin_router to the FastAPI application in backend/app/main.py.
+# 4. Ensure the `require_admin_privileges` dependency correctly protects the endpoint.
 
 # Add other admin-specific endpoints here in the future 

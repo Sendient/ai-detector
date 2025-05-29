@@ -142,10 +142,11 @@ async def read_current_user_profile(
         # teacher.words_used_current_cycle is now expected to be populated from the DB
         # word_limit is the allowance for the current plan
         remaining_words = None
-        if word_limit is not None and teacher.words_used_current_cycle is not None:
-            remaining_words = max(0, word_limit - teacher.words_used_current_cycle)
-        elif word_limit is None: # Case for unlimited plans (e.g., Schools plan)
-            remaining_words = None # Or a special value like -1 if you prefer to indicate unlimited explicitly
+        words_used = teacher.words_used_current_cycle if teacher.words_used_current_cycle is not None else 0
+
+        if word_limit is not None: # For Free or Pro plans
+            remaining_words = max(0, word_limit - words_used)
+        # For unlimited plans (e.g., Schools plan), remaining_words remains None, which is correctly handled by frontend.
 
         # Create the TeacherProfile response, including the new fields
         teacher_profile_response = TeacherProfile(

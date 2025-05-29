@@ -27,6 +27,7 @@ import SubscriptionsPage from './pages/SubscriptionsPage';
 import ClassViewPage from './pages/ClassViewPage';
 import AdminPage from './pages/AdminPage';
 import AdminStudentsPage from './pages/AdminStudentsPage';
+import AdminManageClassesPage from './pages/admin/AdminManageClassesPage';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
@@ -72,6 +73,9 @@ function App() {
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/students" element={<AdminStudentsPage />} />
+        <Route path="/admin/manage-classes" element={<AdminManageClassesPage />} />
+        <Route path="/admin/documents" element={<AdminPage />} />
+        <Route path="/admin/billing" element={<AdminPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
