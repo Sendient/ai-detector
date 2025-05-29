@@ -114,7 +114,7 @@ function DashboardPage() {
   const { t } = useTranslation();
   const { isAuthenticated, isLoading: isAuthLoading, getToken, user } = useKindeAuth();
   const navigate = useNavigate();
-  const { currentUser, loading: authLoading } = useAuth(); // Added useAuth and authLoading
+  const { currentUser, loading: authLoading } = useAuth();
 
   // --- State for Dashboard Data ---
   const [isLoading, setIsLoading] = useState(true);
@@ -138,15 +138,15 @@ function DashboardPage() {
 
   // Helper function to get plan display name
   const getPlanDisplayName = (planString) => {
-    if (authLoading || isAuthLoading) return 'Loading...'; // Show loading state
+    if (authLoading || isAuthLoading) return 'Loading...';
     if (planString) {
         const formattedPlan = planString.charAt(0).toUpperCase() + planString.slice(1);
         return `${formattedPlan} Plan`;
     }
-    if (isAuthenticated) { // If authenticated but no plan string, default to Free Plan
+    if (isAuthenticated) {
         return t('header_free_plan', 'Free Plan');
     }
-    return 'Plan N/A'; // Fallback if not authenticated or no plan info
+    return 'Plan N/A';
   };
 
   // --- Effect to update user name from Kinde auth ---
@@ -283,7 +283,7 @@ function DashboardPage() {
     }
   }, [isAuthenticated, getToken, t]);
 
-  // Effect to fetch dashboard data - Keep simplified dependencies
+  // Effect to fetch dashboard data
   useEffect(() => {
     if (isAuthenticated && !isAuthLoading) {
       console.log('[Dashboard] useEffect trigger: Fetching data. isAuthenticated:', isAuthenticated, 'isAuthLoading:', isAuthLoading);
@@ -301,7 +301,9 @@ function DashboardPage() {
     setSortOrder(newSortOrder);
   };
 
-  // Quick Start Button Handler
+  // Quick Start Button Handler (navigates to /quickstart)
+  // Kept for potential future use if a button needs this specific handler,
+  // but the restored card uses <Link>.
   const handleQuickStart = () => {
     navigate('/quickstart');
   };
@@ -329,6 +331,13 @@ function DashboardPage() {
      }
   };
 
+  // --- Main Render ---
+  if (isAuthLoading) {
+    return <div className="flex items-center justify-center min-h-screen">
+      <div className="loading loading-spinner loading-lg"></div>
+    </div>;
+  }
+
   // --- Render Login Prompt if not Authenticated ---
   if (!isAuthenticated && !isAuthLoading) {
     return <div className="alert alert-info shadow-lg">
@@ -340,7 +349,7 @@ function DashboardPage() {
   }
 
   // --- Render Loading State ---
-  if (isLoading || isAuthLoading) {
+  if (isLoading || authLoading) { // Combined loading states
     return <div className="flex items-center justify-center min-h-screen">
       <div className="loading loading-spinner loading-lg"></div>
     </div>;
@@ -383,50 +392,66 @@ function DashboardPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 container mx-auto p-4 md:p-6"> {/* Restored outer container class, added padding from newer version */}
 
       {/* --- Row 1: Welcome/QuickStart (Left) & Chart (Right) --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* Column 1: Welcome Message & Quick Start Button with Image */}
+        {/* Column 1: Welcome Message & Quick Start Button */}
         <div 
-          className="p-6 rounded-lg shadow-md border border-base-300 bg-base-100 relative overflow-hidden"
+          className="p-6 rounded-lg shadow-md border border-base-300 bg-base-100 relative overflow-hidden flex flex-col"
         >
-          {/* Image as a layer, behind the content - REMOVED */}
-          
-          {/* Content - on top of the image. Added left padding to shift content right. */}
-          <div className="relative z-10 space-y-4 pl-8">
-            <h2 className="text-2xl font-semibold text-base-content mb-4">
-              {t('dashboardPage_welcome')} {userName}
-            </h2>
-            {currentUser && ( // Added plan display
-              <div className="text-sm text-base-content/80">
-                <p>
-                  You are on the '{getPlanDisplayName(currentUser.current_plan)}' plan.
-                </p>
-                {currentUser.current_plan !== 'schools' ? (
-                  <>
-                    <p>
-                      You have {currentUser.current_plan_word_limit?.toLocaleString() || 'N/A'} words to assess this month.
-                    </p>
-                    <p>
-                      You have {currentUser.remaining_words_current_cycle?.toLocaleString() || 'N/A'} words left on your plan.
-                    </p>
-                     <p>
-                      You have processed {currentUser.documents_processed_current_cycle?.toLocaleString() || '0'} documents this cycle.
-                    </p>
-                  </>
-                ) : (
-                  <p>You have unlimited words and document processing.</p>
-                )}
-              </div>
-            )}
-            <div className="flex justify-start">
+          <div className="relative z-10 flex flex-col flex-grow space-y-3">
+            <div className="flex-grow">
+              <h2 className="text-2xl font-semibold text-base-content mb-2">
+                {t('dashboardPage_welcome')} {userName || 'User'}!
+              </h2>
+              <div className="my-3 border-t border-base-content/20"></div>
+
+              {!authLoading && currentUser ? (
+                <div className="text-lg text-base-content/90 space-y-1">
+                  <p>
+                    {t('dashboardPage_plan_prefix', 'You are on the ')} 
+                    <span className="font-semibold">{getPlanDisplayName(currentUser.current_plan)}</span>.
+                  </p>
+                  {currentUser.current_plan !== 'SCHOOLS' && (
+                    <>
+                      <p>
+                        {t('dashboardPage_wordLimit_prefix', 'Monthly limit: ')}
+                        <span className="font-semibold">{currentUser.current_plan_word_limit?.toLocaleString() || t('common_text_notApplicable')}</span> 
+                        {t('dashboardPage_wordLimit_suffix', ' words.')}
+                      </p>
+                      <p>
+                        {t('dashboardPage_wordsRemaining_prefix', 'Words remaining: ')}
+                        <span className="font-semibold">
+                          {(currentUser.current_plan_word_limit - currentUser.words_used_current_cycle) > 0 
+                            ? (currentUser.current_plan_word_limit - currentUser.words_used_current_cycle)?.toLocaleString() 
+                            : 0
+                          }
+                        </span>.
+                      </p>
+                    </>
+                  )}
+                  <p>
+                    {t('dashboardPage_docsProcessed_prefix', 'Documents processed this cycle: ')}
+                    <span className="font-semibold">{currentUser.documents_processed_current_cycle || 0}</span>.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {[...Array(3)].map((_, i) => (
+                      <div key={i} className="h-4 bg-gray-300 rounded w-3/4 animate-pulse"></div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-auto flex justify-end pt-2">
               <Link
                 to="/quickstart"
-                className="btn btn-primary"
+                className="btn btn-primary btn-md group"
               >
-                <ArrowUpTrayIcon className="h-5 w-5 mr-2"/>
+                <ArrowUpTrayIcon className="w-5 h-5 mr-2 transition-transform duration-300 ease-in-out group-hover:-translate-y-0.5" />
                 {t('dashboardPage_button_quickStart')}
               </Link>
             </div>
@@ -440,29 +465,29 @@ function DashboardPage() {
             <ScoreDistributionChart data={chartData} />
           </div>
         </div>
-
-      </div>
+      </div> {/* End of Row 1 grid */}
 
       {/* --- Row 2: Key Stats (Full Width) --- */}
+      {/* Restoring the original "stats shadow w-full" container for key stats */}
       <div className="stats shadow w-full">
         <div className="stat">
           <div className="stat-figure text-primary"><DocumentDuplicateIcon className="h-8 w-8"/></div>
-          <div className="stat-title">Total Documents</div>
+          <div className="stat-title">{t('dashboard_stat_totalDocuments', 'Total Documents')}</div>
           <div className="stat-value">{keyStats?.total_processed_documents || '0'}</div>
         </div>
         <div className="stat">
           <div className="stat-figure text-secondary"><ScaleIcon className="h-8 w-8"/></div>
-          <div className="stat-title">Average AI Score</div>
+          <div className="stat-title">{t('dashboard_stat_avgScore', 'Average AI Score')}</div>
           <div className="stat-value">{formatScore(keyStats?.avgScore)}</div>
         </div>
         <div className="stat">
           <div className="stat-figure text-accent"><CheckBadgeIcon className="h-8 w-8"/></div>
-          <div className="stat-title">Flagged Recently</div>
+          <div className="stat-title">{t('dashboard_stat_flaggedRecent', 'Flagged Recently')}</div>
           <div className="stat-value">{keyStats?.flaggedRecent || '0'}</div>
         </div>
         <div className="stat">
           <div className="stat-figure text-info"><ClockIcon className="h-8 w-8"/></div>
-          <div className="stat-title">Pending / Processing</div>
+          <div className="stat-title">{t('dashboard_stat_pendingProcessing', 'Pending / Processing')}</div>
           <div className="stat-value">{keyStats?.pending || '0'}</div>
         </div>
       </div>
@@ -471,8 +496,8 @@ function DashboardPage() {
       <div className="card bg-base-100 shadow-md border border-base-300">
         <div className="card-body">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="card-title text-xl">Recent Assessments</h2>
-            <button className="btn btn-sm btn-ghost" onClick={() => navigate('/documents')}>View All</button>
+            <h2 className="card-title text-xl">{t('dashboard_table_heading_recent', 'Recent Assessments')}</h2>
+            <button className="btn btn-sm btn-ghost" onClick={() => navigate('/documents')}>{t('common_button_viewAll', 'View All')}</button>
           </div>
           <div className="overflow-x-auto">
             {sortedAssessments.length > 0 ? (
@@ -523,10 +548,10 @@ function DashboardPage() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                         <button
-                          onClick={() => navigate(`/documents/${doc.id}/report`)}
+                          onClick={() => navigate(`/documents/${doc.id || doc._id}/report`)} // Ensure navigation ID is correct
                           className="btn btn-ghost btn-xs"
                         >
-                          <EyeIcon className="h-4 w-4"/> View
+                          <EyeIcon className="h-4 w-4"/> {t('common_button_view', 'View')}
                         </button>
                       </td>
                     </tr>
