@@ -56,6 +56,8 @@ param parAllowCredentials bool
 
 param parFrontendUrl string
 
+param parAllowedMethods array
+
 module containerApp 'br/public:avm/res/app/container-app:0.11.0' = {
   scope: resourceGroup(parSubId, parRgName)
   name: 'containerAppDeployment-${parEnv}'
@@ -94,6 +96,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.11.0' = {
     corsPolicy: {
       allowCredentials: parAllowCredentials
       allowedOrigins: parCorsAllowedOrigins
+      allowedMethods: parAllowedMethods
     }
     secrets: {
       secureList: parSecretList
