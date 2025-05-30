@@ -682,5 +682,22 @@
     "privacy_policy_url": "https://www.smartdetector.ai/privacy-policy/",
 
     "profilePage_button_saveChanges": "Save Changes",
-    "common_notAvailable": "Not Available"
+    "common_notAvailable": "Not Available",
+
+    "header_free_plan": "Free Plan",
+    "profilePage_personalInfo_title": "Personal Information",
+    "profilePage_myAccount_title": "My Account",
+    "profilePage_account_createdOn": "Account Created On:",
+    "profilePage_subscription_currentPlan": "Current Plan:",
+    "profilePage_usageDetails_title": "Usage Details",
+    "profilePage_usage_allowance": "Monthly Word Allowance:",
+    "profilePage_usage_used": "Words Used This Cycle:",
+    "profilePage_usage_remaining": "Words Remaining This Cycle:",
+    "profilePage_usage_documentsProcessed": "Documents Processed This Cycle:",
+    "profilePage_contactInfo_title": "Contact Information",
+    "profilePage_contactInfo_phone": "Phone:",
+    "profilePage_contactInfo_email": "Email:",
+    "profilePage_contactInfo_address": "Address:",
+    "common_not_applicable": "N/A",
+    "profilePage_button_saving": "Saving..."
 }
