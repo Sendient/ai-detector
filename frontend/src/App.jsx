@@ -27,7 +27,7 @@ import SubscriptionsPage from './pages/SubscriptionsPage';
 import ClassViewPage from './pages/ClassViewPage';
 import AdminPage from './pages/AdminPage';
 import AdminStudentsPage from './pages/AdminStudentsPage';
-import AdminManageClassesPage from '@/pages/admin/AdminManageClassesPage';
+import AdminManageClassesPage from '@/pages/admin/AdminManageClassesPage.jsx';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
