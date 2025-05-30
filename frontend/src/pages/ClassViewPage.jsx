@@ -2,6 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'react-toastify';
+import { useAuth } from '../contexts/AuthContext';
+
+// VITE_API_BASE_URL will be like http://localhost:8000 (without /api/v1)
+const API_HOST_URL = import.meta.env.VITE_API_BASE_URL;
+const API_PREFIX = '/api/v1';
 
 function ClassViewPage() {
     const { t } = useTranslation();
@@ -13,7 +19,7 @@ function ClassViewPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const API_URL = API_HOST_URL;
 
     const fetchClassDetails = useCallback(async () => {
         if (!classId) {
@@ -41,26 +47,31 @@ function ClassViewPage() {
             }
             
             console.log(`Fetching class details for ID: ${classId}`);
-            const classResponse = await fetch(`${API_URL}/api/v1/classgroups/${classId}`, {
+            const classGroupRes = await fetch(`${API_HOST_URL}${API_PREFIX}/class-groups/${classId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!classResponse.ok) {
-                const errorData = await classResponse.json().catch(() => ({ detail: classResponse.statusText }));
+            if (!classGroupRes.ok) {
+                const errorData = await classGroupRes.json().catch(() => ({ detail: classGroupRes.statusText }));
                 throw new Error(t('messages_error_fetchFailed', { detail: errorData.detail || t('messages_error_notFound', { item: t('common_label_className') }) }));
             }
-            const classData = await classResponse.json();
-            setClassGroup(classData);
+            const classGroupData = await classGroupRes.json();
+            setClassGroup(classGroupData);
 
-            const studentsResponse = await fetch(`${API_URL}/api/v1/students/?class_id=${classId}`, {
+            const studentsRes = await fetch(`${API_HOST_URL}${API_PREFIX}/students?class_group_id=${classId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!studentsResponse.ok) {
-                const errorData = await studentsResponse.json().catch(() => ({ detail: studentsResponse.statusText }));
+            if (!studentsRes.ok) {
+                const errorData = await studentsRes.json().catch(() => ({ detail: studentsRes.statusText }));
                 throw new Error(t('messages_error_fetchFailed', { detail: errorData.detail || t('messages_students_fetchError') }));
             }
-            const studentsData = await studentsResponse.json();
+            const studentsData = await studentsRes.json();
             console.log("Fetched Students Data for ClassViewPage:", JSON.stringify(studentsData, null, 2));
             setStudents(studentsData || []);
+
+            const documentsRes = await fetch(`${API_HOST_URL}${API_PREFIX}/documents?class_group_id=${classId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!documentsRes.ok) throw new Error(t('messages_error_fetchFailed', { detail: `documents (${documentsRes.status})` }));
 
         } catch (err) {
             console.error("Error fetching class details:", err);
@@ -70,7 +81,7 @@ function ClassViewPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [API_URL, isAuthenticated, authLoading, t, getToken, classId]);
+    }, [API_HOST_URL, API_PREFIX, isAuthenticated, authLoading, t, getToken, classId]);
 
     useEffect(() => {
         if (classId) {

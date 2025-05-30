@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-// import { toast } from 'sonner'; // Removed sonner
+import { toast } from 'react-toastify';
 import {
     PencilSquareIcon,
     TrashIcon,
@@ -10,6 +10,11 @@ import {
     ArrowPathIcon // Assuming this is for the refresh button, keep if used elsewhere
 } from '@heroicons/react/24/outline';
 import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid'; // <-- Import sorting icons
+import { useAuth } from '../contexts/AuthContext'; // Assuming AuthContext provides getCurrentUser
+
+// VITE_API_BASE_URL will be like http://localhost:8000 (without /api/v1)
+const HOST_URL = import.meta.env.VITE_API_BASE_URL;
+const API_PREFIX = '/api/v1';
 
 function ClassesPage() {
     const { t } = useTranslation();
@@ -30,8 +35,6 @@ function ClassesPage() {
     // Sorting state
     const [sortField, setSortField] = useState('class_name'); // Default sort field
     const [sortOrder, setSortOrder] = useState('asc'); // Default sort order
-
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     const clearPageMessage = () => setTimeout(() => setPageMessage({ text: '', type: '' }), 5000);
 
@@ -70,7 +73,7 @@ function ClassesPage() {
                 setIsLoadingInitial(false);
                 return;
             }
-            const response = await fetch(`${API_URL}/api/v1/class-groups`, {
+            const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!response.ok) {
@@ -91,7 +94,7 @@ function ClassesPage() {
             setIsLoading(false);
             setIsLoadingInitial(false);
         }
-    }, [API_URL, getToken, isAuthenticated, authLoading, t]);
+    }, [HOST_URL, API_PREFIX, getToken, isAuthenticated, authLoading, t]);
 
     useEffect(() => {
         fetchClassGroups();
@@ -176,8 +179,8 @@ function ClassesPage() {
         setPageMessage({ text: '', type: '' });
         const method = editingClassGroup ? 'PUT' : 'POST';
         const url = editingClassGroup
-            ? `${API_URL}/api/v1/class-groups/${editingClassGroup._id}`
-            : `${API_URL}/api/v1/class-groups`;
+            ? `${HOST_URL}${API_PREFIX}/class-groups/${editingClassGroup._id}`
+            : `${HOST_URL}${API_PREFIX}/class-groups`;
 
         const payload = {
             class_name: formData.class_name,
@@ -230,7 +233,7 @@ function ClassesPage() {
         try {
             const token = await getToken();
             if (!token) throw new Error(t('messages_error_authTokenMissing'));
-            const response = await fetch(`${API_URL}/api/v1/class-groups/${classId}`, {
+            const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups/${classId}`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` },
             });

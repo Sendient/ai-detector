@@ -699,5 +699,14 @@
     "profilePage_contactInfo_email": "Email:",
     "profilePage_contactInfo_address": "Address:",
     "common_not_applicable": "N/A",
-    "profilePage_button_saving": "Saving..."
+    "profilePage_button_saving": "Saving...",
+
+    "dashboard_stat_totalDocuments": "Total Documents",
+    "dashboard_stat_avgScore": "Average AI Score",
+    "dashboard_stat_flaggedRecent": "Flagged Recently",
+    "dashboard_stat_pendingProcessing": "Pending / Processing",
+    "dashboard_table_heading_recent": "Recent Assessments",
+    "common_button_viewAll": "View All",
+
+    "messages_profile_success_saved": "Profile saved successfully."
 }

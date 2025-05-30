@@ -23,7 +23,7 @@ i18n
     // The default language to use if detection fails or a key is missing
     // This is CRUCIAL for fallback behavior.
     fallbackLng: {
-      'en': ['en-GB', 'en-US'], // If 'en' is detected, try 'en-GB', then 'en-US'
+      // 'en': ['en-GB', 'en-US'], // If 'en' is detected, try 'en-GB', then 'en-US'
       'fr': ['fr-FR'],         // If 'fr' is detected, try 'fr-FR'
       'default': ['en-GB']    // For any other unsupported language, fallback to 'en-GB'
     },
@@ -46,7 +46,7 @@ i18n
       lookupLocalStorage: 'appLocale', // You can name this whatever you like
 
       // Add these options to better handle generic language codes like 'en'
-      nonExplicitSupportedLngs: true,
+      nonExplicitSupportedLngs: false,
       checkWhitelist: true,
     },
 
