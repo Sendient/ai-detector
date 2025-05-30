@@ -79,7 +79,12 @@ else:
         "http://localhost:3000",  # Alternative frontend port
         "http://127.0.0.1:5173",  # Alternative localhost
         "http://127.0.0.1:3000",  # Alternative localhost
-        "https://gray-mud-0fe5b3703.6.azurestaticapps.net", # Production frontend origin
+        "https://gray-mud-0fe5b3703.6.azurestaticapps.net",
+        "https://app.smartdetector.ai",
+        "https://dev-app.smartdetector.ai",
+        "https://staging-app.smartdetector.ai",
+        "https://nice-stone-0864d4c03.6.azurestaticapps.net",
+        "https://calm-sand-0d8c25a03.6.azurestaticapps.net"
     ]
     if frontend_origin_env:
         default_origins.append(frontend_origin_env)
