@@ -74,11 +74,29 @@ jobs:
             --query properties.configuration.ingress.fqdn \
             --output tsv)
 
-          echo "$APP_URL"
-          echo "url=https://$APP_URL" >> $GITHUB_OUTPUT
+          echo "Raw APP_URL from Azure: $APP_URL"
+          
+          # Ensure it's an HTTPS URL before setting it as output
+          # (This logic is just for safety, the main check is the raw APP_URL)
+          FINAL_APP_URL_OUTPUT=""
+          if [[ "$APP_URL" == http://* ]]; then
+            echo "Warning: APP_URL from Azure started with http://. Stripping it and prepending https://."
+            FINAL_APP_URL_OUTPUT="https://${APP_URL#http://}"
+          elif [[ "$APP_URL" == https://* ]]; then
+            echo "APP_URL from Azure already started with https://."
+            FINAL_APP_URL_OUTPUT="$APP_URL"
+          else
+            # Assuming it's just the FQDN without protocol, prepend https://
+            echo "APP_URL from Azure did not have a scheme. Prepending https://."
+            FINAL_APP_URL_OUTPUT="https://$APP_URL"
+          fi
+
+          echo "Final APP_URL_OUTPUT to be used for GitHub step output: $FINAL_APP_URL_OUTPUT"
+          echo "url=$FINAL_APP_URL_OUTPUT" >> $GITHUB_OUTPUT
 
       - name: Create .env file
         run: |
+          echo "Debug: Value of steps.get_app_url.outputs.url going into .env: ${{ steps.get_app_url.outputs.url }}"
           cd frontend
           echo "VITE_API_BASE_URL=${{ steps.get_app_url.outputs.url }}" > .env
           echo "VITE_KINDE_DOMAIN=${{ vars.VITE_KINDE_DOMAIN }}" >> .env
