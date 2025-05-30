@@ -87,6 +87,11 @@ param parCorsAllowedOrigins = [
   'http://localhost:5173'
 ]
 
+param parAllowedMethods = [
+  '*'
+]
+
+
 // Follow the secret refs from the env variables and registries
 param parSecretList = [
         {
