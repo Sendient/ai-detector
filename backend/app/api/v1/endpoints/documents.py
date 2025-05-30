@@ -873,16 +873,16 @@ async def upload_batch(
             return BatchWithDocuments(
                 id=created_batch.id,
                 teacher_id=created_batch.teacher_id,
-                # student_id and assignment_id are not part of Batch model, removing them from response
-                # student_id=created_batch.student_id,
-                # assignment_id=created_batch.assignment_id,
+                total_files=created_batch.total_files,
+                completed_files=created_batch.completed_files,
+                failed_files=created_batch.failed_files,
                 priority=created_batch.priority,
                 status=BatchStatus.FAILED,
-                upload_timestamp=created_batch.upload_timestamp,
-                updated_at=datetime.now(timezone.utc), # ensure updated_at is fresh
-                documents=[]
+                created_at=created_batch.created_at,
+                updated_at=datetime.now(timezone.utc),
+                error_message="No valid files were provided in the batch.",
+                document_ids=[]
             )
-
 
     for task in tasks_to_enqueue:
         enqueue_success = await enqueue_assessment_task(
@@ -939,21 +939,20 @@ async def upload_batch(
         final_updated_batch.status = updated_batch_data.status # Manually update status for response
         final_updated_batch.updated_at = datetime.now(timezone.utc)
 
-
     logger.info(f"Batch {created_batch.id} processing finished. Tasks enqueued: {successful_queues}/{len(tasks_to_enqueue)}. Final Batch Status: {final_updated_batch.status if final_updated_batch else 'Unknown'}")
 
     return BatchWithDocuments(
         id=final_updated_batch.id if final_updated_batch else created_batch.id,
         teacher_id=final_updated_batch.teacher_id if final_updated_batch else created_batch.teacher_id,
-        # student_id and assignment_id are not part of Batch model, removing them from response
-        # student_id=final_updated_batch.student_id if final_updated_batch else created_batch.student_id,
-        # assignment_id=final_updated_batch.assignment_id if final_updated_batch else created_batch.assignment_id,
+        total_files=final_updated_batch.total_files if final_updated_batch else created_batch.total_files,
+        completed_files=final_updated_batch.completed_files if final_updated_batch else created_batch.completed_files,
+        failed_files=final_updated_batch.failed_files if final_updated_batch else created_batch.failed_files,
         priority=final_updated_batch.priority if final_updated_batch else created_batch.priority,
         status=final_updated_batch.status if final_updated_batch else BatchStatus.UNKNOWN, # provide a fallback
-        upload_timestamp=final_updated_batch.upload_timestamp if final_updated_batch else created_batch.upload_timestamp,
+        created_at=final_updated_batch.created_at if final_updated_batch else created_batch.created_at,
         updated_at=final_updated_batch.updated_at if final_updated_batch else datetime.now(timezone.utc),
         error_message=final_updated_batch.error_message if final_updated_batch and hasattr(final_updated_batch, 'error_message') else None,
-        documents=created_documents_list # Return list of docs that were attempted to be created
+        document_ids=[doc.id for doc in created_documents_list]
     )
 
 @router.get(
