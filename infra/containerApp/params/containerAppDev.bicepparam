@@ -67,6 +67,10 @@ param parEnvVariables01 = [
     name: 'STRIPE_WEBHOOK_SECRET'
     secretRef: 'stripe-webhook-secret'
   }
+  {
+    name: 'ML_AIDETECTOR_URL'
+    secretRef: 'ml-aidetector-url'
+  }
 ]
 
 param parFrontendUrl = 'https://gray-mud-0fe5b3703.6.azurestaticapps.net'
@@ -124,6 +128,11 @@ param parSecretList = [
           identity: parUserMi
           keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/stripe-pro-plan-price-id-${parEnv}'
           name: 'stripe-pro-plan-price-id'
+        }
+        {
+          identity: parUserMi
+          keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/ml-aidetector-url-${parEnv}'
+          name: 'ml-aidetector-url'
         }
       ]
 
