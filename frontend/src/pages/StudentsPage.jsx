@@ -12,6 +12,7 @@ import {
   ExclamationTriangleIcon,
   ArrowUpTrayIcon,
   ArrowPathIcon,
+  DocumentPlusIcon
 } from '@heroicons/react/24/outline';
 import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid';
 
@@ -56,6 +57,17 @@ function StudentsPage() {
   const [studentDocuments, setStudentDocuments] = useState([]);
   const [isLoadingStudentDocuments, setIsLoadingStudentDocuments] = useState(false);
   const [studentDocumentsError, setStudentDocumentsError] = useState(null);
+
+  // State for allocating documents modal
+  const [showAllocateDocumentModal, setShowAllocateDocumentModal] = useState(false);
+  const [allTeacherDocuments, setAllTeacherDocuments] = useState([]);
+  const [filteredUnallocatedDocuments, setFilteredUnallocatedDocuments] = useState([]);
+  const [isLoadingAllTeacherDocs, setIsLoadingAllTeacherDocs] = useState(false);
+  const [allocateDocError, setAllocateDocError] = useState(null);
+  const [allocateDocSuccess, setAllocateDocSuccess] = useState(null);
+  const [selectedDocumentForAllocationId, setSelectedDocumentForAllocationId] = useState(null);
+  const [searchTermForAllocateDocModal, setSearchTermForAllocateDocModal] = useState('');
+  const [isAllocatingDocument, setIsAllocatingDocument] = useState(false); // For modal's confirm button
 
   const initialStudentData = {
     first_name: '',
@@ -196,6 +208,45 @@ function StudentsPage() {
         setIsLoadingStudentDocuments(false);
     }
   }, [isAuthenticated, getToken, t, API_BASE_URL, editingStudent]); // Added editingStudent to deps for the error message
+
+  const fetchAllTeacherDocuments = useCallback(async () => {
+    if (!isAuthenticated) {
+      setAllocateDocError(t('messages_error_loginRequired_action'));
+      return;
+    }
+    setIsLoadingAllTeacherDocs(true);
+    setAllocateDocError(null);
+    setAllTeacherDocuments([]);
+    setFilteredUnallocatedDocuments([]);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+      
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+        const detail = (typeof errorData.detail === 'string' && errorData.detail) ? errorData.detail : response.statusText;
+        throw new Error(t('messages_docs_fetchError', { detail }));
+      }
+      const data = await response.json();
+      const allDocs = data.map(doc => ({ ...doc, id: doc._id || doc.id })).filter(doc => doc.id);
+      setAllTeacherDocuments(allDocs);
+
+      const unallocated = allDocs.filter(doc => !doc.student_id);
+      setFilteredUnallocatedDocuments(unallocated);
+      // if (unallocated.length === 0) { // Optional: message if no unallocated docs found
+      //   setAllocateDocError(t('studentsPage.modal_allocateDoc_noUnallocatedDocs')); 
+      // }
+    } catch (err) {
+      console.error("Error fetching all teacher documents:", err);
+      setAllocateDocError(err.message || t('messages_error_unexpected'));
+    } finally {
+      setIsLoadingAllTeacherDocs(false);
+    }
+  }, [isAuthenticated, getToken, t, API_BASE_URL]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -802,6 +853,77 @@ function StudentsPage() {
     });
   }, [students, studentSortField, studentSortOrder]);
 
+  const handleOpenAllocateDocumentModal = () => {
+    if (!editingStudent || !editingStudent.id) {
+      console.error("Cannot open allocate document modal without a selected student.");
+      return;
+    }
+    setShowAllocateDocumentModal(true);
+    setSelectedDocumentForAllocationId(null);
+    setSearchTermForAllocateDocModal('');
+    setAllocateDocError(null);
+    setAllocateDocSuccess(null);
+    fetchAllTeacherDocuments();
+  };
+
+  const handleCloseAllocateDocumentModal = () => {
+    setShowAllocateDocumentModal(false);
+    setAllTeacherDocuments([]); // Clear to ensure fresh data next time
+    setFilteredUnallocatedDocuments([]);
+    setSelectedDocumentForAllocationId(null);
+    setSearchTermForAllocateDocModal('');
+    setAllocateDocError(null);
+    setAllocateDocSuccess(null);
+    setIsAllocatingDocument(false);
+  };
+
+  const handleConfirmDocumentAllocation = async () => {
+    if (!editingStudent || !editingStudent.id || !selectedDocumentForAllocationId) {
+      setAllocateDocError(t('messages_students_docAllocate_error_selectDocAndStudent'));
+      return;
+    }
+    setIsAllocatingDocument(true);
+    setAllocateDocError(null);
+    setAllocateDocSuccess(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${selectedDocumentForAllocationId}/assign-student`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ student_id: editingStudent.id }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+        const detail = (typeof errorData.detail === 'string' && errorData.detail) ? errorData.detail : response.statusText;
+        throw new Error(t('messages_students_docAllocate_error_assignFailed', { detail }));
+      }
+      
+      const allocatedDocFilename = allTeacherDocuments.find(d => d.id === selectedDocumentForAllocationId)?.original_filename || 'document';
+      setAllocateDocSuccess(t('messages_students_docAllocate_success', { filename: allocatedDocFilename, studentName: `${editingStudent.first_name} ${editingStudent.last_name}` }));
+      
+      fetchStudentDocuments(editingStudent.id);
+      // Optimistically update the unallocated list locally or re-fetch
+      setFilteredUnallocatedDocuments(prev => prev.filter(doc => doc.id !== selectedDocumentForAllocationId));
+      setAllTeacherDocuments(prev => prev.filter(doc => doc.id !== selectedDocumentForAllocationId)); // Also from the main list if needed
+
+      setTimeout(() => {
+        handleCloseAllocateDocumentModal();
+      }, 2000);
+
+    } catch (err) {
+      console.error("Error allocating document to student:", err);
+      setAllocateDocError(err.message || t('messages_error_unexpected'));
+    } finally {
+      setIsAllocatingDocument(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -991,17 +1113,29 @@ function StudentsPage() {
                   <h4 className="text-md font-semibold mb-3 text-base-content">{t('students_form_card_documents_heading', 'Student Documents')}</h4>
                   <div className="card bg-base-100 shadow-xl">
                     <div className="card-body p-4">
-                      <div className="flex justify-between items-center">
-                        <h2 className="card-title text-lg">Student Documents</h2>
-                        <button
-                          type="button"
-                          onClick={() => fetchStudentDocuments(editingStudent.id)}
-                          disabled={isLoadingStudentDocuments}
-                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-                        >
-                          <ArrowPathIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
-                          {isLoadingStudentDocuments ? t('studentsPage.refreshingDocuments') : t('studentsPage.refreshDocuments')}
-                        </button>
+                      <div className="flex justify-between items-center mb-4">
+                        <h2 className="card-title text-lg">{t('students_form_card_studentDocuments_subheading', 'Documents for this Student')}</h2>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleOpenAllocateDocumentModal}
+                            className="btn btn-sm btn-primary"
+                            title={t('studentsPage.button_allocateNewDocument_title')}
+                            disabled={isLoadingStudentDocuments || isAllocatingDocument}
+                          >
+                            <DocumentPlusIcon className="h-5 w-5 mr-1" />
+                            {t('studentsPage.button_allocateNewDocument')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => fetchStudentDocuments(editingStudent.id)}
+                            disabled={isLoadingStudentDocuments}
+                            className="btn btn-sm btn-outline btn-secondary"
+                            title={t('studentsPage.button_refreshDocuments_title')}
+                          >
+                            <ArrowPathIcon className="h-5 w-5" />
+                          </button>
+                        </div>
                       </div>
                       {isLoadingStudentDocuments && <p className="text-sm text-gray-500 mt-2">{t('studentsPage.loadingDocuments')}</p>}
                       {studentDocumentsError && <p className="text-sm text-red-600 mt-2">{studentDocumentsError}</p>}
@@ -1251,6 +1385,114 @@ function StudentsPage() {
           </div>
         </div>
       )}
+
+      {/* Allocate Document Modal */}
+      {showAllocateDocumentModal && editingStudent && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-base-100 p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-semibold mb-4 text-base-content">
+              {t('studentsPage.modal_allocateDoc_heading', { studentName: `${editingStudent.first_name} ${editingStudent.last_name}` })}
+            </h3>
+            
+            {allocateDocError && (
+              <div className="alert alert-error mb-4">
+                <XCircleIcon className="h-6 w-6"/>
+                <span>{t('common_error_prefix')} {allocateDocError}</span>
+              </div>
+            )}
+            {allocateDocSuccess && (
+              <div className="alert alert-success mb-4">
+                <CheckCircleIcon className="h-6 w-6" />
+                <span>{allocateDocSuccess}</span>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder={t('studentsPage.modal_allocateDoc_searchPlaceholder')}
+                value={searchTermForAllocateDocModal}
+                onChange={(e) => setSearchTermForAllocateDocModal(e.target.value)}
+                className="input input-bordered w-full input-sm"
+                disabled={isLoadingAllTeacherDocs}
+              />
+            </div>
+
+            <div className="overflow-y-auto flex-grow mb-4 border border-base-300 rounded-md min-h-[200px]">
+              {isLoadingAllTeacherDocs ? (
+                <div className="flex justify-center items-center h-full">
+                  <span className="loading loading-spinner loading-lg"></span>
+                  <p className="ml-2">{t('studentsPage.modal_allocateDoc_loadingDocs')}</p>
+                </div>
+              ) : filteredUnallocatedDocuments.filter(doc => 
+                  doc.original_filename.toLowerCase().includes(searchTermForAllocateDocModal.toLowerCase())
+                ).length === 0 ? (
+                <p className="text-center p-4 text-base-content/70">
+                  {allTeacherDocuments.length > 0 && filteredUnallocatedDocuments.length === 0 
+                    ? t('studentsPage.modal_allocateDoc_allDocsAllocated') 
+                    : t('studentsPage.modal_allocateDoc_noUnallocatedDocs')
+                  }
+                </p>
+              ) : (
+                <table className="table table-sm w-full">
+                  <thead>
+                    <tr>
+                      <th>{t('studentsPage.modal_allocateDoc_col_filename')}</th>
+                      <th>{t('studentsPage.modal_allocateDoc_col_status')}</th>
+                      <th>{t('studentsPage.modal_allocateDoc_col_words')}</th>
+                      <th>{t('studentsPage.modal_allocateDoc_col_chars')}</th>
+                      <th>{t('studentsPage.modal_allocateDoc_col_aiScore')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUnallocatedDocuments
+                      .filter(doc => 
+                        doc.original_filename.toLowerCase().includes(searchTermForAllocateDocModal.toLowerCase())
+                      )
+                      .map(doc => (
+                        <tr 
+                          key={doc.id}
+                          onClick={() => setSelectedDocumentForAllocationId(doc.id)}
+                          className={`cursor-pointer hover:bg-base-200 ${selectedDocumentForAllocationId === doc.id ? 'bg-primary text-primary-content' : ''}`}
+                        >
+                          <td title={doc.original_filename} className="truncate max-w-xs">{doc.original_filename}</td>
+                          <td><span className={`badge badge-sm ${doc.status === 'COMPLETED' ? 'badge-success' : doc.status === 'PROCESSING' || doc.status === 'QUEUED' ? 'badge-info' : doc.status === 'ERROR' ? 'badge-error' : 'badge-ghost'}`}>{doc.status}</span></td>
+                          <td>{doc.word_count?.toLocaleString() || '-'}</td>
+                          <td>{doc.character_count?.toLocaleString() || '-'}</td>
+                          <td>{doc.score !== null && doc.score !== undefined ? `${(doc.score * 100).toFixed(1)}%` : 'N/A'}</td>
+                        </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t border-base-300">
+              <button
+                type="button"
+                onClick={handleCloseAllocateDocumentModal}
+                className="btn btn-ghost btn-sm"
+                disabled={isAllocatingDocument}
+              >
+                {t('common_button_cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDocumentAllocation} // Changed from form onSubmit to button onClick
+                className="btn btn-primary btn-sm"
+                disabled={!selectedDocumentForAllocationId || isAllocatingDocument || isLoadingAllTeacherDocs}
+              >
+                {isAllocatingDocument ? (
+                  <><span className="loading loading-spinner loading-xs"></span>{t('common_status_allocating')}</>
+                ) : (
+                  t('studentsPage.modal_allocateDoc_button_confirm')
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
