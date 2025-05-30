@@ -31,10 +31,6 @@ param parEnvVariables01 = [
     secretRef: 'kinde-client-secret'
   }
   {
-    name: 'STRIPE_SECRET_KEY'
-    secretRef: 'stripe-secret-key'
-  }
-  {
     name: 'AZURE_BLOB_CONNECTION_STRING'
     secretRef: 'storage-connection-string'
   }
@@ -54,6 +50,26 @@ param parEnvVariables01 = [
   {
     name: 'FRONTEND_URL'
     value: parFrontendUrl
+  }
+  {
+    name: 'STRIPE_PUBLISHABLE_KEY'
+    secretRef: 'stripe-publishable-key'
+  }
+  {
+    name: 'STRIPE_PRO_PLAN_PRICE_ID'
+    secretRef: 'stripe-pro-plan-price-id'
+  }
+  {
+    name: 'STRIPE_SECRET_KEY'
+    secretRef: 'stripe-secret-key'
+  }
+  {
+    name: 'STRIPE_WEBHOOK_SECRET'
+    secretRef: 'stripe-webhook-secret'
+  }
+  {
+    name: 'ML_AIDETECTOR_URL'
+    secretRef: 'ml-aidetector-url'
   }
 ]
 
@@ -97,6 +113,26 @@ param parSecretList = [
           identity: parUserMi
           keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/stripe-secret-${parEnv}'
           name: 'stripe-secret-key'
+        }
+        {
+          identity: parUserMi
+          keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/stripe-webhook-secret-${parEnv}'
+          name: 'stripe-webhook-secret'
+        }
+        {
+          identity: parUserMi
+          keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/stripe-publishable-key-${parEnv}'
+          name: 'stripe-publishable-key'
+        }
+        {
+          identity: parUserMi
+          keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/stripe-pro-plan-price-id-${parEnv}'
+          name: 'stripe-pro-plan-price-id'
+        }
+        {
+          identity: parUserMi
+          keyVaultUrl: 'https://kv-sdt-uks-aid-${parEnv}.vault.azure.net/secrets/ml-aidetector-url-${parEnv}'
+          name: 'ml-aidetector-url'
         }
       ]
 
