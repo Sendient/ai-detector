@@ -2,12 +2,14 @@ import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpTrayIcon, ArrowDownTrayIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
+import { useNavigate } from 'react-router-dom';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 function BulkUploadPage() {
   const { t } = useTranslation();
   const { getToken, isAuthenticated } = useKindeAuth();
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -294,6 +296,14 @@ function BulkUploadPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => navigate('/students')}
+                  className="btn btn-secondary"
+                >
+                  {t('bulkUpload_button_backToStudents', 'Back to Students')}
+                </button>
               </div>
             </div>
           )}

@@ -855,7 +855,6 @@ function DocumentsPage() {
               <span className="text-sm">{uploadStatus}</span>
             </div>
           )}
-          <p className="text-xs text-base-content/70 mt-2">{t('documents_upload_note_placeholders')}</p>
         </div>
       </div>
 

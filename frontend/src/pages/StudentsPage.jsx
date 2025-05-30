@@ -50,8 +50,8 @@ function StudentsPage() {
   const [tempPreviousClassToAddId, setTempPreviousClassToAddId] = useState('');
 
   // Sorting state for students table
-  const [studentSortField, setStudentSortField] = useState('last_name'); // Default: last_name
-  const [studentSortOrder, setStudentSortOrder] = useState('asc'); // Default: asc
+  const [studentSortField, setStudentSortField] = useState('created_at'); // Default: created_at
+  const [studentSortOrder, setStudentSortOrder] = useState('desc'); // Default: desc
 
   // New state for student documents
   const [studentDocuments, setStudentDocuments] = useState([]);
@@ -122,7 +122,7 @@ function StudentsPage() {
       }
 
       const data = await response.json();
-      console.log('API Response Data:', data);
+      console.log('[fetchStudents] Raw API Response Data:', data); // Log fetched students
       const processedData = data.map(student => ({
         ...student,
         id: student._id || student.id
@@ -153,6 +153,7 @@ function StudentsPage() {
         throw new Error(t('messages_error_fetchFailed', { detail: `class groups: ${response.status}` }));
       }
       const data = await response.json();
+      console.log('[fetchClassGroupsForDropdown] Raw data:', data); // Log fetched class groups
       const processedClasses = data
         .map(cg => {
           if (!cg.id && cg._id) {
@@ -697,56 +698,102 @@ function StudentsPage() {
 
         throw new Error(specificErrorMessage);
       }
-      const resultData = await response.json();
-      savedStudentId = resultData.id || resultData._id;
+      const studentResponseData = await response.json();
+      savedStudentId = studentResponseData.id || studentResponseData._id;
       if (!savedStudentId) {
         throw new Error(t('messages_error_actionFailed', { action: logAction, detail: 'missing ID' }));
       }
       
-      if (!isEditing && selectedClassGroupId !== initialClassGroupId) {
-        if (initialClassGroupId) {
-          const deleteUrl = `${API_BASE_URL}/api/v1/classgroups/${initialClassGroupId}/students/${savedStudentId}`;
+      console.info(t(isEditing ? 'messages_students_form_editSuccess' : 'messages_students_form_success'));
+      console.info(`Student ${isEditing ? 'updated' : 'created'} successfully: ${savedStudentId} for teacher ${user.id}`);
+
+      if (!isEditing) {
+        // Logic for NEW student class assignment
+        if (selectedClassGroupId && selectedClassGroupId !== "") {
+          console.info(`[handleSubmit NewStudent] Attempting to add student ${savedStudentId} to selected class ${selectedClassGroupId}`);
+          const addUrl = `${API_BASE_URL}/api/v1/class-groups/${selectedClassGroupId}/students/${savedStudentId}`;
           try {
-            const deleteResponse = await fetch(deleteUrl, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${token}` }
+            const addResponse = await fetch(addUrl, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             });
-            if (!deleteResponse.ok && deleteResponse.status !== 404) {
-              console.warn(`[handleSubmit] Failed to remove student from previous class ${initialClassGroupId}: ${deleteResponse.status}`);
+            if (!addResponse.ok) {
+              const errorData = await addResponse.json().catch(() => ({}));
+              const detail = errorData.detail || `Status: ${addResponse.status}`;
+              console.warn(`[handleSubmit NewStudent] Failed to add student ${savedStudentId} to class ${selectedClassGroupId}. Detail: ${detail}`);
+              setFormError(t('messages_students_class_assignErrorOnCreate', { detail })); 
+            } else {
+              console.info(`[handleSubmit NewStudent] Student ${savedStudentId} successfully added to class ${selectedClassGroupId}.`);
             }
-          } catch (deleteErr) {
-            console.warn(`[handleSubmit] Error during fetch to remove student from old class ${initialClassGroupId}: ${deleteErr}`);
+          } catch (error) {
+            console.warn(`[handleSubmit NewStudent] Error adding student to class ${selectedClassGroupId}: ${error.message}`);
+            setFormError(t('messages_students_class_assignErrorOnCreate', { detail: error.message }));
           }
         }
-        if (selectedClassGroupId) {
-          const postUrl = `${API_BASE_URL}/api/v1/classgroups/${selectedClassGroupId}/students/${savedStudentId}`;
-          try {
-            const postResponse = await fetch(postUrl, {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (!postResponse.ok) {
-              let postErrorDetail = `HTTP ${postResponse.status}`;
-              try {
-                const errData = await postResponse.json();
-                postErrorDetail = errData.detail || JSON.stringify(errData);
-              } catch (e) {
-                try {
-                  postErrorDetail = await postResponse.text() || postErrorDetail;
-                } catch (e2) {}
+      } else {
+        // Logic for EXISTING student class assignment
+        if (selectedClassGroupId !== initialClassGroupId) {
+          console.info(`[handleSubmit EditStudent] Class selection changed. Initial: '${initialClassGroupId}', Selected: '${selectedClassGroupId}' for student ${savedStudentId}`);
+          
+          // 1. Remove from old class if it was set and is different from new selection
+          if (initialClassGroupId && initialClassGroupId !== "" && initialClassGroupId !== selectedClassGroupId) {
+            console.info(`[handleSubmit EditStudent] Attempting to remove student ${savedStudentId} from old class ${initialClassGroupId}`);
+            const deleteUrl = `${API_BASE_URL}/api/v1/class-groups/${initialClassGroupId}/students/${savedStudentId}`;
+            try {
+              const deleteResponse = await fetch(deleteUrl, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+              });
+              if (!deleteResponse.ok && deleteResponse.status !== 404) {
+                const errorData = await deleteResponse.json().catch(() => ({}));
+                console.warn(`[handleSubmit EditStudent] Failed to remove student from old class ${initialClassGroupId}. Detail: ${errorData.detail || `Status: ${deleteResponse.status}`}`);
+              } else {
+                console.info(`[handleSubmit EditStudent] Student ${savedStudentId} removed from old class ${initialClassGroupId} or was not in it.`);
               }
-              console.warn(`[handleSubmit] Failed to add student to new class ${selectedClassGroupId}: ${postErrorDetail}`);
+            } catch (error) {
+              console.warn(`[handleSubmit EditStudent] Error removing student from old class ${initialClassGroupId}: ${error.message}`);
             }
-          } catch (postErr) {
-            console.warn(`[handleSubmit] Error during fetch to add student to new class ${selectedClassGroupId}: ${postErr}`);
           }
+
+          // 2. Add to new class if a new one is selected (and it's not empty)
+          if (selectedClassGroupId && selectedClassGroupId !== "") {
+            console.info(`[handleSubmit EditStudent] Attempting to add student ${savedStudentId} to new class ${selectedClassGroupId}`);
+            const addUrl = `${API_BASE_URL}/api/v1/class-groups/${selectedClassGroupId}/students/${savedStudentId}`;
+            try {
+              const addResponse = await fetch(addUrl, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              });
+              if (!addResponse.ok) {
+                const errorData = await addResponse.json().catch(() => ({}));
+                console.warn(`[handleSubmit EditStudent] Failed to add student ${savedStudentId} to new class ${selectedClassGroupId}. Detail: ${errorData.detail || `Status: ${addResponse.status}`}`);
+                // Consider setting formError here too if this failure is critical for editing
+              } else {
+                console.info(`[handleSubmit EditStudent] Student ${savedStudentId} successfully added to new class ${selectedClassGroupId}.`);
+              }
+            } catch (error) {
+              console.warn(`[handleSubmit EditStudent] Error adding student to new class ${selectedClassGroupId}: ${error.message}`);
+            }
+          }
+        } else {
+          console.info(`[handleSubmit EditStudent] Class selection not changed for student ${savedStudentId}. No class update needed.`);
         }
       }
 
-      setFormSuccess(t('messages_students_form_success', { action: logAction.toLowerCase() }));
-      await fetchStudents();
-      await fetchClassGroupsForDropdown();
-      resetForms();
+      // Common post-success actions
+      if (isEditing) { // For existing students, stay on form, refresh related data
+        // setFormSuccess(t('messages_students_form_editSuccess')); // Already handled by console.info
+        // Fetch updated student details or class lists if necessary for immediate UI update
+        // For now, we assume the individual add/remove calls update state sufficiently for the session, or a full refresh is okay.
+      }
+      // For both new and existing, after all operations:
+      await fetchStudents(); // Refresh student list in the background
+      await fetchClassGroupsForDropdown(); // Refresh class group dropdown
+      resetForms(); // Reset form fields and hide form
+      if (location.pathname.startsWith('/students')) { // Only navigate if still on a student related page (e.g. not if called from bulk upload context in future)
+          navigate('/students'); // Navigate back to student list view
+      }
+
     } catch (err) {
       setFormError(err.message || t('messages_error_unexpected'));
     } finally {
@@ -1272,14 +1319,19 @@ function StudentsPage() {
                           </th>
                           <th>{t('students_column_externalId')}</th>
                           <th>{t('students_column_classes')}</th>
+                          <th className="cursor-pointer hover:bg-base-200" onClick={() => handleStudentSort('created_at')}>
+                            {t('students_column_createdOn', 'Created On')}
+                            {studentSortField === 'created_at' && (studentSortOrder === 'asc' ? <ChevronUpIcon className="inline h-4 w-4 ml-1" /> : <ChevronDownIcon className="inline h-4 w-4 ml-1" />)}
+                            {studentSortField !== 'created_at' && <ArrowsUpDownIcon className="inline h-4 w-4 ml-1 text-gray-400" />}
+                          </th>
                           <th>{t('common_label_actions')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {isLoading ? (
-                          <tr><td colSpan="6" className="text-center"><span className="loading loading-dots loading-md"></span></td></tr>
+                          <tr><td colSpan="7" className="text-center"><span className="loading loading-dots loading-md"></span></td></tr>
                         ) : sortedStudents.length === 0 ? (
-                          <tr><td colSpan="6" className="text-center py-4">{error ? error : t('messages_students_noStudents')}</td></tr>
+                          <tr><td colSpan="7" className="text-center py-4">{error ? error : t('messages_students_noStudents')}</td></tr>
                         ) : (
                           sortedStudents.map(student => (
                             <tr key={student.id} className="hover">
@@ -1289,6 +1341,9 @@ function StudentsPage() {
                               <td>{student.external_student_id || '-'}</td>
                               <td>
                                 {getStudentClassNames(student)}
+                              </td>
+                              <td>
+                                {student.created_at ? new Date(student.created_at).toLocaleString() : '-'}
                               </td>
                               <td className="space-x-1">
                                 <button

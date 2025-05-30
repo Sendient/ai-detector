@@ -84,9 +84,11 @@ function Sidebar() {
                     <div className="text-center text-sm text-gray-500 p-2">{t('sidebar_auth_loading')}</div>
                 ) : isAuthenticated ? (
                     <>
-                        <div className="px-3 py-2">
-                            <img src={UpgradeSideImage} alt="Upgrade Plan" className="w-full h-auto rounded-md" />
-                        </div>
+                        <a href="https://www.smarteducator.ai/sign-up/" target="_blank" rel="noopener noreferrer">
+                            <div className="px-3 py-2">
+                                <img src={UpgradeSideImage} alt="Upgrade Plan" className="w-full h-auto rounded-md" />
+                            </div>
+                        </a>
 
                         {/* Conditionally render Admin link here */}
                         {!authContextLoading && currentUser && currentUser.is_administrator && (

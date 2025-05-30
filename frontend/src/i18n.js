@@ -18,7 +18,7 @@ i18n
   .init({
     // --- Core Settings ---
     // Define the languages you want to support
-    supportedLngs: ['en-GB', 'en-US', 'fr-FR'],
+    supportedLngs: ['en', 'en-GB', 'en-US', 'fr-FR'],
 
     // The default language to use if detection fails or a key is missing
     // This is CRUCIAL for fallback behavior.

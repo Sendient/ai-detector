@@ -291,9 +291,9 @@ async def bulk_upload_students(
                 else:
                     logger.info(f"Row {row_num}: Processing class '{class_name_to_find_or_create}' for teacher {user_kinde_id}.")
                     # Look for existing class with name and no academic year
-                    class_group_to_assign = await crud.get_class_group_by_name_and_teacher(
-                        name=class_name_to_find_or_create, 
-                        teacher_kinde_id=user_kinde_id, # Keep using Kinde ID for this lookup as it's on the ClassGroup document for now
+                    class_group_to_assign = await crud.get_class_group_by_name_year_and_teacher(
+                        class_name=class_name_to_find_or_create,
+                        teacher_id=teacher_internal_id,
                         academic_year=None # Explicitly look for academic_year = None
                     )
                     if not class_group_to_assign:

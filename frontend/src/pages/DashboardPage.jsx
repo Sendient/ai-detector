@@ -538,7 +538,7 @@ function DashboardPage() {
                         {doc.original_filename}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-base-content/80">
-                        {new Date(doc.upload_timestamp || doc.created_at).toLocaleDateString()}
+                        {new Date(doc.upload_timestamp || doc.created_at).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm">
                         {getStatusBadge(doc.status)}
