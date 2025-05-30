@@ -20,7 +20,7 @@ import {
     LogOut
 } from 'lucide-react';
 import AppLogoDark from '../img/SMARTDETECTOR_STRAPLINE_DARK.png'; // Import the new logo
-import UpgradeSideImage from '../img/Upgrade-side-image.png'; // Import the new upgrade image
+import UpgradeSideImage from '../img/Upgrade-Side-Image.png'; // Import the new upgrade image
 
 // -> Remove the old PlaceholderIcon, LoginIcon, etc. component definitions
 
