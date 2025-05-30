@@ -676,5 +676,11 @@
     "bulkUpload_button_backToStudents": "Back to Students",
 
     "adminManageTeachers_heading": "Manage Teachers",
-    "adminManageTeachers_invite_button": "Invite New Teacher"
+    "adminManageTeachers_invite_button": "Invite New Teacher",
+
+    "terms_and_conditions_url": "https://www.smartdetector.ai/terms-and-conditions/",
+    "privacy_policy_url": "https://www.smartdetector.ai/privacy-policy/",
+
+    "profilePage_button_saveChanges": "Save Changes",
+    "common_notAvailable": "Not Available"
 }
