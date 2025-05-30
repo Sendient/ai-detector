@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     AZURE_BLOB_CONTAINER_NAME: str = "uploaded-documents"
 
     # ML API Endpoint
-    ML_API_URL: Optional[str] = "https://fa-sdt-uks-aitextdet-prod.azurewebsites.net/api/ai-text-detection?code=PZrMzMk1VBBCyCminwvgUfzv_YGhVU-5E1JIs2if7zqiAzFuMhUC-g%3D%3D" # Default Production URL
+    ML_AIDETECTOR_URL: Optional[str] = None # For the AI Detector service
     ML_API_TIMEOUT_SECONDS: int = 60 # Timeout for ML API calls in seconds
 
     # --- Stripe Settings ---
