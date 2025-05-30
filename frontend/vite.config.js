@@ -24,13 +24,12 @@ export default defineConfig({
   server: {
     port: 5173, // Keep the frontend running on 5173 (or your preferred port)
     proxy: {
-      // Using the VITE_API_PROXY_PATH from .env for the proxy path
-      // Example: '/api/v1'
-      [process.env.VITE_API_PROXY_PATH || '/api/v1']: {
-        target: process.env.VITE_API_BASE_URL || 'http://localhost:8000', // The backend server address
-        changeOrigin: true,
-        secure: false, // Set to true if your backend is HTTPS and you trust the cert
-        // No rewrite needed if the backend expects the full path including /api/v1
+      // Proxy requests starting with '/api' to your backend server
+      '/api': {
+        target: process.env.VITE_API_BASE_URL || 'https://localhost:8000', // Use HTTPS
+        changeOrigin: true, // Recommended for virtual hosted sites
+        secure: true, // Enable SSL certificate verification
+        // rewrite: (path) => path.replace(/^\/api/, ''), // Uncomment if your backend doesn't expect /api prefix
       }
     }
   }
