@@ -86,6 +86,9 @@ jobs:
           echo "VITE_KINDE_LOGIN_REDIRECT_URI=${{ steps.get_swa_details.outputs.url }}" >> .env
           echo "VITE_KINDE_LOGOUT_REDIRECT_URI=${{ steps.get_swa_details.outputs.url }}" >> .env
           echo "VITE_KINDE_AUDIENCE=${{ vars.VITE_KINDE_AUDIENCE }}" >> .env
+          echo "VITE_API_PROXY_PATH=${{ vars.VITE_API_PROXY_PATH }}" >> .env
+          echo "VITE_STRIPE_PUBLISHABLE_KEY=${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}" >> .env
+          echo "VITE_STRIPE_PRO_PLAN_PRICE_ID=${{ vars.VITE_STRIPE_PRO_PLAN_PRICE_ID }}" >> .env
 
       - name: Deploy to Azure Static Web Apps
         uses: azure/static-web-apps-deploy@v1
