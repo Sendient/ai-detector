@@ -3,6 +3,7 @@ import React, { Suspense } from 'react'; // Import Suspense
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Import KindeProvider
 import { KindeProvider } from '@kinde-oss/kinde-auth-react';
