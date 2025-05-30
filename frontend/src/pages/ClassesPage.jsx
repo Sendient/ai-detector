@@ -176,7 +176,7 @@ function ClassesPage() {
         setPageMessage({ text: '', type: '' });
         const method = editingClassGroup ? 'PUT' : 'POST';
         const url = editingClassGroup
-            ? `${API_URL}/api/v1/class-groups/${editingClassGroup.id}`
+            ? `${API_URL}/api/v1/class-groups/${editingClassGroup._id}`
             : `${API_URL}/api/v1/class-groups`;
 
         const payload = {

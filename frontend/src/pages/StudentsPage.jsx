@@ -63,7 +63,6 @@ function StudentsPage() {
     email: '',
     external_student_id: '',
     descriptor: '',
-    year_group: ''
   };
 
   const [formData, setFormData] = useState(initialStudentData);
@@ -437,7 +436,6 @@ function StudentsPage() {
       email: studentToEdit.email || '',
       external_student_id: studentToEdit.external_student_id || '',
       descriptor: studentToEdit.descriptor || '',
-      year_group: studentToEdit.year_group || ''
     });
 
     const assigned = currentClassGroups.filter(cg => 
@@ -596,14 +594,13 @@ function StudentsPage() {
       }
       token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const payload = {};
-      for (const key in formData) {
-        if (formData[key] !== '' && formData[key] !== null) {
-          payload[key] = formData[key];
-        }
-      }
-      if (!payload.first_name) payload.first_name = formData.first_name;
-      if (!payload.last_name) payload.last_name = formData.last_name;
+      const payload = {
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        email: formData.email || null,
+        external_student_id: formData.external_student_id || null,
+        descriptor: formData.descriptor || null,
+      };
       if (!isEditing && user?.id) {
         payload.teacher_id = user.id;
       }
@@ -909,19 +906,6 @@ function StudentsPage() {
                       className="input input-bordered w-full"
                     />
                   </div>
-                  <div className="form-control w-full">
-                    <label className="label" htmlFor="year_group">
-                      <span className="label-text text-sm">{t('students_form_label_yearGroup')}</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="year_group"
-                      id="year_group"
-                      value={formData.year_group}
-                      onChange={handleInputChange}
-                      className="input input-bordered w-full"
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -1153,16 +1137,15 @@ function StudentsPage() {
                             {studentSortField !== 'email' && <ArrowsUpDownIcon className="inline h-4 w-4 ml-1 text-gray-400" />}
                           </th>
                           <th>{t('students_column_externalId')}</th>
-                          <th>{t('students_column_yearGroup')}</th>
                           <th>{t('students_column_classes')}</th>
                           <th>{t('common_label_actions')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {isLoading ? (
-                          <tr><td colSpan="7" className="text-center"><span className="loading loading-dots loading-md"></span></td></tr>
+                          <tr><td colSpan="6" className="text-center"><span className="loading loading-dots loading-md"></span></td></tr>
                         ) : sortedStudents.length === 0 ? (
-                          <tr><td colSpan="7" className="text-center py-4">{error ? error : t('messages_students_noStudents')}</td></tr>
+                          <tr><td colSpan="6" className="text-center py-4">{error ? error : t('messages_students_noStudents')}</td></tr>
                         ) : (
                           sortedStudents.map(student => (
                             <tr key={student.id} className="hover">
@@ -1170,7 +1153,6 @@ function StudentsPage() {
                               <td>{student.last_name}</td>
                               <td>{student.email || '-'}</td>
                               <td>{student.external_student_id || '-'}</td>
-                              <td>{student.year_group || '-'}</td>
                               <td>
                                 {getStudentClassNames(student)}
                               </td>

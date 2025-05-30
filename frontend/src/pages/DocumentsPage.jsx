@@ -558,6 +558,8 @@ function DocumentsPage() {
       const studentName = studentsForAssignmentList.find(s => s.id === selectedStudentIdForAssignment)?.first_name || 'Student';
       setAssignStudentModalSuccess(t('messages_assignStudent_success', { studentName: studentName, filename: assigningDoc.original_filename }));
       
+      fetchDocuments(); // ADDED: Refresh documents list
+
       setTimeout(() => {
         handleCloseAssignStudentModal();
       }, 1500);
