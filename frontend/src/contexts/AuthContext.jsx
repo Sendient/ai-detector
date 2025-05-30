@@ -27,7 +27,7 @@ export const AuthProvider = ({ children }) => {
                     
                     let profileData;
                     try {
-                        profileData = await apiService.get('/api/v1/teachers/me');
+                        profileData = await apiService.get('/teachers/me');
                         // console.log("AuthProvider: Initial /teachers/me GET successful:", profileData);
                         console.log("AuthProvider: Initial /teachers/me GET successful. Full Profile Data:", JSON.parse(JSON.stringify(profileData)));
                         console.log("AuthProvider: profileData.is_administrator directly after fetch:", profileData?.is_administrator);
@@ -60,15 +60,15 @@ export const AuthProvider = ({ children }) => {
                                 // +++ ADDED: Log the payload being sent +++
                                 console.log("AuthProvider: Sending minimalProfilePayload to PUT /teachers/me:", minimalProfilePayload);
                                 // +++ ADDED: Log the full URL +++
-                                console.log("AuthProvider: Full PUT URL should be:", apiService.defaults.baseURL + '/api/v1/teachers/me');
+                                console.log("AuthProvider: Full PUT URL should be:", apiService.defaults.baseURL + '/teachers/me');
 
-                                const putResponse = await apiService.put('/api/v1/teachers/me', minimalProfilePayload);
+                                const putResponse = await apiService.put('/teachers/me', minimalProfilePayload);
                                 console.log("AuthProvider: PUT /teachers/me successful or finished:", putResponse);
 
                                 // After successful PUT, retry GET /teachers/me
                                 console.log("AuthProvider: Retrying GET /teachers/me after PUT.");
                                 // apiService.setAuthToken(token); // Still set
-                                profileData = await apiService.get('/api/v1/teachers/me');
+                                profileData = await apiService.get('/teachers/me');
                                 console.log("AuthProvider: Subsequent GET /teachers/me successful after PUT:", profileData);
 
                             } catch (putOrSecondGetError) {
