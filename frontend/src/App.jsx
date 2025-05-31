@@ -28,6 +28,7 @@ import ClassViewPage from './pages/ClassViewPage';
 import AdminPage from './pages/AdminPage';
 import AdminStudentsPage from './pages/AdminStudentsPage';
 import AdminManageClassesPage from '@/pages/Admin/AdminManageClassesPage.jsx';
+import AdminManageDocumentsPage from './pages/AdminManageDocumentsPage';
 
 function App() {
   const { isAuthenticated, isLoading, login } = useKindeAuth();
@@ -74,7 +75,7 @@ function App() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/students" element={<AdminStudentsPage />} />
         <Route path="/admin/manage-classes" element={<AdminManageClassesPage />} />
-        <Route path="/admin/documents" element={<AdminPage />} />
+        <Route path="/admin/documents" element={<AdminManageDocumentsPage />} />
         <Route path="/admin/billing" element={<AdminPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

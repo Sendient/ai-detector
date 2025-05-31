@@ -29,7 +29,7 @@ const AdminStudentsPage = () => {
         setIsLoading(true);
         setError(null);
         try {
-            const fetchedStudentsRaw = await apiService.get('/api/v1/admin/students'); 
+            const fetchedStudentsRaw = await apiService.get('/admin/students'); 
             const processedStudents = fetchedStudentsRaw.map(student => {
                 if (!student.id && student._id) {
                     return { ...student, id: student._id };
@@ -61,7 +61,7 @@ const AdminStudentsPage = () => {
         }
         if (window.confirm(t('admin_students_page_confirm_delete', `Are you sure you want to delete student: ${studentName || 'N/A'}? This action cannot be undone.`))) {
             try {
-                await apiService.delete(`/api/v1/admin/students/${studentId}`);
+                await apiService.delete(`/admin/students/${studentId}`);
                 setStudents(prevStudents => prevStudents.filter(student => student.id !== studentId));
                 setError(null);
             } catch (err) {

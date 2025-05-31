@@ -20,6 +20,11 @@ router = APIRouter(
     dependencies=[Depends(require_kinde_admin_role)] # Apply to all routes in this router
 )
 
+@router.get("/test-admin-students-route-please-ignore") # TEMPORARY TEST ROUTE
+async def test_admin_students_route_please_ignore():
+    logger.info("%%%% TEST ROUTE /test-admin-students-route-please-ignore WAS HIT %%%%")
+    return {"message": "Admin students temporary test route is working!"}
+
 @router.get(
     "/overview",
     status_code=status.HTTP_200_OK,
@@ -60,7 +65,7 @@ def _ensure_admin_privileges(payload: Dict[str, Any]):
 # --- Admin Endpoints --- 
 
 @router.get(
-    "/students",
+    "/students", # REVERTED PATH
     response_model=List[Student],
     summary="Get all student profiles (Admin)",
     description="Retrieves all student profiles. Requires admin privileges."
