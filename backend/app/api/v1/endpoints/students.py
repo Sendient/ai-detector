@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 # Create the router instance
 router = APIRouter(
     prefix="/students",
-    tags=["Students"]
+    tags=["Students"],
+    redirect_slashes=False  # Explicitly disable automatic trailing slash redirects
 )
 
 # === Student API Endpoints (Now Protected) ===
