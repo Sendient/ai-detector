@@ -187,7 +187,7 @@ function ClassesPage() {
         const method = editingClassGroup ? 'PUT' : 'POST';
         const url = editingClassGroup
             ? `${HOST_URL}${API_PREFIX}/class-groups/${editingClassGroup._id}`
-            : `${HOST_URL}${API_PREFIX}/class-groups`;
+            : `${HOST_URL}${API_PREFIX}/class-groups/`;
         console.log("ClassesPage: Submitting form to URL:", url); // Added for debugging
 
         const payload = {
