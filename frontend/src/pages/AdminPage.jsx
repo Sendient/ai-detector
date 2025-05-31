@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheckIcon, EyeIcon, ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/24/outline';
 import { useTranslation } from 'react-i18next';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react'; // Added for getToken
+import { HOST_URL, API_PREFIX } from '../services/apiService';
 // You might want to create a specific API service for admin actions
 // import adminApiService from '../services/adminApiService'; 
 
@@ -111,6 +112,33 @@ const AdminPage = () => {
       }
     }, [getToken, isAuthenticated, currentUser, t]);
 
+    const fetchAdminStats = useCallback(async () => {
+      if (!isAuthenticated) {
+        setError(t('messages_error_loginRequired'));
+        return;
+      }
+
+      try {
+        const token = await getToken();
+        if (!token) throw new Error(t('messages_error_authTokenMissing'));
+
+        const response = await fetch(`${HOST_URL}${API_PREFIX}/admin/stats`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+          throw new Error(errorData.detail || t('messages_error_fetchFailed'));
+        }
+
+        const data = await response.json();
+        setAdminData(data);
+      } catch (err) {
+        console.error("Error fetching admin stats:", err);
+        setError(err.message || t('messages_error_unexpected'));
+      }
+    }, [isAuthenticated, getToken, t]);
+
     useEffect(() => {
         // Redirect if not admin or still loading
         if (!isKindeAuthLoading && !isAuthContextLoading) {
@@ -122,9 +150,10 @@ const AdminPage = () => {
             if (currentUser && currentUser.is_administrator) {
                 setAdminData({ overview: "Welcome to the Admin Dashboard." }); // Simplified placeholder
                 fetchLimitedTeachers(); // Fetch teachers for the card
+                fetchAdminStats();
             }
         }
-    }, [currentUser, isAuthContextLoading, isKindeAuthLoading, navigate, fetchLimitedTeachers, isAuthenticated]);
+    }, [currentUser, isAuthContextLoading, isKindeAuthLoading, navigate, fetchLimitedTeachers, isAuthenticated, fetchAdminStats]);
 
     const requestSort = (key) => {
       let direction = 'ascending';

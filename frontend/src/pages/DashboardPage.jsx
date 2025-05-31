@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import MainCardBackground2Image from '../img/maincard2.png'; // Import the new background image maincard2.png
 import { useAuth } from '../contexts/AuthContext'; // Corrected import path
+import { HOST_URL, API_PREFIX } from '../services/apiService';
 
 // --- Import Icons ---
 import {
@@ -175,109 +176,22 @@ function DashboardPage() {
 
     try {
       const token = await getToken();
-      if (!token) {
-        console.error('[Dashboard] fetchDashboardData: Failed to obtain token: Authentication token not available.');
-        throw new Error(t('messages_error_authTokenMissing'));
-      }
-      console.log('[Dashboard] fetchDashboardData: Token obtained successfully.');
+      if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      console.log('[Dashboard] fetchDashboardData: Initiating fetch for dashboard data.');
-      const [statsResponse, distributionResponse, recentDocsResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_BASE_URL}/api/v1/dashboard/score-distribution`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_BASE_URL}/api/v1/dashboard/recent`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
+      const response = await fetch(`${HOST_URL}${API_PREFIX}/dashboard/stats`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-      console.log('[Dashboard] fetchDashboardData: Received response for /recent. Status:', recentDocsResponse.status, 'OK:', recentDocsResponse.ok);
-
-      // Handle Stats Response
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json();
-        setKeyStats({
-            current_documents: statsData.current_documents || 0,
-            deleted_documents: statsData.deleted_documents || 0,
-            total_processed_documents: statsData.total_processed_documents || 0,
-            avgScore: statsData.avgScore,
-            flaggedRecent: statsData.flaggedRecent || 0,
-            pending: statsData.pending || 0
-        });
-      } else {
-        console.warn(`[Dashboard] Fetch failed for /api/v1/dashboard/stats. Status: ${statsResponse.status}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(errorData.detail || t('messages_error_fetchFailed'));
       }
 
-      // Handle Distribution Response
-      if (distributionResponse.ok) {
-        const responseData = await distributionResponse.json();
-        setDebugInfo(prev => ({
-          ...prev,
-          distributionResponse: responseData,
-          lastFetch: new Date().toISOString()
-        }));
-        if (responseData && Array.isArray(responseData.distribution)) {
-          const processedData = processDistributionData(responseData.distribution);
-          setChartData(processedData);
-          setDebugInfo(prev => ({
-            ...prev,
-            processedData
-          }));
-        } else {
-          console.warn('[Dashboard] Score distribution response missing expected \'distribution\' array:', responseData);
-          setChartData(DEFAULT_RANGES);
-        }
-      } else {
-        console.warn(`[Dashboard] Fetch failed for /api/v1/dashboard/score-distribution. Status: ${distributionResponse.status}`);
-        setChartData(DEFAULT_RANGES);
-      }
-
-      // Handle Recent Documents Response
-      if (recentDocsResponse.ok) {
-        try {
-          const recentDocs = await recentDocsResponse.json();
-          console.log('[Dashboard] fetchDashboardData: Parsed JSON from /recent:', recentDocs);
-
-          if (Array.isArray(recentDocs)) {
-            const validDocs = recentDocs.filter(doc => doc && (doc.id || doc._id));
-            if (validDocs.length !== recentDocs.length) {
-               console.warn("[Dashboard] Some recent documents were missing an ID and filtered out.");
-            }
-            console.log('[Dashboard] fetchDashboardData: Setting recentAssessments state with:', validDocs);
-            setRecentAssessments(validDocs);
-          } else {
-            console.warn("[Dashboard] /api/v1/dashboard/recent did not return an array:", recentDocs);
-            console.log('[Dashboard] fetchDashboardData: Setting recentAssessments state with: [] (due to non-array response)');
-            setRecentAssessments([]);
-          }
-        } catch (jsonError) {
-           console.error('[Dashboard] Error parsing JSON from /api/v1/dashboard/recent:', jsonError);
-           console.log('[Dashboard] fetchDashboardData: Setting recentAssessments state with: [] (due to JSON parse error)');
-           setRecentAssessments([]);
-        }
-      } else {
-         console.warn(`[Dashboard] Fetch failed for /api/v1/dashboard/recent. Status: ${recentDocsResponse.status}`);
-         console.log('[Dashboard] fetchDashboardData: Setting recentAssessments state with: [] (due to fetch failure)');
-         setRecentAssessments([]);
-      }
-
-      // Check for any errors *after* processing all responses
-      if (!statsResponse.ok || !distributionResponse.ok || !recentDocsResponse.ok) {
-        // Construct a more informative error message
-        const errors = [];
-        if (!statsResponse.ok) errors.push(`Stats (${statsResponse.status})`);
-        if (!distributionResponse.ok) errors.push(`Score Distribution (${distributionResponse.status})`);
-        if (!recentDocsResponse.ok) errors.push(`Recent Docs (${recentDocsResponse.status})`);
-        throw new Error(`Failed to fetch some dashboard data: ${errors.join(', ')}`);
-      }
-    } catch (error) {
-      if (!error.message.includes(t('messages_error_authTokenMissing'))) {
-         console.error('[Dashboard] fetchDashboardData: Caught error:', error.message);
-      }
-      setError(error.message);
+      const data = await response.json();
+      setKeyStats(data);
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
+      setError(err.message || t('messages_error_unexpected'));
     } finally {
       setIsLoading(false);
     }

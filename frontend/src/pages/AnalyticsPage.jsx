@@ -7,6 +7,8 @@ import { useAuth } from '../contexts/AuthContext';
 // npm install lucide-react
 import { Calendar as CalendarIcon, TrendingUp, FileText, Users, BarChart2, AlertTriangle, ListChecks, Link as LinkIcon } from 'lucide-react';
 import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid';
+import { useTranslation } from 'react-i18next';
+import { HOST_URL, API_PREFIX, API_BASE_URL } from '../services/apiService';
 
 // --- Authentication Placeholder Removed ---
 // Removed the placeholder getAuthToken function
@@ -83,30 +85,49 @@ function AnalyticsPage() {
    const fetchDashboardData = useCallback(async () => {
     if (isAuthLoading || !user?.id) return;
     setIsLoadingDashboard(true); setDashboardError(null); let token;
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-    const apiUrl = `${API_BASE_URL}/api/v1/dashboard/stats`;
     try {
         token = await getToken(); if (!token) throw new Error("Authentication token not available.");
-        console.log(`Fetching Dashboard Stats from: ${apiUrl}`);
-        const response = await fetch(apiUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', }, });
-        if (!response.ok) { const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response' })); throw new Error(errorData.detail || `HTTP error! status: ${response.status}`); }
-        const data = await response.json(); setDashboardStats(data);
-    } catch (err) { console.error("Failed to fetch dashboard stats:", err); setDashboardError(err.message || "Failed to load dashboard statistics."); setDashboardStats(null);
-    } finally { setIsLoadingDashboard(false); }
+        console.log(`Fetching Dashboard Stats from: ${API_BASE_URL}/api/v1/dashboard/stats`);
+        const response = await fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, { 
+            method: 'GET', 
+            headers: { 
+                'Authorization': `Bearer ${token}`, 
+                'Content-Type': 'application/json', 
+            }, 
+        });
+        if (!response.ok) { 
+            const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response' })); 
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`); 
+        }
+        const data = await response.json(); 
+        setDashboardStats(data);
+    } catch (err) { 
+        console.error("Failed to fetch dashboard stats:", err); 
+        setDashboardError(err.message || "Failed to load dashboard statistics."); 
+        setDashboardStats(null);
+    } finally { 
+        setIsLoadingDashboard(false); 
+    }
    }, [user?.id, getToken, isAuthLoading]);
 
    // Fetch Recent Activity Function (Using Kinde Auth)
    const fetchActivityData = useCallback(async (limit = 5) => {
     if (isAuthLoading || !user?.id) return;
     setIsLoadingActivity(true); setActivityError(null); let token;
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-    // Assuming your documents endpoint supports limit, sort_by, and sort_order query params
-    const apiUrl = `${API_BASE_URL}/api/v1/dashboard/recent`;
     try {
         token = await getToken(); if (!token) throw new Error("Authentication token not available.");
-        console.log(`Fetching Recent Activity from: ${apiUrl}`);
-        const response = await fetch(apiUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', }, });
-        if (!response.ok) { const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response' })); throw new Error(errorData.detail || `HTTP error! status: ${response.status}`); }
+        console.log(`Fetching Recent Activity from: ${API_BASE_URL}/api/v1/dashboard/recent`);
+        const response = await fetch(`${API_BASE_URL}/api/v1/dashboard/recent`, { 
+            method: 'GET', 
+            headers: { 
+                'Authorization': `Bearer ${token}`, 
+                'Content-Type': 'application/json', 
+            }, 
+        });
+        if (!response.ok) { 
+            const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response' })); 
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`); 
+        }
         const data = await response.json();
         // Ensure data is an array before setting state
         if (Array.isArray(data)) {
@@ -119,13 +140,14 @@ function AnalyticsPage() {
             // Map _id to id if necessary (optional, depending on backend consistency)
             const mappedData = validData.map(item => ({ ...item, id: item.id || item._id }));
             setRecentActivity(mappedData); // Set state with validated and mapped data
-        } else {
-            console.error("Recent activity API did not return an array:", data);
-            setRecentActivity([]); // Set to empty array if response is not as expected
-            throw new Error("Invalid data format received for recent activity.");
         }
-    } catch (err) { console.error("Failed to fetch recent activity:", err); setActivityError(err.message || "Failed to load recent activity."); setRecentActivity([]);
-    } finally { setIsLoadingActivity(false); }
+    } catch (err) {
+        console.error("Failed to fetch recent activity:", err);
+        setActivityError(err.message || "Failed to load recent activity.");
+        setRecentActivity([]);
+    } finally {
+        setIsLoadingActivity(false);
+    }
    }, [user?.id, getToken, isAuthLoading]);
 
 
