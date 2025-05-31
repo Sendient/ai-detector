@@ -61,9 +61,13 @@ function ClassesPage() {
             setIsLoadingInitial(false);
             return;
         }
-        console.log("ClassesPage: Fetching class groups from URL:", `${HOST_URL}${API_PREFIX}/class-groups`); // Added for debugging
+        // console.log("ClassesPage: Fetching class groups from URL:", `${HOST_URL}${API_PREFIX}/class-groups`); // Original log
         setIsLoading(true);
         setPageMessage({ text: '', type: '' }); // Clear previous messages
+        
+        const urlToFetch = `${HOST_URL}${API_PREFIX}/class-groups`; // Define URL variable
+        console.log("[VERY PRECISE LOG] ClassesPage: Exactly this URL is being passed to fetch for class groups:", urlToFetch);
+
         try {
             const token = await getToken();
             if (!token) {
@@ -75,7 +79,7 @@ function ClassesPage() {
                 setIsLoadingInitial(false);
                 return;
             }
-            const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups`, {
+            const response = await fetch(urlToFetch, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!response.ok) {
@@ -88,6 +92,7 @@ function ClassesPage() {
             setClassGroups(data || []);
             setError(null); // Clear general error on success
         } catch (err) {
+            console.error("[VERY PRECISE LOG] ClassesPage: Fetch failed for URL:", urlToFetch, "Error:", err, "Error message:", err.message, "Error stack:", err.stack);
             setError(err.message);
             setPageMessage({ text: err.message, type: 'error' });
             clearPageMessage();
