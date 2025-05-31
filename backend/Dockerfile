@@ -41,7 +41,7 @@ EXPOSE 8000
 # Starts the server on 0.0.0.0 to be accessible from outside the container
 # Assumes your FastAPI app instance is named 'app' in 'app/main.py' (relative to WORKDIR /app)
 # So, the path is app.main:app because of the COPY ./app /app/app structure.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug", "--access-log"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug", "--access-log", "--proxy-headers", "--forwarded-allow-ips='*'"]
 
 # For a production-ready setup, you might consider more Uvicorn workers:
 # CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
