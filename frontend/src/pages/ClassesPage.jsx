@@ -14,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext'; // Assuming AuthContext provi
 
 // VITE_API_BASE_URL will be like http://localhost:8000 (without /api/v1)
 const HOST_URL = import.meta.env.VITE_API_BASE_URL;
+console.log("ClassesPage: HOST_URL initialized to:", HOST_URL); // Added for debugging
 const API_PREFIX = '/api/v1';
 
 function ClassesPage() {
@@ -60,6 +61,7 @@ function ClassesPage() {
             setIsLoadingInitial(false);
             return;
         }
+        console.log("ClassesPage: Fetching class groups from URL:", `${HOST_URL}${API_PREFIX}/class-groups`); // Added for debugging
         setIsLoading(true);
         setPageMessage({ text: '', type: '' }); // Clear previous messages
         try {
@@ -181,6 +183,7 @@ function ClassesPage() {
         const url = editingClassGroup
             ? `${HOST_URL}${API_PREFIX}/class-groups/${editingClassGroup._id}`
             : `${HOST_URL}${API_PREFIX}/class-groups`;
+        console.log("ClassesPage: Submitting form to URL:", url); // Added for debugging
 
         const payload = {
             class_name: formData.class_name,
@@ -233,6 +236,7 @@ function ClassesPage() {
         try {
             const token = await getToken();
             if (!token) throw new Error(t('messages_error_authTokenMissing'));
+            console.log("ClassesPage: Deleting class group from URL:", `${HOST_URL}${API_PREFIX}/class-groups/${classId}`); // Added for debugging
             const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups/${classId}`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` },
