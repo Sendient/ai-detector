@@ -5,7 +5,7 @@ import time   # For uptime calculation
 import sys    # For sys.stdout in logging configuration
 from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone # For uptime calculation
 import asyncio
