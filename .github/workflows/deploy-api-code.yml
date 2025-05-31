@@ -104,6 +104,33 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Add step to detect changes that require rebuild
+      - name: Check for changes requiring rebuild
+        id: changes_check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manual trigger - forcing rebuild"
+            echo "force_rebuild=true" >> $GITHUB_OUTPUT
+          else
+            # Get the list of changed files
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+            
+            # Check for Dockerfile or dependency changes
+            if echo "$CHANGED_FILES" | grep -q "Dockerfile\|docker-compose\|requirements.txt\|package.json"; then
+              echo "Dockerfile, docker-compose, or dependency changes detected - forcing rebuild"
+              echo "force_rebuild=true" >> $GITHUB_OUTPUT
+            else
+              # Check if only Python/JavaScript files changed
+              if echo "$CHANGED_FILES" | grep -q "\.py$\|\.js$\|\.ts$\|\.jsx$\|\.tsx$"; then
+                echo "Only code files changed - using cache"
+                echo "force_rebuild=false" >> $GITHUB_OUTPUT
+              else
+                echo "Other changes detected - forcing rebuild"
+                echo "force_rebuild=true" >> $GITHUB_OUTPUT
+              fi
+            fi
+          fi
+
       # Add Docker metadata (tags, labels)
       # See https://github.com/docker/metadata-action
       - name: Docker meta
@@ -155,19 +182,23 @@ jobs:
           echo "Buildx Nodes: ${{ steps.buildx.outputs.nodes }}"
           echo "Buildx Endpoint: ${{ steps.buildx.outputs.endpoint }}"
 
-      # Build and push Docker image with Buildx (recommended for multi-platform builds if needed)
-      # See https://github.com/docker/build-push-action
+      # Build and push Docker image with Buildx
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
           builder: ${{ steps.buildx.outputs.name }}
-          context: ./backend # Assuming Dockerfile is in the 'backend' directory
+          context: ./backend
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ steps.changes_check.outputs.force_rebuild == 'true' && 'force-rebuild' || 'default' }}
+          cache-to: type=gha,mode=max,scope=${{ steps.changes_check.outputs.force_rebuild == 'true' && 'force-rebuild' || 'default' }}
+          no-cache: ${{ steps.changes_check.outputs.force_rebuild == 'true' }}
+          # Add build args to help with caching
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+            DOCKER_BUILDKIT=1
 
 
   # deploy_to_aca:
