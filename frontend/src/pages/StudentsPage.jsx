@@ -15,10 +15,7 @@ import {
   DocumentPlusIcon
 } from '@heroicons/react/24/outline';
 import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid';
-
-// VITE_API_BASE_URL will be like http://localhost:8000 (without /api/v1)
-const HOST_URL = import.meta.env.VITE_API_BASE_URL;
-const API_PREFIX = '/api/v1';
+import { API_BASE_URL } from '../services/apiService';
 
 function StudentsPage() {
   const { t } = useTranslation();
@@ -91,15 +88,7 @@ function StudentsPage() {
   };
 
   const fetchStudents = useCallback(async () => {
-    if (!isAuthenticated) {
-      setStudents([]);
-      setIsLoading(false);
-      if (!isAuthLoading) {
-        setError(t('messages_error_loginRequired_viewStudents'));
-      }
-      return;
-    }
-
+    if (!isAuthenticated) return;
     setIsLoading(true);
     setError(null);
 
@@ -107,36 +96,24 @@ function StudentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/students`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const response = await fetch(`${API_BASE_URL}/api/v1/students`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (!response.ok) {
-        let errorDetail = `HTTP error ${response.status}`;
-        try {
-          const errData = await response.json();
-          errorDetail = errData.detail || errorDetail;
-        } catch (e) {
-          const textError = await response.text();
-          errorDetail = textError || errorDetail;
-        }
-        throw new Error(t('messages_students_fetchError', { detail: errorDetail }));
+        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+        throw new Error(errorData.detail || t('messages_error_fetchFailed'));
       }
 
       const data = await response.json();
-      console.log('[fetchStudents] Raw API Response Data:', data); // Log fetched students
-      const processedData = data.map(student => ({
-        ...student,
-        id: student._id || student.id
-      })).filter(student => student.id);
-      setStudents(processedData);
+      setStudents(data);
     } catch (err) {
-      console.error("Error fetching students:", err);
+      console.error('Error fetching students:', err);
       setError(err.message || t('messages_error_unexpected'));
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, isAuthLoading, getToken, t, HOST_URL, API_PREFIX]);
+  }, [isAuthenticated, getToken, t]);
 
   const fetchClassGroupsForDropdown = useCallback(async () => {
     if (!isAuthenticated) return [];
@@ -148,7 +125,7 @@ function StudentsPage() {
     try {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!response.ok) {
@@ -173,7 +150,7 @@ function StudentsPage() {
       setIsLoadingClasses(false);
     }
     return fetchedClasses;
-  }, [isAuthenticated, getToken, t, HOST_URL, API_PREFIX]);
+  }, [isAuthenticated, getToken, t]);
 
   const fetchStudentDocuments = useCallback(async (currentStudentId) => {
     if (!isAuthenticated || !currentStudentId) {
@@ -188,7 +165,7 @@ function StudentsPage() {
         const token = await getToken();
         if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-        const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/?student_id=${currentStudentId}`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/documents/?student_id=${currentStudentId}`, {
             headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -208,7 +185,7 @@ function StudentsPage() {
     } finally {
         setIsLoadingStudentDocuments(false);
     }
-  }, [isAuthenticated, getToken, t, HOST_URL, API_PREFIX, editingStudent]); // Added editingStudent to deps for the error message
+  }, [isAuthenticated, getToken, t, editingStudent]); // Added editingStudent to deps for the error message
 
   const fetchAllTeacherDocuments = useCallback(async () => {
     if (!isAuthenticated) {
@@ -223,7 +200,7 @@ function StudentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
       
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -247,7 +224,7 @@ function StudentsPage() {
     } finally {
       setIsLoadingAllTeacherDocs(false);
     }
-  }, [isAuthenticated, getToken, t, HOST_URL, API_PREFIX]);
+  }, [isAuthenticated, getToken, t]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -356,7 +333,7 @@ function StudentsPage() {
     try {
       token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -406,7 +383,7 @@ function StudentsPage() {
       }
 
       if (studentIdToAssign) {
-        const postUrl = `${HOST_URL}${API_PREFIX}/classgroups/${newClass.id}/students/${studentIdToAssign}`;
+        const postUrl = `${API_BASE_URL}/api/v1/classgroups/${newClass.id}/students/${studentIdToAssign}`;
         const postResponse = await fetch(postUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` }
@@ -530,7 +507,7 @@ function StudentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/classgroups/${classGroupIdToRemove}/students/${editingStudent.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/classgroups/${classGroupIdToRemove}/students/${editingStudent.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -586,7 +563,7 @@ function StudentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups/${classToAddId}/students/${editingStudent.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups/${classToAddId}/students/${editingStudent.id}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -634,7 +611,7 @@ function StudentsPage() {
     setFormSuccess(null);
     const isEditing = !!editingStudent;
     const studentIdForUrl = isEditing ? editingStudent?.id : null;
-    const url = isEditing ? `${HOST_URL}${API_PREFIX}/students/${studentIdForUrl}` : `${HOST_URL}${API_PREFIX}/students/`;
+    const url = isEditing ? `${API_BASE_URL}/api/v1/students/${studentIdForUrl}` : `${API_BASE_URL}/api/v1/students/`;
     const method = isEditing ? 'PUT' : 'POST';
     const logAction = isEditing ? 'Updating' : 'Creating';
     let savedStudentId = null;
@@ -711,7 +688,7 @@ function StudentsPage() {
         // Logic for NEW student class assignment
         if (selectedClassGroupId && selectedClassGroupId !== "") {
           console.info(`[handleSubmit NewStudent] Attempting to add student ${savedStudentId} to selected class ${selectedClassGroupId}`);
-          const addUrl = `${HOST_URL}${API_PREFIX}/class-groups/${selectedClassGroupId}/students/${savedStudentId}`;
+          const addUrl = `${API_BASE_URL}/api/v1/class-groups/${selectedClassGroupId}/students/${savedStudentId}`;
           try {
             const addResponse = await fetch(addUrl, {
               method: 'POST',
@@ -738,7 +715,7 @@ function StudentsPage() {
           // 1. Remove from old class if it was set and is different from new selection
           if (initialClassGroupId && initialClassGroupId !== "" && initialClassGroupId !== selectedClassGroupId) {
             console.info(`[handleSubmit EditStudent] Attempting to remove student ${savedStudentId} from old class ${initialClassGroupId}`);
-            const deleteUrl = `${HOST_URL}${API_PREFIX}/class-groups/${initialClassGroupId}/students/${savedStudentId}`;
+            const deleteUrl = `${API_BASE_URL}/api/v1/class-groups/${initialClassGroupId}/students/${savedStudentId}`;
             try {
               const deleteResponse = await fetch(deleteUrl, {
                 method: 'DELETE',
@@ -758,7 +735,7 @@ function StudentsPage() {
           // 2. Add to new class if a new one is selected (and it's not empty)
           if (selectedClassGroupId && selectedClassGroupId !== "") {
             console.info(`[handleSubmit EditStudent] Attempting to add student ${savedStudentId} to new class ${selectedClassGroupId}`);
-            const addUrl = `${HOST_URL}${API_PREFIX}/class-groups/${selectedClassGroupId}/students/${savedStudentId}`;
+            const addUrl = `${API_BASE_URL}/api/v1/class-groups/${selectedClassGroupId}/students/${savedStudentId}`;
             try {
               const addResponse = await fetch(addUrl, {
                 method: 'POST',
@@ -827,7 +804,7 @@ function StudentsPage() {
         }
       }
       if (classToRemoveFrom) {
-        const deleteUrl = `${HOST_URL}${API_PREFIX}/classgroups/${classToRemoveFrom}/students/${studentId}`;
+        const deleteUrl = `${API_BASE_URL}/api/v1/classgroups/${classToRemoveFrom}/students/${studentId}`;
         const deleteResponse = await fetch(deleteUrl, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
@@ -836,7 +813,7 @@ function StudentsPage() {
           console.warn(`Failed to remove student from class ${classToRemoveFrom} before deleting: ${deleteResponse.status}`);
         }
       }
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/students/${studentId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/students/${studentId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -936,7 +913,7 @@ function StudentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${selectedDocumentForAllocationId}/assign-student`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${selectedDocumentForAllocationId}/assign-student`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
