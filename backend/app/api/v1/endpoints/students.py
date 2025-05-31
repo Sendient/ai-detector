@@ -92,7 +92,7 @@ async def read_student(
     return student
 
 @router.get(
-    "/",
+    "",
     response_model=List[Student],
     status_code=status.HTTP_200_OK,
     summary="Get a list of students (Protected)",
