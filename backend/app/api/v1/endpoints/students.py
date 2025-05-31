@@ -25,7 +25,7 @@ router = APIRouter(
 # === Student API Endpoints (Now Protected) ===
 
 @router.post(
-    "/",
+    "",
     response_model=Student,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new student (Protected)", # Updated summary
