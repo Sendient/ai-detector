@@ -634,7 +634,7 @@ function StudentsPage() {
     setFormSuccess(null);
     const isEditing = !!editingStudent;
     const studentIdForUrl = isEditing ? editingStudent?.id : null;
-    const url = isEditing ? `${HOST_URL}${API_PREFIX}/students/${studentIdForUrl}` : `${HOST_URL}${API_PREFIX}/students/`;
+    const url = isEditing ? `${HOST_URL}${API_PREFIX}/students/${studentIdForUrl}` : `${HOST_URL}${API_PREFIX}/students`;
     const method = isEditing ? 'PUT' : 'POST';
     const logAction = isEditing ? 'Updating' : 'Creating';
     let savedStudentId = null;
