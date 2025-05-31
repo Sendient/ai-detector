@@ -1154,35 +1154,23 @@ async def get_all_students_admin(
         return students_list
 
     query = soft_delete_filter(include_deleted)
-    # No teacher_id filter for admin
+    logger.info(f"Getting all students for admin view (deleted={include_deleted}) skip={skip} limit={limit}")
 
-    logger.info(f"Admin getting all students (deleted={include_deleted}) skip={skip} limit={limit}")
     try:
-        cursor = collection.find(query, session=session).skip(skip).limit(limit) # REMOVED .sort("created_at", -1)
+        cursor = collection.find(query, session=session).skip(skip).limit(limit).sort("created_at", -1) # Sort by creation date
         async for doc in cursor:
             try:
-                # Manually map _id to id if necessary for Pydantic model
-                mapped_data = {**doc}
-                if "_id" in mapped_data and "id" not in mapped_data:
-                    mapped_data["id"] = mapped_data.pop("_id")
-                elif "_id" not in mapped_data and "id" in mapped_data: # if 'id' is UUID and '_id' is not there
-                    pass # id is already correctly populated
-                elif "_id" in mapped_data and "id" in mapped_data and mapped_data["id"] is None : # if id is None but _id exists
-                     mapped_data["id"] = mapped_data.pop("_id")
-                elif "_id" not in mapped_data and "id" not in mapped_data:
-                    logger.warning(f"Student doc missing both '_id' and 'id': {doc}")
-                    continue
-
-                students_list.append(Student(**mapped_data))
+                # Ensure _id is mapped to id if your Pydantic model uses 'id' and DB uses '_id'
+                # mapped_data = {**doc, "id": doc.get("_id")}
+                # students_list.append(Student(**mapped_data))
+                students_list.append(Student(**doc)) # Assuming Student model can handle _id directly or via alias
             except ValidationError as validation_err:
-                logger.error(f"Pydantic validation failed for student doc (admin) {doc.get('id', doc.get('_id', 'UNKNOWN ID'))}: {validation_err}")
-            except Exception as e: # Catch other potential errors during processing
-                logger.error(f"Error processing student doc (admin) {doc.get('id', doc.get('_id', 'UNKNOWN ID'))}: {e}", exc_info=True)
+                logger.error(f"Pydantic validation failed for admin student doc {doc.get('_id', 'UNKNOWN')}: {validation_err}")
+            except Exception as e:
+                logger.error(f"Unexpected error processing admin student doc {doc.get('_id', 'UNKNOWN')}: {e}", exc_info=True)
 
-    except PyMongoError as e:
-        logger.error(f"MongoDB error getting all students for admin: {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"Unexpected error getting all students for admin: {e}", exc_info=True)
+        logger.error(f"Error getting all students for admin: {e}", exc_info=True)
     return students_list
 
 @with_transaction
@@ -2850,3 +2838,42 @@ async def create_result(
         return None
 
 # --- Batch CRUD ---
+
+async def get_all_documents_admin(
+    skip: int = 0,
+    limit: int = 100,
+    include_deleted: bool = False, # Or False, depending on desired default
+    session=None # Add session if you plan to use transactions
+) -> List[Document]:
+    """
+    Retrieves all documents for the admin view, with optional pagination and
+    soft-delete filtering.
+    """
+    collection = _get_collection(DOCUMENT_COLLECTION)
+    documents_list: List[Document] = []
+    if collection is None:
+        logger.warning("get_all_documents_admin: Document collection is not available.")
+        return documents_list
+
+    query = soft_delete_filter(include_deleted)
+    logger.info(f"Getting all documents for admin view (deleted={include_deleted}) skip={skip} limit={limit}")
+
+    try:
+        cursor = collection.find(query, session=session).skip(skip).limit(limit).sort("upload_timestamp", -1) # Sort by upload_timestamp or other relevant field
+        async for doc_data in cursor:
+            try:
+                # Ensure _id is mapped to id if your Pydantic model uses 'id' and DB uses '_id'
+                # If Document model handles _id directly or via alias, this might not be needed
+                # mapped_data = {**doc_data, "id": doc_data.get("_id")}
+                # documents_list.append(Document(**mapped_data))
+                documents_list.append(Document(**doc_data))
+            except Exception as e_doc_model:
+                logger.error(f"Error creating Document model from data: {doc_data}. Error: {e_doc_model}", exc_info=True)
+                # Decide how to handle individual model creation errors (e.g., skip, log, raise)
+        logger.info(f"Successfully fetched {len(documents_list)} documents for admin.")
+    except Exception as e:
+        logger.error(f"Error fetching all documents for admin: {e}", exc_info=True)
+        # Optionally re-raise or return empty list / handle as appropriate
+        raise # Or handle more gracefully depending on desired behavior
+
+    return documents_list

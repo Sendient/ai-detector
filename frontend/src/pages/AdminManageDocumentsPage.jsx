@@ -20,13 +20,12 @@ const AdminManageDocumentsPage = () => {
         setIsLoading(true);
         setError(null);
         try {
-            // TODO: Replace with actual API call
-            // const fetchedData = await apiService.get('/admin/documents/all'); 
+            const fetchedData = await apiService.get('/admin/documents/all'); 
             // For now, using placeholder empty data. 
             // When implementing, ensure _id is mapped to id if necessary, similar to AdminStudentsPage.
-            const fetchedData = []; // Replace with actual API call result
+            // const fetchedData = []; // Replace with actual API call result
             setDocuments(fetchedData.map(doc => ({...doc, id: doc._id || doc.id })) || []);
-            console.log("AdminManageDocumentsPage: Fetched documents data (placeholder):", fetchedData);
+            console.log("AdminManageDocumentsPage: Fetched documents data:", fetchedData);
         } catch (err) {
             console.error("AdminManageDocumentsPage: Error fetching documents data:", err);
             let errorMessage = t('admin_documents_page.error_load', "Failed to load documents.");

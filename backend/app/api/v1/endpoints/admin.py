@@ -9,6 +9,7 @@ from ....core.security import require_kinde_admin_role, get_current_user_payload
 from ....db import crud # For DB operations
 from ....models.student import Student # Changed from TeacherProfile to Student
 from ....models.teacher import Teacher, TeacherProfile  # Assuming a Teacher model to represent the data, IMPORT TeacherProfile
+from ....models.document import Document # <-- Import the Document model
 from ....models.enums import UserRoleEnum, SubscriptionPlan # Added SubscriptionPlan
 from ....core.config import settings # Added settings
 
@@ -204,6 +205,36 @@ async def get_all_teachers_admin(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while fetching teacher data."
+        )
+
+@router.get(
+    "/documents/all",
+    response_model=List[Document],
+    summary="Get all documents (Admin Only)",
+    description="Retrieves a comprehensive list of all documents in the system. Requires admin privileges."
+)
+async def get_all_documents_admin(
+    skip: int = Query(0, ge=0, description="Records to skip for pagination"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    # current_user_payload: Dict[str, Any] = Depends(get_current_user_payload) # Handled by router dependency
+):
+    logger.info(f"GET /admin/documents/all called. Skip: {skip}, Limit: {limit}")
+    try:
+        documents = await crud.get_all_documents_admin(skip=skip, limit=limit) # Assumes a new CRUD function
+        if not documents:
+            logger.info("GET /admin/documents/all: No documents found.")
+            return []
+        
+        logger.info(f"GET /admin/documents/all: Returning {len(documents)} document records.")
+        return documents
+    except HTTPException as http_exc:
+        logger.error(f"GET /admin/documents/all: HTTPException - {http_exc.status_code} - {http_exc.detail}", exc_info=True)
+        raise http_exc
+    except Exception as e:
+        logger.error(f"GET /admin/documents/all: An unexpected error occurred: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while fetching document data."
         )
 
 # TODO:
