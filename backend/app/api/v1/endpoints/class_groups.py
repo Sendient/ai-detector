@@ -290,7 +290,7 @@ async def read_class_group(
 
 # --- GET /classgroups/ ---
 @router.get(
-    "/",
+    "",
     response_model=List[ClassGroup],
     status_code=status.HTTP_200_OK,
     summary="Get a list of class groups (Protected)",
@@ -301,6 +301,7 @@ async def read_class_groups(
     limit: int = Query(100, ge=1, le=500, description="Max records to return"),
     current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
 ):
+    logger.info(f"User payload sub: {current_user_payload.get('sub')}, attempting to read class groups (skip={skip}, limit={limit}).")
     user_kinde_id_str = current_user_payload.get("sub")
     logger.info(f"User {user_kinde_id_str} attempting to read list of their class groups (skip={skip}, limit={limit}).")
 
