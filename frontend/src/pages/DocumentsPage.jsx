@@ -374,7 +374,7 @@ function DocumentsPage() {
 
       // Use API_BASE_URL here if your proxy setup is different for direct calls
       // For consistency, if PROXY_PATH is for /api/v1, then student endpoint would be /api/v1/students
-      const response = await fetch(`${PROXY_PATH}/students/`, { // Assuming PROXY_PATH includes /api/v1
+      const response = await fetch(`${PROXY_PATH}/students`, { // REMOVED TRAILING SLASH HERE
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
