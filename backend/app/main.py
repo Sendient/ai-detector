@@ -143,6 +143,23 @@ if origins_to_use:
         allow_headers=["*"],
     )
 
+# === INCLUDE API ROUTERS ===
+# Ensure API_V1_PREFIX is defined (it's imported from .core.config)
+_original_fastapi_app.include_router(schools_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(teachers_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(class_groups_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(students_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(documents_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(results_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(dashboard_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(analytics_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(admin_router, prefix=API_V1_PREFIX)
+_original_fastapi_app.include_router(subscriptions_router, prefix=API_V1_PREFIX)
+# For webhooks, the prefix might be different, e.g., /webhooks or directly under /
+# Assuming it also goes under API_V1_PREFIX for now, adjust if its prefix is different.
+_original_fastapi_app.include_router(stripe_webhook_router, prefix=API_V1_PREFIX) # Example: '/webhooks' or settings.STRIPE_WEBHOOK_PREFIX
+
+
 # --- Event Handlers for DB Connection and Batch Processor ---
 @_original_fastapi_app.on_event("startup")
 async def startup_event():
@@ -384,33 +401,6 @@ async def readiness_probe(response: Response): # Inject Response to modify statu
         # Log why it's not ready
         logger.warning(f"Readiness probe failed: Database status is {db_health.get('status')}")
         return {"status": "not_ready", "database": db_health}
-
-# --- Include API Routers ---
-# Use settings.API_V1_PREFIX for consistency
-_original_fastapi_app.include_router(schools_router, prefix=settings.API_V1_PREFIX, tags=["Schools"])
-_original_fastapi_app.include_router(teachers_router, prefix=settings.API_V1_PREFIX, tags=["Teachers"])
-_original_fastapi_app.include_router(class_groups_router, prefix=settings.API_V1_PREFIX, tags=["Class Groups"])
-_original_fastapi_app.include_router(students_router, prefix=settings.API_V1_PREFIX, tags=["Students"])
-# _original_fastapi_app.include_router(assignments_router, prefix=settings.API_V1_PREFIX, tags=["Assignments"]) # COMMENTED OUT
-_original_fastapi_app.include_router(documents_router, prefix=settings.API_V1_PREFIX, tags=["Documents"])
-_original_fastapi_app.include_router(results_router, prefix=settings.API_V1_PREFIX, tags=["Results"])
-_original_fastapi_app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX, tags=["Dashboard"])
-_original_fastapi_app.include_router(analytics_router, prefix=f"{settings.API_V1_PREFIX}/analytics", tags=["Analytics"])
-_original_fastapi_app.include_router(admin_router, prefix=f"{settings.API_V1_PREFIX}", tags=["Admin"])
-
-# --- NEW: Include Stripe Subscription and Webhook Routers ---
-_original_fastapi_app.include_router(
-    subscriptions_router,
-    prefix=f"{settings.API_V1_PREFIX}/subscriptions", # Ensure this matches your API structure
-    tags=["Subscriptions"]
-)
-_original_fastapi_app.include_router(
-    stripe_webhook_router,
-    prefix=f"{settings.API_V1_PREFIX}/webhooks/stripe", # This prefix + "/stripe" from the webhook router itself = /webhooks/stripe
-    tags=["Stripe Webhooks"]
-)
-# --- END NEW ROUTER INCLUSIONS ---
-
 
 # This test endpoint might be redundant if you have a proper root or health check
 # If it's for a specific test, ensure it's clear.
