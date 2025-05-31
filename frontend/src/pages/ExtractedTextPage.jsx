@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { XCircleIcon } from '@heroicons/react/24/outline';
-import { HOST_URL, API_PREFIX } from '../services/apiService';
 
 function ExtractedTextPage() {
   const { t } = useTranslation();
@@ -13,6 +12,7 @@ function ExtractedTextPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [documentFilename, setDocumentFilename] = useState('...');
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
   const fetchDocumentMetadata = useCallback(async () => {
     const idToFetch = documentId;
@@ -23,7 +23,7 @@ function ExtractedTextPage() {
     try {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${idToFetch}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${idToFetch}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!response.ok) {
@@ -35,37 +35,72 @@ function ExtractedTextPage() {
     } catch (err) {
       setDocumentFilename(`ID: ${idToFetch}`);
     }
-  }, [documentId, isAuthenticated, getToken, t]);
+  }, [documentId, isAuthenticated, getToken, t, API_BASE_URL]);
 
   const fetchExtractedText = useCallback(async () => {
-    if (!isAuthenticated || !documentId || documentId === 'undefined') {
-      if (documentId === 'undefined') setError(t('messages_error_invalidId'));
-      return;
-    }
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${documentId}/text`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(errorData.detail || t('messages_error_fetchFailed'));
+    const idToFetch = documentId;
+    if (isAuthenticated && idToFetch && idToFetch !== 'undefined') {
+      setIsLoading(true);
+      setError(null);
+      setExtractedText('');
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error(t('messages_error_authTokenMissing'));
+        }
+        const response = await fetch(`${API_BASE_URL}/api/v1/documents/${idToFetch}/text`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) {
+          let errorDetail = `HTTP error ${response.status}`;
+          try {
+            const errData = await response.json();
+            errorDetail = errData.detail || errorDetail;
+          } catch (e) {
+            const textError = await response.text();
+            errorDetail = textError || errorDetail;
+          }
+          if (response.status === 404) errorDetail = t('messages_text_notFound');
+          if (response.status === 415) errorDetail = t('messages_text_unsupported');
+          throw new Error(t('messages_text_fetchError', { detail: errorDetail }));
+        }
+        const textData = await response.text();
+        setExtractedText(textData);
+      } catch (err) {
+        let displayError = t('messages_error_unexpected');
+        if (err instanceof Error) {
+          displayError = err.message;
+        } else if (typeof err === 'string') {
+          displayError = err;
+        }
+        if (!(displayError === t('messages_text_notFound') ||
+            displayError === t('messages_text_unsupported') ||
+            displayError.startsWith(t('messages_text_fetchError', { detail: '' }).split(':')[0]))) {
+          displayError = t('messages_text_fetchError', { detail: displayError });
+        }
+        setError(displayError);
+      } finally {
+        setIsLoading(false);
       }
-      const data = await response.json();
-      setExtractedText(data.text || '');
-    } catch (err) {
-      console.error("Error fetching extracted text:", err);
-      setError(err.message || t('messages_error_unexpected'));
-    } finally {
+    } else {
       setIsLoading(false);
+      if (!isAuthLoading && !isAuthenticated) {
+        setError(t('messages_error_loginRequired_viewText'));
+      } else if (!idToFetch || idToFetch === 'undefined') {
+        setError(t('messages_text_missingId'));
+      }
     }
-  }, [documentId, isAuthenticated, getToken, t]);
+  }, [documentId, isAuthenticated, isAuthLoading, getToken, t, API_BASE_URL]);
 
   useEffect(() => {
-    fetchDocumentMetadata();
-    fetchExtractedText();
-  }, [fetchDocumentMetadata, fetchExtractedText]);
+    if (!isAuthLoading && isAuthenticated) {
+      fetchDocumentMetadata();
+      fetchExtractedText();
+    } else if (!isAuthLoading && !isAuthenticated) {
+      setError(t('messages_error_loginRequired_viewText'));
+      setIsLoading(false);
+    }
+  }, [documentId, isAuthLoading, isAuthenticated, fetchDocumentMetadata, fetchExtractedText, t, API_BASE_URL]);
 
   return (
     <div>

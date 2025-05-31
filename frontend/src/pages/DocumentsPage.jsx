@@ -17,7 +17,6 @@ import {
   ChevronDownIcon,
   ArrowsUpDownIcon
 } from '@heroicons/react/24/outline';
-import { API_BASE_URL } from '../services/apiService';
 
 function DocumentsPage() {
   const { t } = useTranslation();
@@ -63,163 +62,147 @@ function DocumentsPage() {
 
   const bulkFileInputRef = useRef(null);
 
+  const PROXY_PATH = import.meta.env.VITE_API_PROXY_PATH || '/api/v1';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''; // Ensure API_BASE_URL is defined if used
+
   // Polling interval in milliseconds
   const POLLING_INTERVAL = 5000; // 5 seconds
 
-  const fetchResultsForDocuments = useCallback(async (docIds) => {
-    if (!isAuthenticated || !docIds.length) return;
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+  const fetchResultsForDocuments = useCallback(async (docIds, token) => {
+    if (!token || !docIds || docIds.length === 0) return;
+    console.log(`[DocumentsPage] Fetching results for docs: ${docIds.join(', ')}`);
+    const resultsPromises = docIds.map(docId =>
+        fetch(`${PROXY_PATH}/results/document/${docId}`, { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(async res => {
+                if (!res.ok) {
+                    let detail = `Status: ${res.status}`;
+                    try { const errData = await res.json(); detail = errData.detail || detail; } catch (e) { /* Ignore */ }
+                    console.warn(`Failed to fetch result for doc ${docId}: ${detail}`);
+                    return { docId, status: 'failed', error: res.status };
+                }
+                const resultData = await res.json();
+                return { docId, status: 'fulfilled', data: resultData };
+            })
+            .catch(err => {
+                console.error(`Network or other error fetching result for doc ${docId}:`, err);
+                return { docId, status: 'failed', error: err.message || 'Network error' };
+            })
+    );
+    const resultsSettled = await Promise.allSettled(resultsPromises);
+    setAssessmentResults(prevResults => {
+        const newResults = { ...prevResults };
+        resultsSettled.forEach(promiseResult => {
+            if (promiseResult.status === 'fulfilled' && promiseResult.value?.status === 'fulfilled') {
+                const { docId, data } = promiseResult.value;
+                if (data?.status === COMPLETED_STATUS && typeof data?.score === 'number') {
+                    newResults[docId] = data.score;
+                    console.log(`[DocumentsPage] Stored score ${data.score} for completed doc ${docId}`);
+                } else {
+                    if (data?.status === COMPLETED_STATUS) {
+                        newResults[docId] = null;
+                        console.log(`[DocumentsPage] Result for doc ${docId} is COMPLETED but score is not a number (is ${data?.score}). Storing null score.`);
+                    } else {
+                        delete newResults[docId];
+                        console.log(`[DocumentsPage] Result for doc ${docId} status is ${data?.status} (not COMPLETED with a numeric score), score not stored/updated.`);
+                    }
+                }
+            } else if (promiseResult.status === 'fulfilled' && promiseResult.value?.status === 'failed') {
+                const { docId } = promiseResult.value;
+                delete newResults[docId];
+                console.log(`[DocumentsPage] Fetch failed for result of doc ${docId}. Status: ${promiseResult.value?.error}`);
+            } else if (promiseResult.status === 'rejected') {
+                 console.error("[DocumentsPage] Promise rejected while fetching results:", promiseResult.reason);
+            }
+        });
+        return newResults;
+    });
+  }, [COMPLETED_STATUS]);
 
-      const results = await Promise.all(
-        docIds.map(docId =>
-          fetch(`${API_BASE_URL}/api/v1/results/document/${docId}`, { 
-            headers: { 'Authorization': `Bearer ${token}` } 
-          })
-        )
-      );
+  const fetchDocuments = useCallback(async (isPoll = false) => {
+    if (isAuthenticated) {
+      if (!isPoll) setIsLoading(true);
+      if (!isPoll) setError(null);
 
-      const validResults = await Promise.all(
-        results.map(async (res) => {
-          if (!res.ok) return null;
-          try {
-            return await res.json();
-          } catch (e) {
-            console.error('Error parsing result:', e);
-            return null;
-          }
-        })
-      );
+      try {
+        const token = await getToken();
+        if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
+        const response = await fetch(`${PROXY_PATH}/documents/`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!response.ok) {
+            let errorDetail = `HTTP error ${response.status}`;
+            try { const errData = await response.json(); errorDetail = errData.detail || errorDetail; } catch (e) { /* Ignore */ }
+            throw new Error(t('messages_docs_fetchError', { message: errorDetail }));
+        }
+        const data = await response.json();
+        const mappedData = data.map(doc => ({ ...doc, id: doc._id || doc.id })).filter(doc => doc.id);
+        console.log('[DocumentsPage] Mapped data before setting state:', mappedData);
+        setDocuments(prevDocs => {
+          return mappedData;
+        });
+        
+        const completedDocIds = mappedData.filter(doc => doc.status === COMPLETED_STATUS).map(doc => doc.id);
+        const currentCompletedIdsInResults = Object.keys(assessmentResults);
+        const newCompletedIdsToFetchResults = completedDocIds.filter(id => !currentCompletedIdsInResults.includes(id));
 
-      setAssessmentResults(validResults.filter(Boolean));
-    } catch (err) {
-      console.error('Error fetching results:', err);
-    }
-  }, [isAuthenticated, getToken, t]);
-
-  const fetchDocuments = useCallback(async () => {
-    if (!isAuthenticated) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
-
-      const response = await fetch(`${API_BASE_URL}/api/v1/documents/`, { 
-        headers: { 'Authorization': `Bearer ${token}` } 
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(errorData.detail || t('messages_error_fetchFailed'));
+        if (newCompletedIdsToFetchResults.length > 0 && token) {
+            await fetchResultsForDocuments(newCompletedIdsToFetchResults, token);
+        }
+      } catch (err) {
+        console.error("Error fetching documents:", err);
+        if (!isPoll) setError(err.message || t('messages_error_unexpected'));
+      } finally { 
+        if (!isPoll) setIsLoading(false); 
       }
-
-      const data = await response.json();
-      setDocuments(data);
-    } catch (err) {
-      console.error('Error fetching documents:', err);
-      setError(err.message || t('messages_error_unexpected'));
-    } finally {
-      setIsLoading(false);
+    } else {
+        setDocuments([]);
+        if (!isPoll) setIsLoading(false);
+        if (!isAuthLoading && !isPoll) {
+            setError(t('messages_error_loginRequired_viewDocs'));
+        }
     }
-  }, [isAuthenticated, getToken, t]);
+  }, [isAuthenticated, isAuthLoading, getToken, fetchResultsForDocuments, t, COMPLETED_STATUS, assessmentResults]);
 
-  const handleFileUpload = async (event) => {
-    const files = event.target.files;
-    if (!files.length) return;
+  const performUpload = async (fileToUpload, studentId, assignmentId) => {
+    if (!isAuthenticated) {
+      throw new Error(t('messages_error_loginRequired_upload'));
+    }
 
-    setIsUploading(true);
-    setUploadError(null);
+    const token = await getToken();
+    if (!token) {
+      throw new Error(t('messages_error_authTokenMissing'));
+    }
 
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
+    const formData = new FormData();
+    formData.append('file', fileToUpload);
 
-      const formData = new FormData();
-      Array.from(files).forEach(file => {
-        formData.append('files', file);
-      });
+    if (studentId) {
+      formData.append('student_id', studentId);
+    }
+    if (assignmentId) {
+      formData.append('assignment_id', assignmentId);
+    }
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
+    const response = await fetch(`${PROXY_PATH}/documents/upload`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(errorData.detail || t('messages_error_uploadFailed'));
+    if (!response.ok) {
+      let errorDetail = `HTTP error ${response.status}`;
+      try {
+        const errData = await response.json();
+        errorDetail = errData.detail || errorDetail;
+      } catch (e) {
+        try {
+            const textError = await response.text();
+            errorDetail = textError || errorDetail;
+        } catch (textE) {
+            // keep original errorDetail
+        }
       }
-
-      const result = await response.json();
-      setDocuments(prev => [...prev, ...result]);
-      setUploadSuccess(true);
-    } catch (err) {
-      console.error('Error uploading files:', err);
-      setUploadError(err.message || t('messages_error_unexpected'));
-    } finally {
-      setIsUploading(false);
+      throw new Error(t('messages_upload_failed_for_file', { fileName: fileToUpload.name, detail: errorDetail }));
     }
-  };
-
-  const handleAssess = async (documentId) => {
-    if (!documentId) return;
-    setIsAssessing(true);
-    setAssessError(null);
-
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
-
-      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/assess`, { 
-        method: 'POST', 
-        headers: { 'Authorization': `Bearer ${token}` } 
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(errorData.detail || t('messages_error_assessFailed'));
-      }
-
-      // Refresh documents list
-      await fetchDocuments();
-    } catch (err) {
-      console.error('Error assessing document:', err);
-      setAssessError(err.message || t('messages_error_unexpected'));
-    } finally {
-      setIsAssessing(false);
-    }
-  };
-
-  const handleDelete = async (documentId) => {
-    if (!documentId) return;
-    setIsDeleting(true);
-    setDeleteError(null);
-
-    try {
-      const token = await getToken();
-      if (!token) throw new Error(t('messages_error_authTokenMissing'));
-
-      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(errorData.detail || t('messages_error_deleteFailed'));
-      }
-
-      setDocuments(prev => prev.filter(doc => doc.id !== documentId));
-    } catch (err) {
-      console.error('Error deleting document:', err);
-      setDeleteError(err.message || t('messages_error_unexpected'));
-    } finally {
-      setIsDeleting(false);
-    }
+    return response.json();
   };
 
   const handleFileChange = (event) => {
@@ -305,6 +288,56 @@ function DocumentsPage() {
     }, 3000); 
   };
 
+  const handleAssess = async (documentId) => {
+    if (!isAuthenticated) {
+        console.error("Assessment failed: User not authenticated.");
+        setError(t('messages_error_loginRequired_assess'));
+        return;
+    }
+    console.log(`[DocumentsPage] Initiating assessment for document ID: ${documentId}`);
+    setAssessmentStatus(prev => ({ ...prev, [documentId]: 'loading' }));
+    setAssessmentErrors(prev => { const newErrors = {...prev}; delete newErrors[documentId]; return newErrors; });
+    setError(null);
+
+    try {
+        const token = await getToken();
+        if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
+        const response = await fetch(`${PROXY_PATH}/documents/${documentId}/assess`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+        
+        if (!response.ok) {
+            let errorDetail = `HTTP error ${response.status}`;
+            try { 
+                const errData = await response.json(); 
+                errorDetail = errData.detail || errorDetail; 
+            } catch (e) { 
+                const textError = await response.text(); 
+                errorDetail = textError || errorDetail; 
+            }
+            throw new Error(t('messages_assessment_failed', { detail: errorDetail }));
+        }
+        
+        const resultData = await response.json();
+        console.log(`[DocumentsPage] Assessment successful for ${documentId}:`, resultData);
+        setAssessmentStatus(prev => ({ ...prev, [documentId]: 'success' }));
+        
+        if (resultData && typeof resultData.score === 'number') {
+            setAssessmentResults(prev => ({ ...prev, [documentId]: resultData.score }));
+        } else {
+            console.warn(`Assessment triggered for ${documentId}, but score missing/invalid in immediate /assess response:`, resultData);
+        }
+        
+        // Refresh the documents list to show the updated status (e.g., PENDING, QUEUED)
+        await fetchDocuments();
+        
+    } catch (err) {
+        const errorMessage = err.message || t('messages_assessment_errorUnknown');
+        console.error(`Error assessing document ${documentId}:`, errorMessage);
+        setError(null);
+        setAssessmentStatus(prev => ({ ...prev, [documentId]: 'error' }));
+        setAssessmentErrors(prev => ({ ...prev, [documentId]: errorMessage }));
+    }
+  };
+
   const handleViewText = (documentId) => { navigate(`/documents/${documentId}/text-view`); };
   const handleViewReport = (documentId) => { navigate(`/documents/${documentId}/report`); };
 
@@ -341,7 +374,7 @@ function DocumentsPage() {
 
       // Use API_BASE_URL here if your proxy setup is different for direct calls
       // For consistency, if PROXY_PATH is for /api/v1, then student endpoint would be /api/v1/students
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/students/`, { // Assuming PROXY_PATH includes /api/v1
+      const response = await fetch(`${PROXY_PATH}/students/`, { // Assuming PROXY_PATH includes /api/v1
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
@@ -363,7 +396,7 @@ function DocumentsPage() {
     } finally {
       setIsLoadingStudentsForAssignment(false);
     }
-  }, [getToken, isAuthenticated, t, HOST_URL, API_PREFIX]); // Added PROXY_PATH to dependencies
+  }, [getToken, isAuthenticated, t, PROXY_PATH]); // Added PROXY_PATH to dependencies
 
   const handleDeleteClick = (docId) => {
     setDeletingDocId(docId);
@@ -380,7 +413,7 @@ function DocumentsPage() {
     try {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${deletingDocId}`, {
+      const response = await fetch(`${PROXY_PATH}/documents/${deletingDocId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -432,7 +465,7 @@ function DocumentsPage() {
         const token = await getToken();
         if (!token) { throw new Error(t('messages_error_authTokenMissing')); }
         
-        const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${documentId}/cancel-assessment`, {
+        const response = await fetch(`${PROXY_PATH}/documents/${documentId}/cancel-assessment`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -485,7 +518,7 @@ function DocumentsPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${assigningDoc.id}/assign-student`,
+      const response = await fetch(`${PROXY_PATH}/documents/${assigningDoc.id}/assign-student`,
         {
           method: 'PUT',
           headers: {
@@ -575,7 +608,7 @@ function DocumentsPage() {
         throw new Error(t('messages_error_authTokenMissing'));
       }
 
-      const response = await fetch(`${HOST_URL}${API_PREFIX}/documents/${documentId}/reprocess`, {
+      const response = await fetch(`${PROXY_PATH}/documents/${documentId}/reprocess`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

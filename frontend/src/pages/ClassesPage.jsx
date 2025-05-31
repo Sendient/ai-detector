@@ -11,7 +11,10 @@ import {
 } from '@heroicons/react/24/outline';
 import { ChevronUpIcon, ChevronDownIcon, ArrowsUpDownIcon } from '@heroicons/react/20/solid'; // <-- Import sorting icons
 import { useAuth } from '../contexts/AuthContext'; // Assuming AuthContext provides getCurrentUser
-import { API_BASE_URL } from '../services/apiService';
+
+// VITE_API_BASE_URL will be like http://localhost:8000 (without /api/v1)
+const HOST_URL = import.meta.env.VITE_API_BASE_URL;
+const API_PREFIX = '/api/v1';
 
 function ClassesPage() {
     const { t } = useTranslation();
@@ -70,7 +73,7 @@ function ClassesPage() {
                 setIsLoadingInitial(false);
                 return;
             }
-            const response = await fetch(`${API_BASE_URL}/api/v1/class-groups`, {
+            const response = await fetch(`${HOST_URL}${API_PREFIX}/class-groups`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!response.ok) {
@@ -91,7 +94,7 @@ function ClassesPage() {
             setIsLoading(false);
             setIsLoadingInitial(false);
         }
-    }, [API_BASE_URL, getToken, isAuthenticated, authLoading, t]);
+    }, [HOST_URL, API_PREFIX, getToken, isAuthenticated, authLoading, t]);
 
     useEffect(() => {
         fetchClassGroups();
