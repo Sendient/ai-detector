@@ -5,6 +5,7 @@ import time   # For uptime calculation
 import sys    # For sys.stdout in logging configuration
 from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone # For uptime calculation
 import asyncio
@@ -104,6 +105,11 @@ _original_fastapi_app = FastAPI(
     redoc_url="/api/redoc", # Consider making this conditional on settings.DEBUG
     openapi_url="/api/openapi.json" # Consider f"{settings.API_V1_PREFIX}/openapi.json"
 )
+
+# Add ProxyHeadersMiddleware to handle X-Forwarded-* headers
+# This should be one of the first middlewares added.
+# Trust all hosts when behind a known proxy like Azure Container Apps.
+_original_fastapi_app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # Initialize app.state for storing worker/processor instances and tasks
 _original_fastapi_app.state.assessment_worker_instance = None
