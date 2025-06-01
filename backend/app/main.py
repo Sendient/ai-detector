@@ -157,7 +157,7 @@ _original_fastapi_app.include_router(admin_router, prefix=API_V1_PREFIX)
 _original_fastapi_app.include_router(subscriptions_router, prefix=API_V1_PREFIX)
 # For webhooks, the prefix might be different, e.g., /webhooks or directly under /
 # Assuming it also goes under API_V1_PREFIX for now, adjust if its prefix is different.
-_original_fastapi_app.include_router(stripe_webhook_router, prefix=API_V1_PREFIX) # Example: '/webhooks' or settings.STRIPE_WEBHOOK_PREFIX
+_original_fastapi_app.include_router(stripe_webhook_router, prefix=f"{API_V1_PREFIX}/webhooks")
 
 
 # --- Event Handlers for DB Connection and Batch Processor ---

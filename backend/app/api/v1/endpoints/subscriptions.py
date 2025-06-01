@@ -190,6 +190,13 @@ async def create_portal_session(
     frontend_base_url = settings.FRONTEND_URL or os.getenv("FRONTEND_URL", "http://localhost:5173")
     return_url = f"{frontend_base_url}/account/billing"
 
+    # ---- START TEMPORARY DEBUG LOGGING ----
+    logger.info(f"DEBUG: settings.FRONTEND_URL value: {settings.FRONTEND_URL}")
+    logger.info(f"DEBUG: os.getenv('FRONTEND_URL') value: {os.getenv('FRONTEND_URL')}")
+    logger.info(f"DEBUG: Calculated frontend_base_url: {frontend_base_url}")
+    logger.info(f"DEBUG: Final return_url being passed to Stripe: {return_url}")
+    # ---- END TEMPORARY DEBUG LOGGING ----
+
     try:
         logger.info(f"Creating Stripe Customer Portal session for customer {current_teacher.stripe_customer_id}. Return URL: {return_url}")
         portal_session = stripe.billing_portal.Session.create(
