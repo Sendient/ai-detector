@@ -159,10 +159,8 @@ function ProfilePage() {
 
             setSuccess(t('messages_profile_success_saved'));
 
-            // Redirect to dashboard after successful save
-            setTimeout(() => {
-                navigate('/');
-            }, 2000);
+            // Redirect to dashboard (root path) after successful save
+            navigate('/');
         } catch (err) {
             console.error("Profile save error:", err); // Log the error for debugging
             setError(err.message || t('messages_profile_error_unexpectedSave'));
