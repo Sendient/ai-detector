@@ -304,25 +304,41 @@ async def get_teacher_by_id(teacher_id: uuid.UUID, session=None) -> Optional[Tea
         return None
 
 async def get_teacher_by_kinde_id(kinde_id: str, session=None) -> Optional[Teacher]:
-    """Retrieves a teacher by their Kinde ID."""
     collection = _get_collection(TEACHER_COLLECTION)
     if collection is None: return None
-    
-    query = {"kinde_id": kinde_id} # Query by the kinde_id field
-    query.update(soft_delete_filter(False)) # Ensure we don't fetch soft-deleted
-
     logger.info(f"Getting teacher by kinde_id: {kinde_id}")
+    query = {"kinde_id": kinde_id}
+    query.update(soft_delete_filter(False)) # Ensure we get the teacher even if soft_delete_filter default changes
     try:
         teacher_doc = await collection.find_one(query, session=session)
     except Exception as e:
-        logger.error(f"Error finding teacher by kinde_id {kinde_id}: {e}", exc_info=True)
+        logger.error(f"Error getting teacher by kinde_id {kinde_id}: {e}", exc_info=True)
         return None
-        
     if teacher_doc:
-        # _id from DB is UUID, Teacher model id field is uuid.UUID.
+        # logger.debug(f"Teacher found by kinde_id {kinde_id}: {teacher_doc}") # DEBUG
         return Teacher(**teacher_doc)
     else:
-        logger.debug(f"Teacher with kinde_id {kinde_id} not found or is marked as deleted.")
+        # logger.debug(f"Teacher not found by kinde_id: {kinde_id}") # DEBUG
+        return None
+
+async def get_teacher_by_stripe_customer_id(stripe_customer_id: str, session=None) -> Optional[Teacher]:
+    collection = _get_collection(TEACHER_COLLECTION)
+    if collection is None:
+        logger.error("Teacher collection not found, cannot get teacher by stripe_customer_id.")
+        return None
+    logger.info(f"Getting teacher by stripe_customer_id: {stripe_customer_id}")
+    query = {"stripe_customer_id": stripe_customer_id}
+    query.update(soft_delete_filter(False)) # Get teacher regardless of soft delete status for webhook processing
+    try:
+        teacher_doc = await collection.find_one(query, session=session)
+    except Exception as e:
+        logger.error(f"Error getting teacher by stripe_customer_id {stripe_customer_id}: {e}", exc_info=True)
+        return None
+    if teacher_doc:
+        logger.info(f"Teacher found for stripe_customer_id {stripe_customer_id}: Kinde ID {teacher_doc.get('kinde_id')}")
+        return Teacher(**teacher_doc)
+    else:
+        logger.warning(f"Teacher not found for stripe_customer_id: {stripe_customer_id}")
         return None
 
 async def get_all_teachers(skip: int = 0, limit: int = 100, include_deleted: bool = False, session=None) -> List[Teacher]:

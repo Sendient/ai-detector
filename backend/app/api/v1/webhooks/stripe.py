@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional as TypingOptional # Renamed to avoid conf
 import stripe
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase # For type hinting the DB
+import asyncio
 
 from ....core.config import settings
 from ....db import crud as crud_teacher # crud.py contains teacher-related functions
@@ -14,6 +15,11 @@ from ....models.enums import SubscriptionPlan, StripeSubscriptionStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+@router.get("/test-webhook-router") # New test endpoint
+async def test_webhook_router_endpoint():
+    logger.info("!!!! DEBUG: /test-webhook-router endpoint in stripe.py was reached !!!!")
+    return {"message": "Stripe webhook router test endpoint is active"}
 
 @router.post(
     "/stripe", # This path should match the URL you configured in your Stripe Dashboard
@@ -193,6 +199,12 @@ async def stripe_webhook(
                     update_data["pro_plan_activated_at"] = None
                     logger.warning(f"Subscription {stripe_subscription_id} created with unexpected plan ID {plan_id_from_stripe} vs expected {settings.STRIPE_PRO_PLAN_PRICE_ID}. Plan not set to PRO.")
 
+                # Attempt to retrieve the teacher by Stripe Customer ID before updating.
+                # This is useful for logging or if you need pre-update state.
+                teacher_before_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
+                if teacher_before_update:
+                    logger.info(f"invoice.paid: Teacher Kinde ID {teacher_before_update.kinde_id} found for Stripe Customer ID {stripe_customer_id} before update.")
+
                 await _update_teacher_record(stripe_customer_id, update_data, "checkout.session.completed")
 
             except stripe.error.StripeError as se:
@@ -224,6 +236,8 @@ async def stripe_webhook(
                         "current_plan": SubscriptionPlan.PRO, # Reinforce Pro plan status
                         "pro_plan_activated_at": datetime.now(timezone.utc) # SET/UPDATE PRO ACTIVATION DATE
                     }
+                    # Attempt to retrieve the teacher by Stripe Customer ID before updating.
+                    # This is useful for logging or if you need pre-update state.
                     teacher_before_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
                     if teacher_before_update and (teacher_before_update.current_plan != SubscriptionPlan.PRO or teacher_before_update.pro_plan_activated_at is None):
                         update_data["pro_plan_activated_at"] = datetime.now(timezone.utc)
@@ -255,40 +269,46 @@ async def stripe_webhook(
             # Consider sending a notification to the user.
 
         elif event_type == 'customer.subscription.created':
-            logger.info(f"Handling customer.subscription.created for subscription: {event_data.id}")
-            stripe_customer_id = event_data.get("customer")
-            stripe_subscription_id = event_data.id # The event_data is the subscription object
-            
-            # Retrieve the subscription to get plan details and current_period_end
+            subscription = event_data
+            logger.info(f"Handling customer.subscription.created for subscription: {subscription.id}")
+
+            # Retrieve the full subscription object to ensure all fields are present
             try:
-                subscription = stripe.Subscription.retrieve(stripe_subscription_id, expand=['items.data.price'])
-                current_period_end_dt = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
-                plan_id_from_stripe = subscription.items.data[0].price.id if subscription.items.data else None
+                full_subscription = await asyncio.to_thread(
+                    stripe.Subscription.retrieve,
+                    subscription.id,
+                    expand=['items.data.price'] # Ensure price is expanded
+                )
+                logger.info(f"Retrieved full subscription object for {subscription.id} in customer.subscription.created event.")
+            except stripe.StripeError as e:
+                logger.error(f"Stripe API error retrieving subscription {subscription.id} in customer.subscription.created: {e}")
+                # Depending on policy, may re-raise or return error response
+                raise HTTPException(status_code=500, detail=f"Stripe API error: {str(e)}")
 
-                update_payload_sub_created = {
-                    "stripe_subscription_id": stripe_subscription_id,
-                    "subscription_status": StripeSubscriptionStatus(subscription.status), # Use actual status from Stripe
-                    "current_period_end": current_period_end_dt,
-                }
+            stripe_customer_id = full_subscription.customer
+            plan_id_from_stripe = full_subscription.items.data[0].price.id
+            current_period_end_ts = full_subscription.current_period_end # Now should be available
+            current_period_end_dt = datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
 
-                if plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID and subscription.status == 'active':
-                    update_payload_sub_created["current_plan"] = SubscriptionPlan.PRO
-                    # Check if already PRO to keep original activation date
-                    teacher_before_create_sub_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
-                    if teacher_before_create_sub_update and (teacher_before_create_sub_update.current_plan != SubscriptionPlan.PRO or teacher_before_create_sub_update.pro_plan_activated_at is None):
-                        update_payload_sub_created["pro_plan_activated_at"] = datetime.now(timezone.utc)
-                    elif teacher_before_create_sub_update and teacher_before_create_sub_update.pro_plan_activated_at is not None:
-                        # If already PRO and activated_at is set, ensure it's not accidentally cleared if not in payload
-                        pass # pro_plan_activated_at remains as is from previous state
-                else:
-                    update_payload_sub_created["pro_plan_activated_at"] = None # Clear if not PRO or not active
+            update_data = {
+                "stripe_subscription_id": subscription.id,
+                "subscription_status": StripeSubscriptionStatus(subscription.status), # Use actual status from Stripe
+                "current_period_end": current_period_end_dt,
+            }
 
-                await _update_teacher_record(stripe_customer_id, update_payload_sub_created, "customer.subscription.created")
+            if plan_id_from_stripe == settings.STRIPE_PRO_PLAN_PRICE_ID and subscription.status == 'active':
+                update_data["current_plan"] = SubscriptionPlan.PRO
+                # Check if already PRO to keep original activation date
+                teacher_before_create_sub_update = await crud_teacher.get_teacher_by_stripe_customer_id(db=db, stripe_customer_id=stripe_customer_id)
+                if teacher_before_create_sub_update and (teacher_before_create_sub_update.current_plan != SubscriptionPlan.PRO or teacher_before_create_sub_update.pro_plan_activated_at is None):
+                    update_data["pro_plan_activated_at"] = datetime.now(timezone.utc)
+                elif teacher_before_create_sub_update and teacher_before_create_sub_update.pro_plan_activated_at is not None:
+                    # If already PRO and activated_at is set, ensure it's not accidentally cleared if not in payload
+                    pass # pro_plan_activated_at remains as is from previous state
+            else:
+                update_data["pro_plan_activated_at"] = None # Clear if not PRO or not active
 
-            except stripe.error.StripeError as se:
-                logger.error(f"Stripe error processing customer.subscription.created ({stripe_subscription_id}): {se}", exc_info=True)
-            except Exception as e_sub_created:
-                logger.error(f"Error processing customer.subscription.created ({stripe_subscription_id}): {e_sub_created}", exc_info=True)
+            await _update_teacher_record(stripe_customer_id, update_data, "customer.subscription.created")
 
         elif event_type == 'customer.subscription.updated':
             logger.info(f"Handling customer.subscription.updated for subscription: {event_data.id}")

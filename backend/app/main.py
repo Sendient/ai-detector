@@ -3,7 +3,7 @@ import logging
 import psutil # For system metrics in health check
 import time   # For uptime calculation
 import sys    # For sys.stdout in logging configuration
-from fastapi import FastAPI, Response, Request
+from fastapi import FastAPI, Response, Request, Depends, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from typing import Dict, Any, Optional
@@ -15,6 +15,7 @@ import os
 import pymongo
 from pymongo import IndexModel
 import stripe # Import the stripe library
+from fastapi.responses import HTMLResponse
 
 # Import config and database lifecycle functions
 # Assuming your config.py provides 'settings' object and other constants
@@ -155,9 +156,15 @@ _original_fastapi_app.include_router(dashboard_router, prefix=API_V1_PREFIX)
 _original_fastapi_app.include_router(analytics_router, prefix=API_V1_PREFIX)
 _original_fastapi_app.include_router(admin_router, prefix=API_V1_PREFIX)
 _original_fastapi_app.include_router(subscriptions_router, prefix=API_V1_PREFIX)
-# For webhooks, the prefix might be different, e.g., /webhooks or directly under /
-# Assuming it also goes under API_V1_PREFIX for now, adjust if its prefix is different.
-_original_fastapi_app.include_router(stripe_webhook_router, prefix=f"{API_V1_PREFIX}/webhooks")
+_original_fastapi_app.include_router(stripe_webhook_router, prefix=API_V1_PREFIX)
+
+
+# --- NEW TEST ENDPOINT ---
+@_original_fastapi_app.get("/maintesthit")
+async def main_test_hit_endpoint():
+    logger.info("!!!! DEBUG: /maintesthit endpoint in main.py was reached !!!!")
+    return {"message": "main.py test endpoint is active"}
+# --- END NEW TEST ENDPOINT ---
 
 
 # --- Event Handlers for DB Connection and Batch Processor ---
