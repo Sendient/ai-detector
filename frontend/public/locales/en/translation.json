@@ -83,7 +83,7 @@
   "documents_list_status_loading": "Loading documents...",
   "documents_list_label_aiScore": "AI Score:",
   "documents_list_status_assessmentFailed": "Assessment failed.",
-  "documents_list_status_limitExceeded": "Limit Exceeded",
+  "documents_list_status_limitExceeded": "EXCEEDED",
   "documents_list_button_assess_title": "Assess Document",
   "documents_list_button_assess": "Assess",
   "documents_list_button_assessing_title": "Assessment in Progress",

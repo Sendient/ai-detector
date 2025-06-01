@@ -15,6 +15,7 @@ import schoolsPlanImage from '../img/SD_Schools.png';
 // Placeholder for your Stripe Publishable Key (from .env)
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+console.log('VITE_API_BASE_URL in SubscriptionsPage:', import.meta.env.VITE_API_BASE_URL);
 
 function SubscriptionsPage() {
     const { t } = useTranslation();
@@ -119,7 +120,7 @@ function SubscriptionsPage() {
                 throw new Error(t('messages_error_stripe_pro_price_id_missing', 'Stripe Pro Plan Price ID is not configured.'));
             }
 
-            const response = await fetch(`${API_BASE_URL}/api/v1/subscriptions/create-checkout-session`, {
+            const response = await fetch(`${API_BASE_URL}/api/v1/create-checkout-session`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -177,7 +178,7 @@ function SubscriptionsPage() {
                 throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
             }
 
-            const response = await fetch(`${API_BASE_URL}/api/v1/subscriptions/create-portal-session`, {
+            const response = await fetch(`${API_BASE_URL}/api/v1/create-portal-session`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
