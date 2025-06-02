@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 
 export function useTeacherProfile() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useKindeAuth();
+    const location = useLocation();
     const [profile, setProfile] = useState(null);
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     const [profileError, setProfileError] = useState(null);
@@ -24,8 +26,10 @@ export function useTeacherProfile() {
             profileData.country &&
             profileData.state_county?.trim()
         );
-        console.log('[useTeacherProfile] checkProfileCompletion called with:', profileData);
-        console.log('[useTeacherProfile] Fields check: first_name:', !!profileData.first_name?.trim(), ', last_name:', !!profileData.last_name?.trim(), ', school_name:', !!profileData.school_name?.trim(), ', role:', !!profileData.role, ', country:', !!profileData.country, ', state_county:', !!profileData.state_county?.trim());
+        console.log('[useTeacherProfile] checkProfileCompletion called with (pertinent fields for Layout check):', 
+            { first_name: profileData.first_name, last_name: profileData.last_name, school_name: profileData.school_name, 
+              role: profileData.role, country: profileData.country, state_county: profileData.state_county });
+        console.log('[useTeacherProfile] Fields check values: first_name:', !!profileData.first_name?.trim(), ', last_name:', !!profileData.last_name?.trim(), ', school_name:', !!profileData.school_name?.trim(), ', role:', !!profileData.role, ', country:', !!profileData.country, ', state_county:', !!profileData.state_county?.trim());
         console.log('[useTeacherProfile] checkProfileCompletion result:', isComplete);
         return isComplete;
     }, []);
@@ -93,9 +97,9 @@ export function useTeacherProfile() {
     }, [isAuthenticated, isAuthLoading, user?.id, getAccessToken, t, checkProfileCompletion, API_BASE_URL]);
 
     useEffect(() => {
-        console.log('[useTeacherProfile] Outer useEffect triggered. isAuthenticated:', isAuthenticated, 'user?.id:', user?.id, 'isAuthLoading:', isAuthLoading);
+        console.log('[useTeacherProfile] Outer useEffect triggered. Pathname:', location.pathname, 'IsAuthenticated:', isAuthenticated, 'User ID:', user?.id, 'IsAuthLoading:', isAuthLoading);
         if (isAuthenticated && user?.id) {
-            console.log('[useTeacherProfile] Outer useEffect: Calling fetchProfile.');
+            console.log('[useTeacherProfile] Outer useEffect: Calling fetchProfile due to auth/user/path change.');
             fetchProfile();
         } else if (!isAuthLoading && !isAuthenticated) {
             console.log('[useTeacherProfile] Outer useEffect: User not authenticated and auth not loading. Resetting profile state.');
@@ -104,7 +108,7 @@ export function useTeacherProfile() {
             setProfileError(null);
             setIsProfileComplete(false);
         }
-    }, [isAuthenticated, user?.id, isAuthLoading, fetchProfile]);
+    }, [isAuthenticated, user?.id, isAuthLoading, fetchProfile, location.pathname]);
 
     // Log state changes for debugging
     useEffect(() => {
@@ -122,6 +126,7 @@ export function useTeacherProfile() {
         isLoadingProfile,
         profileError,
         isProfileComplete,
-        refetchProfile: fetchProfile
+        refetchProfile: fetchProfile,
+        checkProfileCompletion
     };
 } 
