@@ -314,11 +314,13 @@ async def get_teacher_by_kinde_id(kinde_id: str, session=None) -> Optional[Teach
     except Exception as e:
         logger.error(f"Error getting teacher by kinde_id {kinde_id}: {e}", exc_info=True)
         return None
+    
     if teacher_doc:
+        # logger.info(f"DEBUG CRUD: Raw teacher_doc from DB for kinde_id {kinde_id}: {teacher_doc}") # REMOVED DEBUG LOGGING
         # logger.debug(f"Teacher found by kinde_id {kinde_id}: {teacher_doc}") # DEBUG
         return Teacher(**teacher_doc)
     else:
-        # logger.debug(f"Teacher not found by kinde_id: {kinde_id}") # DEBUG
+        # logger.info(f"DEBUG CRUD: No teacher document found in DB for kinde_id {kinde_id}") # REMOVED LOGGING FOR NOT FOUND
         return None
 
 async def get_teacher_by_stripe_customer_id(stripe_customer_id: str, session=None) -> Optional[Teacher]:

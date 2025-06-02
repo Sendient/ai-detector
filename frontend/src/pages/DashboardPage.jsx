@@ -111,6 +111,7 @@ const processDistributionData = (data) => {
 
 // --- Dashboard Page Component ---
 function DashboardPage() {
+  console.log('[DashboardPage] Component rendering/mounting. Timestamp:', new Date().toISOString());
   const { t } = useTranslation();
   const { isAuthenticated, isLoading: isAuthLoading, getToken, user } = useKindeAuth();
   const navigate = useNavigate();
@@ -159,7 +160,11 @@ function DashboardPage() {
 
   // Fetch dashboard data
   const fetchDashboardData = useCallback(async () => {
-    if (!isAuthenticated) return;
+    console.log('[DashboardPage] fetchDashboardData called. Timestamp:', new Date().toISOString());
+    if (!isAuthenticated) {
+      console.log('[DashboardPage] fetchDashboardData: Not authenticated, returning early.');
+      return;
+    }
 
     console.log('[Dashboard] fetchDashboardData: Function started.');
     setIsLoading(true);
@@ -273,26 +278,27 @@ function DashboardPage() {
         if (!recentDocsResponse.ok) errors.push(`Recent Docs (${recentDocsResponse.status})`);
         throw new Error(`Failed to fetch some dashboard data: ${errors.join(', ')}`);
       }
-    } catch (error) {
-      if (!error.message.includes(t('messages_error_authTokenMissing'))) {
-         console.error('[Dashboard] fetchDashboardData: Caught error:', error.message);
-      }
-      setError(error.message);
+    } catch (e) {
+      console.error('[Dashboard] fetchDashboardData: An error occurred:', e);
+      setError(e.message || t('messages_error_dataFetchFailed'));
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, getToken, t]);
+  }, [isAuthenticated, getToken, t, API_BASE_URL, setIsLoading, setError, setKeyStats, setChartData, setRecentAssessments, setDebugInfo]);
 
-  // Effect to fetch dashboard data
+  // --- Main useEffect for Data Fetching ---
   useEffect(() => {
+    console.log('[DashboardPage] Main useEffect triggered. Timestamp:', new Date().toISOString());
+    console.log('[DashboardPage] Main useEffect - States: isLoading (local):', isLoading, 'isAuthenticated:', isAuthenticated, 'isAuthLoading (Kinde):', isAuthLoading);
+    
     if (isAuthenticated && !isAuthLoading) {
-      console.log('[Dashboard] useEffect trigger: Fetching data. isAuthenticated:', isAuthenticated, 'isAuthLoading:', isAuthLoading);
+      // console.log('[Dashboard] useEffect: Authenticated and not auth loading. Calling fetchDashboardData.');
+      console.log('[DashboardPage] Main useEffect: Calling fetchDashboardData. Timestamp:', new Date().toISOString());
       fetchDashboardData();
-    } else if (!isAuthLoading && !isAuthenticated) {
-      console.log('[Dashboard] useEffect trigger: Not authenticated, redirecting to login.');
-      navigate('/');
+      console.log('[DashboardPage] Main useEffect: After calling fetchDashboardData. Timestamp:', new Date().toISOString());
     }
-  }, [isAuthenticated, isAuthLoading, fetchDashboardData, navigate]);
+    // Dependencies:
+  }, [isAuthenticated, isAuthLoading, fetchDashboardData, navigate]); // REMOVED isLoading from dependencies
 
   // --- Sorting Logic ---
   const handleSort = (field) => {
@@ -333,6 +339,7 @@ function DashboardPage() {
 
   // --- Main Render ---
   if (isAuthLoading) {
+    console.log('[DashboardPage] Render: Kinde is loading (isAuthLoading). Timestamp:', new Date().toISOString());
     return <div className="flex items-center justify-center min-h-screen">
       <div className="loading loading-spinner loading-lg"></div>
     </div>;
@@ -340,6 +347,7 @@ function DashboardPage() {
 
   // --- Render Login Prompt if not Authenticated ---
   if (!isAuthenticated && !isAuthLoading) {
+    console.log('[DashboardPage] Render: Not authenticated and Kinde not loading. Timestamp:', new Date().toISOString());
     return <div className="alert alert-info shadow-lg">
       <div>
         <InformationCircleIcon className="h-6 w-6 stroke-current shrink-0"/>
@@ -350,6 +358,7 @@ function DashboardPage() {
 
   // --- Render Loading State ---
   if (isLoading || authLoading) { // Combined loading states
+    console.log('[DashboardPage] Render: isLoading or authLoading is true. isLoading (local):', isLoading, 'authLoading (AuthContext):', authLoading, '. Timestamp:', new Date().toISOString());
     return <div className="flex items-center justify-center min-h-screen">
       <div className="loading loading-spinner loading-lg"></div>
     </div>;
@@ -357,6 +366,7 @@ function DashboardPage() {
 
   // --- Render Error State ---
   if (error) {
+    console.log('[DashboardPage] Render: Error state. Error:', error, '. Timestamp:', new Date().toISOString());
     return <div className="alert alert-error shadow-lg">
       <div>
         <ExclamationTriangleIcon className="h-6 w-6 stroke-current shrink-0"/>
@@ -369,6 +379,7 @@ function DashboardPage() {
 
   // --- Render Dashboard Grid ---
   console.log('[DashboardPage] Rendering. Current keyStats:', keyStats);
+  console.log('[DashboardPage] Render: Main content. Timestamp:', new Date().toISOString());
 
   const sortedAssessments = [...recentAssessments].sort((a, b) => {
     if (!sortField) return 0;

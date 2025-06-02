@@ -158,13 +158,15 @@ function ProfilePage() {
             // await refetchProfile(); 
 
             setSuccess(t('messages_profile_success_saved'));
+            setIsSubmitting(false);
 
             // Redirect to dashboard (root path) after successful save
-            navigate('/');
+            console.log('[ProfilePage] handleSubmit: Before navigating to /');
+            navigate('/', { replace: true });
+            console.log('[ProfilePage] handleSubmit: After navigating to /');
         } catch (err) {
             console.error("Profile save error:", err); // Log the error for debugging
             setError(err.message || t('messages_profile_error_unexpectedSave'));
-        } finally {
             setIsSubmitting(false);
         }
     };

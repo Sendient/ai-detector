@@ -10,6 +10,16 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // +++ DEBUG: Track user object reference changes +++
+    useEffect(() => {
+        console.log("AuthProvider DEBUG: Kinde 'user' object instance changed. Timestamp:", new Date().toISOString());
+    }, [user]);
+
+    // +++ DEBUG: Track getToken function reference changes +++
+    useEffect(() => {
+        console.log("AuthProvider DEBUG: Kinde 'getToken' function instance changed. Timestamp:", new Date().toISOString());
+    }, [getToken]);
+
     useEffect(() => {
         const fetchUserProfile = async () => {
             if (isAuthenticated && user) {
