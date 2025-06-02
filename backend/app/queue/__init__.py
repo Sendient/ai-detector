@@ -5,36 +5,17 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..db.database import get_database
+from ..models.task import AssessmentTask
 
 # Default configuration values
 DEFAULT_VISIBILITY_TIMEOUT = 60  # seconds
 MAX_ATTEMPTS = 5
 
 logger = logging.getLogger(__name__)
-
-class AssessmentTask(BaseModel):
-    """Model representing a queued assessment task."""
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, alias="_id")
-    document_id: uuid.UUID
-    user_id: str
-    priority_level: int = 0
-    attempts: int = 0
-    status: str = "PENDING"
-    available_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    retry_count: int = Field(default=0)
-    last_error: Optional[str] = Field(default=None)
-
-    class Config:
-        allow_population_by_field_name = True
-        arbitrary_types_allowed = True
 
 async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority_level: int, db: Optional[AsyncIOMotorDatabase] = None, session=None) -> bool:
     """Add a new assessment task to the queue."""

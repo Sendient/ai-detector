@@ -14,7 +14,8 @@ import httpx
 from motor.motor_asyncio import AsyncIOMotorDatabase # Added for type hinting
 
 from ..core.config import settings
-from ..queue import dequeue_assessment_task, AssessmentTask
+from ..queue import dequeue_assessment_task
+from ..models.task import AssessmentTask
 from ..services.blob_storage import download_blob_as_bytes
 from ..services.text_extraction import extract_text_from_bytes
 from ..db import crud

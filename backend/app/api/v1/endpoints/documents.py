@@ -246,6 +246,12 @@ async def trigger_assessment(
         # If PENDING or FAILED, we can attempt to re-queue via the AssessmentTask mechanism
         if current_result.status in [ResultStatus.PENDING.value, ResultStatus.FAILED.value]:
             logger.info(f"Result for doc {document.id} is {current_result.status}. Attempting to re-queue for assessment.")
+
+            # Check for an existing active task before proceeding
+            existing_active_task = await crud.get_active_assessment_task_by_document_id(document_id=document.id)
+            if existing_active_task:
+                logger.warning(f"Attempt to trigger assessment for document {document.id} which already has an active task {existing_active_task.id} (status: {existing_active_task.status}). Returning current result.")
+                return current_result
             
             # MODIFIED: Add pre-emptive limit check for retry if status is LIMIT_EXCEEDED
             if document.status == DocumentStatus.LIMIT_EXCEEDED:
@@ -306,12 +312,24 @@ async def trigger_assessment(
                     # For LIMIT_EXCEEDED, we need to ensure the status is updated from LIMIT_EXCEEDED, not just any FAILED status.
                     # Also, ensure the result error message is cleared if it was related to limits.
                     update_doc_status_to = DocumentStatus.QUEUED
-                    result_update_payload = {"status": ResultStatus.PENDING.value, "error_message": None} # Clear error message
+                    # result_update_payload = {"status": ResultStatus.PENDING.value, "error_message": None} # Clear error message
                     
                     updated_doc = await crud.update_document_status(document_id=document.id, teacher_id=auth_teacher_id, status=update_doc_status_to)
                     logger.info(f"Successfully re-queued doc {document.id}. Document status set to {update_doc_status_to.value}. Worker will pick it up.")
                     
-                    await crud.update_result(result_id=current_result.id, update_data=result_update_payload, teacher_id=auth_teacher_id)
+                    # await crud.update_result(result_id=current_result.id, update_data=result_update_payload, teacher_id=auth_teacher_id)
+                    await crud.update_result_status(
+                        result_id=current_result.id,
+                        teacher_id=auth_teacher_id,
+                        status=ResultStatus.PENDING, # Pass enum member
+                        error_message=None, # Clear error message
+                        # Optionally clear other fields if appropriate when re-queueing from FAILED/LIMIT_EXCEEDED
+                        score=None,
+                        label=None,
+                        ai_generated=None,
+                        human_generated=None,
+                        paragraph_results=[]
+                    )
                     current_result = await crud.get_result_by_document_id(document_id=document.id, teacher_id=auth_teacher_id)
                     return current_result # Should now be PENDING
                 else:
@@ -325,6 +343,16 @@ async def trigger_assessment(
         # No result record exists. This is unusual if upload creates one.
         # Try to create a PENDING result and enqueue.
         logger.warning(f"No result record found for doc {document.id}. Attempting to create one and enqueue.")
+
+        # Check for an existing active task before creating a new result and task
+        existing_active_task = await crud.get_active_assessment_task_by_document_id(document_id=document.id)
+        if existing_active_task:
+            logger.warning(f"Attempt to trigger assessment for document {document.id} (no existing result) but an active task {existing_active_task.id} (status: {existing_active_task.status}) was found. Raising conflict.")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An assessment task for document {document.id} is already active. Please wait."
+            )
+
         new_result_data = ResultCreate(document_id=document.id, teacher_id=auth_teacher_id, status=ResultStatus.PENDING)
         created_result = await crud.create_result(result_in=new_result_data)
         if not created_result:
@@ -1039,10 +1067,16 @@ async def reset_assessment_status_endpoint( # Renamed
     result_reset_failed = False
     if result_obj:
         logger.info(f"Resetting result {result_obj.id} status to FAILED.") # Corrected to FAILED
-        updated_result_obj = await crud.update_result( # Renamed
+        updated_result_obj = await crud.update_result_status( # Renamed
             result_id=result_obj.id,
             teacher_id=auth_teacher_id, # Pass teacher_id if supported for scoping
-            update_data={"status": ResultStatus.FAILED.value} # Use .value for enums in payload, corrected to FAILED
+            status=ResultStatus.FAILED, # Pass enum member
+            error_message=None, # Clear error message
+            score=None,
+            label=None,
+            ai_generated=None,
+            human_generated=None,
+            paragraph_results=[]
         )
         if not updated_result_obj:
             logger.error(f"Failed to update result status to FAILED during reset for {result_obj.id} (doc: {document_obj.id}).") # Corrected to FAILED

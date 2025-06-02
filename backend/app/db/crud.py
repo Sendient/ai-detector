@@ -33,6 +33,7 @@ from ..models.class_group import ClassGroup, ClassGroupCreate, ClassGroupUpdate
 from ..models.student import Student, StudentCreate, StudentUpdate
 from ..models.document import Document, DocumentCreate, DocumentUpdate
 from ..models.result import Result, ResultCreate, ResultUpdate, ResultStatus
+from ..models.task import AssessmentTask # <<< ADDED IMPORT
 # --- Import Enums used in Teacher model ---
 from ..models.enums import DocumentStatus, ResultStatus, FileType, MarketingSource
 from ..models.batch import Batch, BatchCreate, BatchUpdate, BatchWithDocuments
@@ -2868,30 +2869,61 @@ async def get_all_documents_admin(
     soft-delete filtering.
     """
     collection = _get_collection(DOCUMENT_COLLECTION)
-    documents_list: List[Document] = []
+    documents: List[Document] = []
     if collection is None:
-        logger.warning("get_all_documents_admin: Document collection is not available.")
-        return documents_list
+        return documents # Return empty list if collection is not available
 
     query = soft_delete_filter(include_deleted)
-    logger.info(f"Getting all documents for admin view (deleted={include_deleted}) skip={skip} limit={limit}")
+    logger.info(f"Getting all documents for admin view (deleted={include_deleted}), skip={skip}, limit={limit}")
+    try:
+        cursor = collection.find(query, session=session).skip(skip).limit(limit).sort("created_at", -1) # Example sort
+        async for doc in cursor:
+            try:
+                # Ensure '_id' is converted to 'id' if your Pydantic model expects 'id'
+                # and uses alias for '_id'. This depends on your Pydantic model setup.
+                # If Document model uses alias '_id' for 'id' field, this mapping might not be needed.
+                # mapped_doc = {**doc, "id": doc["_id"]} if "_id" in doc else doc
+                documents.append(Document(**doc)) # Assuming Document model handles alias _id
+            except ValidationError as e:
+                logger.error(f"Pydantic validation error for admin document {doc.get('_id', 'Unknown')}: {e}")
+    except Exception as e:
+        logger.error(f"Error fetching all documents for admin view: {e}", exc_info=True)
+    return documents
+
+
+async def get_active_assessment_task_by_document_id(document_id: uuid.UUID, db: Optional[AsyncIOMotorDatabase] = None) -> Optional[AssessmentTask]:
+    """
+    Retrieves an active (PENDING or IN_PROGRESS) assessment task for a given document_id.
+    """
+    if db is None:
+        current_db = get_database()
+    else:
+        current_db = db
+    
+    if current_db is None:
+        logger.error(f"Database not available, cannot get active assessment task for document {document_id}")
+        return None
 
     try:
-        cursor = collection.find(query, session=session).skip(skip).limit(limit).sort("upload_timestamp", -1) # Sort by upload_timestamp or other relevant field
-        async for doc_data in cursor:
-            try:
-                # Ensure _id is mapped to id if your Pydantic model uses 'id' and DB uses '_id'
-                # If Document model handles _id directly or via alias, this might not be needed
-                # mapped_data = {**doc_data, "id": doc_data.get("_id")}
-                # documents_list.append(Document(**mapped_data))
-                documents_list.append(Document(**doc_data))
-            except Exception as e_doc_model:
-                logger.error(f"Error creating Document model from data: {doc_data}. Error: {e_doc_model}", exc_info=True)
-                # Decide how to handle individual model creation errors (e.g., skip, log, raise)
-        logger.info(f"Successfully fetched {len(documents_list)} documents for admin.")
+        task_doc = await current_db.assessment_tasks.find_one({
+            "document_id": document_id,
+            "status": {"$in": ["PENDING", "IN_PROGRESS"]}
+        })
+        if task_doc:
+            return AssessmentTask(**task_doc)
+        return None
     except Exception as e:
-        logger.error(f"Error fetching all documents for admin: {e}", exc_info=True)
-        # Optionally re-raise or return empty list / handle as appropriate
-        raise # Or handle more gracefully depending on desired behavior
+        logger.error(f"Error retrieving active assessment task for document {document_id}: {e}", exc_info=True)
+        return None
 
-    return documents_list
+# --- Generic Filter and Utility Functions ---
+class FilterOperator:
+    EQUALS = "$eq"; NOT_EQUALS = "$ne"; GREATER_THAN = "$gt"; LESS_THAN = "$lt"
+    GREATER_THAN_EQUALS = "$gte"; LESS_THAN_EQUALS = "$lte"; IN = "$in"; NOT_IN = "$nin"
+    EXISTS = "$exists"; REGEX = "$regex"; TEXT = "$text"; SEARCH = "$search" # Added $search for $text
+    # Common operators used with $regex
+    OPTIONS = "$options"
+    # Geospatial operators (add if needed, for now an example)
+    # NEAR = "$near"; GEO_WITHIN = "$geoWithin"
+    # Array operators
+    ALL = "$all"; ELEM_MATCH = "$elemMatch"; SIZE = "$size"
