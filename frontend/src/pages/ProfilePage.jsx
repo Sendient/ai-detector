@@ -47,7 +47,7 @@ function ProfilePage() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useKindeAuth();
     const navigate = useNavigate();
-    const { profile, isLoadingProfile, profileError, refetchProfile } = useTeacherProfile();
+    const { profile, isLoadingProfile, profileError, refetchProfile, isProfileComplete } = useTeacherProfile();
     const { currentUser, loading: authContextLoading } = useAuth();
 
     const [formData, setFormData] = useState(initialProfileData);
@@ -114,7 +114,6 @@ function ProfilePage() {
             return;
         }
 
-        // Validate required fields
         if (!formData.first_name?.trim() || !formData.last_name?.trim() || 
             !formData.school_name?.trim() || !formData.role || 
             !formData.country || !formData.state_county?.trim()) {
@@ -127,12 +126,11 @@ function ProfilePage() {
         setSuccess('');
 
         try {
-            const token = await getAccessToken("https://api.aidetector.sendient.ai"); // Use correct audience if different
+            const token = await getAccessToken("https://api.aidetector.sendient.ai");
             if (!token) {
                 throw new Error(t('messages_profile_error_noToken'));
             }
 
-            // const response = await fetch(`${API_BASE_URL}/api/v1/teachers/me`, {
             const response = await fetch(`${PROXY_PATH}/teachers/me`, {
                 method: 'PUT',
                 headers: {
@@ -150,29 +148,21 @@ function ProfilePage() {
                 } catch (e) {
                      errorDetail = `${response.status} ${response.statusText}`;
                 }
-                // Use a more specific error message if possible
                 throw new Error(t('messages_profile_error_saveFailed', { detail: errorDetail }));
             }
 
-            // Optional: Refetch profile data to ensure UI consistency if not redirecting immediately
-            // await refetchProfile(); 
-
+            await refetchProfile();
+            
             setSuccess(t('messages_profile_success_saved'));
+            console.log("[ProfilePage] Profile saved and refetchProfile called. Success message set.");
             setIsSubmitting(false);
 
-            // Redirect to dashboard (root path) after successful save
-            console.log('[ProfilePage] handleSubmit: Before navigating to /');
-            navigate('/', { replace: true });
-            console.log('[ProfilePage] handleSubmit: After navigating to /');
         } catch (err) {
-            console.error("Profile save error:", err); // Log the error for debugging
+            console.error("Profile save error:", err);
             setError(err.message || t('messages_profile_error_unexpectedSave'));
             setIsSubmitting(false);
         }
     };
-
-    // --- Log formData state before rendering ---
-    // console.log('ProfilePage render - formData:', formData);
 
     if (isAuthLoading || isLoadingProfile || authContextLoading) {
         return (
@@ -235,7 +225,7 @@ function ProfilePage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* Reverted to md:grid-cols-2 */}
                             <div className="form-control w-full">
                                 <label className="label">
-                                    <span className="label-text">{t('profilePage_form_label_firstName')}</span>
+                                    <span className="label-text">{t('profilePage_form_label_firstName')} <span className="text-red-500">*</span></span>
                                 </label>
                                 <input
                                     type="text"
@@ -249,7 +239,7 @@ function ProfilePage() {
 
                             <div className="form-control w-full">
                                 <label className="label">
-                                    <span className="label-text">{t('profilePage_form_label_lastName')}</span>
+                                    <span className="label-text">{t('profilePage_form_label_lastName')} <span className="text-red-500">*</span></span>
                                 </label>
                                 <input
                                     type="text"
@@ -277,7 +267,7 @@ function ProfilePage() {
 
                             <div className="form-control w-full">
                                 <label className="label">
-                                    <span className="label-text">{t('profilePage_form_label_schoolName')}</span>
+                                    <span className="label-text">{t('profilePage_form_label_schoolName')} <span className="text-red-500">*</span></span>
                                 </label>
                                 <input
                                     type="text"
@@ -292,7 +282,7 @@ function ProfilePage() {
 
                             <div className="form-control w-full">
                                 <label className="label">
-                                    <span className="label-text">{t('profilePage_form_label_role')}</span>
+                                    <span className="label-text">{t('profilePage_form_label_role')} <span className="text-red-500">*</span></span>
                                 </label>
                                 <select
                                     name="role"
@@ -311,7 +301,7 @@ function ProfilePage() {
 
                             <div className="form-control w-full">
                                 <label className="label">
-                                    <span className="label-text">{t('profilePage_form_label_country')}</span>
+                                    <span className="label-text">{t('profilePage_form_label_country')} <span className="text-red-500">*</span></span>
                                 </label>
                                 <select
                                     name="country"
@@ -331,7 +321,7 @@ function ProfilePage() {
 
                             <div className="form-control w-full md:col-span-2"> {/* State/County reverted to md:col-span-2 */}
                                 <label className="label">
-                                    <span className="label-text">{t('profilePage_form_label_stateCounty')}</span>
+                                    <span className="label-text">{t('profilePage_form_label_stateCounty')} <span className="text-red-500">*</span></span>
                                 </label>
                                 <input
                                     type="text"
@@ -342,6 +332,9 @@ function ProfilePage() {
                                     required
                                 />
                             </div>
+                        </div>
+                        <div className="text-sm text-gray-600 md:col-span-2 mb-4">
+                            <span className="text-red-500">*</span> {t('profilePage_form_mandatory_key', 'Indicates a required field')}
                         </div>
                         <div className="card-actions justify-end pt-4 md:col-span-2"> {/* Ensure button spans if needed */}
                             <button type="submit" className="btn btn-primary" disabled={isSubmitting}>

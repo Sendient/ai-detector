@@ -4,6 +4,10 @@ from enum import Enum
 class TeacherRole(str, Enum):
     TEACHER = "teacher"
     SCHOOL_ADMIN = "school_admin"  # Assuming you might have roles like this
+    TUTOR = "tutor"          # NEW: For users identifying as Tutors
+    LECTURER = "lecturer"    # NEW: For users identifying as Lecturers
+    ADMIN = "admin"          # NEW: For users whose descriptive role is Admin (e.g., school office admin)
+    OTHER = "other"          # NEW: For any other roles not explicitly listed
     # Add any other roles your system uses or might use
     # Example: IT_COORDINATOR = "it_coordinator"
     # Example: DISTRICT_ADMIN = "district_admin"

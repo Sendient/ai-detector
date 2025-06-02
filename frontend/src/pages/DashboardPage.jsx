@@ -118,8 +118,9 @@ function DashboardPage() {
   const { currentUser, loading: authLoading } = useAuth();
 
   // --- State for Dashboard Data ---
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false); // Start with false instead of true
   const [error, setError] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState(false); // Add separate flag for data loaded
   const [keyStats, setKeyStats] = useState({
     current_documents: 0,
     deleted_documents: 0,
@@ -134,6 +135,21 @@ function DashboardPage() {
   const [userName, setUserName] = useState('');
   const [sortField, setSortField] = useState('upload_timestamp');
   const [sortOrder, setSortOrder] = useState('desc');
+
+  // Add ref to track fetch state
+  const isFetchingRef = React.useRef(false);
+  const hasDataRef = React.useRef(false);
+  const hasStartedFetchRef = React.useRef(false); // Track if we've started fetching
+
+  // Debug: Track isLoading changes
+  useEffect(() => {
+    console.log('[DashboardPage] isLoading changed to:', isLoading, 'at timestamp:', new Date().toISOString());
+  }, [isLoading]);
+
+  // Debug: Track dataLoaded changes
+  useEffect(() => {
+    console.log('[DashboardPage] dataLoaded changed to:', dataLoaded, 'at timestamp:', new Date().toISOString());
+  }, [dataLoaded]);
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -161,12 +177,19 @@ function DashboardPage() {
   // Fetch dashboard data
   const fetchDashboardData = useCallback(async () => {
     console.log('[DashboardPage] fetchDashboardData called. Timestamp:', new Date().toISOString());
+    
     if (!isAuthenticated) {
       console.log('[DashboardPage] fetchDashboardData: Not authenticated, returning early.');
       return;
     }
 
+    if (isFetchingRef.current) {
+      console.log('[DashboardPage] fetchDashboardData: Already fetching, skipping this call.');
+      return;
+    }
+
     console.log('[Dashboard] fetchDashboardData: Function started.');
+    isFetchingRef.current = true;
     setIsLoading(true);
     setError(null);
     setKeyStats({
@@ -187,17 +210,30 @@ function DashboardPage() {
       console.log('[Dashboard] fetchDashboardData: Token obtained successfully.');
 
       console.log('[Dashboard] fetchDashboardData: Initiating fetch for dashboard data.');
-      const [statsResponse, distributionResponse, recentDocsResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_BASE_URL}/api/v1/dashboard/score-distribution`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_BASE_URL}/api/v1/dashboard/recent`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
+      
+      // Add timeout to prevent hanging
+      const fetchWithTimeout = (promise, timeout = 10000) => {
+        return Promise.race([
+          promise,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Timeout after ${timeout}ms`)), timeout)
+          )
+        ]);
+      };
+
+      const [statsResponse, distributionResponse, recentDocsResponse] = await fetchWithTimeout(
+        Promise.all([
+          fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/api/v1/dashboard/score-distribution`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/api/v1/dashboard/recent`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+        ])
+      );
 
       console.log('[Dashboard] fetchDashboardData: Received response for /recent. Status:', recentDocsResponse.status, 'OK:', recentDocsResponse.ok);
 
@@ -282,23 +318,98 @@ function DashboardPage() {
       console.error('[Dashboard] fetchDashboardData: An error occurred:', e);
       setError(e.message || t('messages_error_dataFetchFailed'));
     } finally {
+      console.log('[Dashboard] fetchDashboardData: Finally block executing - setting isLoading to false');
       setIsLoading(false);
+      isFetchingRef.current = false;
+      hasDataRef.current = true; // Mark that we've fetched data
+      console.log('[Dashboard] fetchDashboardData: Finally block completed');
     }
-  }, [isAuthenticated, getToken, t, API_BASE_URL, setIsLoading, setError, setKeyStats, setChartData, setRecentAssessments, setDebugInfo]);
+  }, [isAuthenticated, t, API_BASE_URL]); // Removed getToken from dependencies to make function more stable
 
-  // --- Main useEffect for Data Fetching ---
+  // --- Simple useEffect for Data Fetching ---
   useEffect(() => {
-    console.log('[DashboardPage] Main useEffect triggered. Timestamp:', new Date().toISOString());
-    console.log('[DashboardPage] Main useEffect - States: isLoading (local):', isLoading, 'isAuthenticated:', isAuthenticated, 'isAuthLoading (Kinde):', isAuthLoading);
+    const loadData = async () => {
+      if (!isAuthenticated || isAuthLoading) {
+        console.log('[DashboardPage] loadData: Not ready to load - isAuthenticated:', isAuthenticated, 'isAuthLoading:', isAuthLoading);
+        return;
+      }
+      
+      if (hasStartedFetchRef.current) {
+        console.log('[DashboardPage] loadData: Already started fetching, skipping');
+        return;
+      }
+      
+      console.log('[DashboardPage] loadData: Starting data fetch');
+      hasStartedFetchRef.current = true;
+      setIsLoading(true);
+      
+      try {
+        console.log('[DashboardPage] loadData: About to call getToken()');
+        
+        // Add timeout to getToken call
+        const getTokenWithTimeout = () => {
+          return Promise.race([
+            getToken(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('getToken timeout after 3 seconds')), 3000)
+            )
+          ]);
+        };
+        
+        const token = await getTokenWithTimeout();
+        console.log('[DashboardPage] loadData: getToken() completed, token length:', token ? token.length : 'null');
+        
+        if (!token) {
+          console.log('[DashboardPage] loadData: No token, returning');
+          return;
+        }
+        
+        console.log('[DashboardPage] loadData: Fetching recent data only (simplified)');
+        
+        // Add timeout to prevent hanging
+        const fetchWithTimeout = (url, options, timeout = 5000) => {
+          return Promise.race([
+            fetch(url, options),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error(`Timeout after ${timeout}ms`)), timeout)
+            )
+          ]);
+        };
+        
+        const response = await fetchWithTimeout(`${API_BASE_URL}/api/v1/dashboard/recent`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[DashboardPage] loadData: Got recent data:', data);
+          setRecentAssessments(Array.isArray(data) ? data : []);
+          hasDataRef.current = true; // Mark successful data fetch
+          console.log('[DashboardPage] loadData: Set hasDataRef.current to true');
+          setDataLoaded(true); // Force re-render with state update
+          console.log('[DashboardPage] loadData: Set dataLoaded to true');
+          
+          // Force immediate re-render by updating isLoading right after dataLoaded
+          setTimeout(() => {
+            console.log('[DashboardPage] loadData: Forcing isLoading false via setTimeout');
+            setIsLoading(false);
+          }, 0);
+        } else {
+          console.log('[DashboardPage] loadData: Response not OK, status:', response.status);
+        }
+      } catch (error) {
+        console.error('[DashboardPage] loadData: Error:', error);
+        setError(error.message);
+      } finally {
+        console.log('[DashboardPage] loadData: Finally block (not setting isLoading here anymore)');
+      }
+    };
     
+    // Only run if authenticated and ready
     if (isAuthenticated && !isAuthLoading) {
-      // console.log('[Dashboard] useEffect: Authenticated and not auth loading. Calling fetchDashboardData.');
-      console.log('[DashboardPage] Main useEffect: Calling fetchDashboardData. Timestamp:', new Date().toISOString());
-      fetchDashboardData();
-      console.log('[DashboardPage] Main useEffect: After calling fetchDashboardData. Timestamp:', new Date().toISOString());
+      loadData();
     }
-    // Dependencies:
-  }, [isAuthenticated, isAuthLoading, fetchDashboardData, navigate]); // REMOVED isLoading from dependencies
+  }, []); // Empty dependency array - only run once on mount
 
   // --- Sorting Logic ---
   const handleSort = (field) => {
@@ -357,8 +468,11 @@ function DashboardPage() {
   }
 
   // --- Render Loading State ---
-  if (isLoading || authLoading) { // Combined loading states
-    console.log('[DashboardPage] Render: isLoading or authLoading is true. isLoading (local):', isLoading, 'authLoading (AuthContext):', authLoading, '. Timestamp:', new Date().toISOString());
+  const shouldShowLoading = authLoading; // Only show loading for auth loading
+  console.log('[DashboardPage] Render condition check - isLoading:', isLoading, 'authLoading:', authLoading, 'dataLoaded:', dataLoaded, 'shouldShowLoading:', shouldShowLoading);
+  
+  if (shouldShowLoading) { // Only show loading for auth
+    console.log('[DashboardPage] Render: authLoading is true. Timestamp:', new Date().toISOString());
     return <div className="flex items-center justify-center min-h-screen">
       <div className="loading loading-spinner loading-lg"></div>
     </div>;
@@ -403,7 +517,7 @@ function DashboardPage() {
   });
 
   return (
-    <div className="space-y-6 container mx-auto p-4 md:p-6"> {/* Restored outer container class, added padding from newer version */}
+    <div className="space-y-6 container mx-auto p-4 md:p-6">
 
       {/* --- Row 1: Welcome/QuickStart (Left) & Chart (Right) --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -476,10 +590,9 @@ function DashboardPage() {
             <ScoreDistributionChart data={chartData} />
           </div>
         </div>
-      </div> {/* End of Row 1 grid */}
+      </div>
 
       {/* --- Row 2: Key Stats (Full Width) --- */}
-      {/* Restoring the original "stats shadow w-full" container for key stats */}
       <div className="stats shadow w-full">
         <div className="stat">
           <div className="stat-figure text-primary"><DocumentDuplicateIcon className="h-8 w-8"/></div>
@@ -559,7 +672,7 @@ function DashboardPage() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                         <button
-                          onClick={() => navigate(`/documents/${doc.id || doc._id}/report`)} // Ensure navigation ID is correct
+                          onClick={() => navigate(`/documents/${doc.id || doc._id}/report`)}
                           className="btn btn-ghost btn-xs"
                         >
                           <EyeIcon className="h-4 w-4"/> {t('common_button_view', 'View')}

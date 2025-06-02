@@ -1,5 +1,5 @@
 // src/components/Layout.jsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
@@ -14,17 +14,39 @@ import { InformationCircleIcon } from '@heroicons/react/24/outline';
 function Layout({ children }) {
   const { t } = useTranslation();
   const { isAuthenticated, isLoading: isAuthLoading } = useKindeAuth();
-  const { profile, isLoadingProfile } = useTeacherProfile();
+  const { profile, isLoadingProfile, isProfileComplete } = useTeacherProfile();
   const navigate = useNavigate();
   const location = useLocation();
+  const redirectTimeoutRef = useRef(null);
 
   useEffect(() => {
-    if (!isAuthLoading && isAuthenticated && !isLoadingProfile) {
-      if (profile === null && location.pathname !== '/profile') {
-        navigate('/profile');
+    console.log('[Layout] useEffect - Path:', location.pathname, 'AuthLoading:', isAuthLoading, 'Authenticated:', isAuthenticated, 'ProfileLoading:', isLoadingProfile, 'ProfileComplete:', isProfileComplete);
+    
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+      redirectTimeoutRef.current = null;
+    }
+    
+    if (!isAuthLoading && isAuthenticated) {
+      // Redirect if:
+      // 1. We are not already on the profile page.
+      // 2. AND (EITHER the profile is still loading (optimistic redirect for new users)
+      // OR the profile has finished loading and is confirmed incomplete).
+      if (location.pathname !== '/profile' && (isLoadingProfile || !isProfileComplete)) {
+        console.log(`[Layout] Redirect condition met: path=${location.pathname}, isLoadingProfile=${isLoadingProfile}, isProfileComplete=${isProfileComplete}. Scheduling redirect to /profile.`);
+        redirectTimeoutRef.current = setTimeout(() => {
+          console.log('[Layout] Executing delayed redirect to /profile (due to loading or incomplete status)');
+          navigate('/profile', { replace: true });
+        }, 300); // 300ms delay 
       }
     }
-  }, [isAuthenticated, isAuthLoading, profile, isLoadingProfile, navigate, location.pathname]);
+    
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
+    };
+  }, [isAuthenticated, isAuthLoading, isLoadingProfile, isProfileComplete, navigate, location.pathname]);
 
   // Show loading state (check both auth and profile loading)
   if (isAuthLoading || (isAuthenticated && isLoadingProfile)) {
