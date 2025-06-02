@@ -21,3 +21,5 @@ param parBlobContainers = [
 ]
 
 param parPublicNetworkAccess = 'Enabled'
+
+param parDefaultAction = 'Allow'
