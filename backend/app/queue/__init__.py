@@ -55,12 +55,10 @@ async def enqueue_assessment_task(document_id: uuid.UUID, user_id: str, priority
 async def _claim_next_task(db: AsyncIOMotorDatabase, visibility_timeout: int) -> Optional[dict]:
     now = datetime.now(timezone.utc)
     filter_query = {
+        "available_at": {"$lt": now},  # Ensure task is available
         "$or": [
             {"status": "PENDING"},
-            {
-                "status": "IN_PROGRESS",
-                "available_at": {"$lt": now},
-            },
+            {"status": "IN_PROGRESS"},
         ]
     }
     update_doc = {

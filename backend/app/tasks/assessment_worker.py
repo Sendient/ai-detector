@@ -478,14 +478,14 @@ class AssessmentWorker:
         available_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
         
         update_payload = {
-            "status": "RETRYING", # Or a more specific error status if your queue handles it
+            "status": "PENDING", # Changed from "RETRYING"
             "retry_count": retry_count,
             "available_at": available_at,
             "last_error": f"{error_reason} at {datetime.now(timezone.utc).isoformat()}"
         }
 
         try:
-            logger.info(f"[AssessmentWorker] Updating task {task.id} for retry. Error: {error_reason}. Retry count: {retry_count}. Available at: {available_at.isoformat()}")
+            logger.info(f"[AssessmentWorker] Updating task {task.id} for retry (status PENDING). Error: {error_reason}. Retry count: {retry_count}. Available at: {available_at.isoformat()}")
             result = await self.db.assessment_tasks.update_one(
                 {"_id": task.id},
                 {"$set": update_payload}
