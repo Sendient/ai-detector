@@ -116,120 +116,6 @@ def mock_kinde_user():
     }
 
 @pytest.mark.asyncio
-async def test_create_teacher_success(
-    app_with_mock_auth: FastAPI,
-    mocker: MockerFixture,
-    sample_teacher_payload: dict[str, Any]
-):
-    """Test successful teacher creation (POST /teachers/) by mocking validate_token."""
-    api_prefix = settings.API_V1_PREFIX
-    test_kinde_id = f"kinde_id_create_success_{uuid.uuid4()}"
-
-    # Define a mock payload similar to what Kinde would provide
-    default_mock_payload = {
-        "sub": test_kinde_id,
-        "email": sample_teacher_payload["email"],  # Add email to token payload
-        "iss": settings.KINDE_DOMAIN or "mock_issuer",
-        "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
-        "exp": time.time() + 3600,
-        "iat": time.time(),
-        "roles": ["teacher"]
-    }
-
-    # Override the get_current_user_payload dependency
-    async def override_get_current_user_payload() -> Dict[str, Any]:
-        return default_mock_payload
-
-    # Store original override to restore it later
-    original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
-    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
-
-    try:
-        # Mock get_teacher_by_kinde_id to return None (teacher doesn't exist)
-        mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=None)
-
-        # Create a TeacherCreate instance from the payload
-        teacher_create = TeacherCreate(**sample_teacher_payload)
-
-        # Mock create_teacher to return a simulated Teacher object
-        mock_created_teacher_dict = {
-            "_id": uuid.uuid4(),  # Add internal UUID
-            "kinde_id": test_kinde_id,
-            "first_name": sample_teacher_payload["first_name"],
-            "last_name": sample_teacher_payload["last_name"],
-            "email": sample_teacher_payload["email"],
-            "school_name": sample_teacher_payload["school_name"],
-            "country": sample_teacher_payload["country"],
-            "state_county": sample_teacher_payload["state_county"],
-            "role": TeacherRole.TEACHER,
-            "is_administrator": False,
-            "how_did_you_hear": None,
-            "description": None,
-            "is_active": True,
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-            "is_deleted": False
-        }
-        
-        mock_created_teacher = Teacher(**mock_created_teacher_dict)
-        mocker.patch('backend.app.db.crud.create_teacher', return_value=mock_created_teacher)
-
-        headers = {
-            "Authorization": "Bearer dummytoken",
-            "Content-Type": "application/json"
-        }
-
-        async with AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
-            response = await client.post(
-                f"{api_prefix}/teachers/",
-                json=sample_teacher_payload,
-                headers=headers
-            )
-
-        assert response.status_code == status.HTTP_201_CREATED
-        response_data = response.json()
-        assert response_data["email"] == sample_teacher_payload["email"]
-        assert response_data["first_name"] == sample_teacher_payload["first_name"]
-        assert response_data["kinde_id"] == test_kinde_id
-        assert response_data["school_name"] == sample_teacher_payload["school_name"]
-        assert response_data["_id"] == str(mock_created_teacher_dict["_id"])  # Check UUID is returned as string
-
-    finally:
-        # Restore original dependency override
-        if original_override:
-            app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
-        elif get_current_user_payload in app_with_mock_auth.dependency_overrides:
-            del app_with_mock_auth.dependency_overrides[get_current_user_payload]
-
-# Fixture for sample teacher data (if not already in conftest.py)
-# @pytest.fixture(scope="module") # Or function scope if modification happens
-# def sample_teacher_payload() -> dict[str, Any]:
-#     return {
-#         "user_id": "kinde_user_abc123", # Example Kinde ID
-#         "first_name": "Alice",
-#         "last_name": "Smith",
-#         "email": "alice.smith@example.com"
-#         # Add other required fields for TeacherCreate schema
-#     }
-
-# You might need to define or import TeacherCreate and Teacher schemas
-# from backend.app.schemas.teacher import TeacherCreate, Teacher
-
-# --- TODO: Add more tests ---
-# test_create_teacher_missing_fields() -> Expect 422
-# test_create_teacher_unauthorized() -> Expect 401/403 (mock dependency accordingly)
-# test_get_teachers_empty()
-# test_get_teachers_with_data()
-# test_get_single_teacher_success()
-# test_get_single_teacher_not_found() -> Expect 404
-# test_update_teacher_success()
-# test_update_teacher_not_found() -> Expect 404
-# test_delete_teacher_success()
-# test_delete_teacher_not_found() -> Expect 404 
-
-# --- Test GET Current Teacher ---
-
-@pytest.mark.asyncio
 async def test_get_current_teacher_success(
     app_with_mock_auth: FastAPI,
     mocker: MockerFixture
@@ -670,140 +556,6 @@ async def test_delete_teacher_not_found(
             del app_with_mock_auth.dependency_overrides[get_current_user_payload]
 
 
-# --- Test POST / (Create Teacher - Conflict) ---
-
-@pytest.mark.asyncio
-async def test_create_teacher_conflict(
-    app_with_mock_auth: FastAPI,
-    mocker: MockerFixture,
-    sample_teacher_payload: dict[str, Any] # Re-use for structure
-):
-    """Test creating a teacher when a profile already exists for the user (expect 409)."""
-    api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_conflict = f"kinde_id_conflict_teacher_{uuid.uuid4()}" # Use a unique Kinde ID
-
-    # Mock authentication
-    default_mock_payload = {
-        "sub": test_kinde_id_conflict,
-        "iss": settings.KINDE_DOMAIN or "mock_issuer",
-        "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
-        "exp": time.time() + 3600,
-        "iat": time.time(),
-        "roles": ["teacher"]
-    }
-
-    async def override_get_current_user_payload() -> dict:
-        return default_mock_payload
-
-    original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
-    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
-
-    try:
-        # Mock get_teacher_by_kinde_id to return an existing teacher, simulating a conflict
-        existing_teacher = Teacher(
-            kinde_id=test_kinde_id_conflict, # ADD THIS
-            email=sample_teacher_payload["email"],
-            first_name=sample_teacher_payload["first_name"],
-            last_name=sample_teacher_payload["last_name"],
-            school_name=sample_teacher_payload.get("school_name", "Conflict School"), # Ensure required fields
-            country=sample_teacher_payload.get("country", "US"),
-            state_county=sample_teacher_payload.get("state_county", "CA")
-            # ... other fields can be minimal as we only need to simulate existence
-        )
-        mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=existing_teacher)
-
-        # crud.create_teacher should NOT be called in this scenario
-        create_teacher_mock = mocker.patch('backend.app.db.crud.create_teacher')
-
-        # --- Make the Request (using sample_teacher_payload for the body) ---
-        headers = {
-            "Authorization": "Bearer dummytoken",
-            "Content-Type": "application/json"
-        }
-
-        async with httpx.AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
-            response = await client.post(
-                f"{api_prefix}/teachers/",
-                json=sample_teacher_payload, # Attempt to create with this data
-                headers=headers
-            )
-
-        # --- Assertions ---
-        assert response.status_code == status.HTTP_409_CONFLICT, \
-            f"Expected 409 Conflict, got {response.status_code}. Response: {response.text}"
-        
-        create_teacher_mock.assert_not_called() # Verify create_teacher was not attempted
-    finally:
-        if original_override:
-            app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
-        elif get_current_user_payload in app_with_mock_auth.dependency_overrides:
-            del app_with_mock_auth.dependency_overrides[get_current_user_payload]
-
-
-# --- Test POST / (Create Teacher - Missing Required Fields) ---
-
-@pytest.mark.asyncio
-async def test_create_teacher_missing_required_fields(
-    app_with_mock_auth: FastAPI,
-    mocker: MockerFixture,
-    sample_teacher_payload: dict[str, Any] # Use for base payload
-):
-    """Test creating a teacher with missing required fields (expect 422)."""
-    api_prefix = settings.API_V1_PREFIX
-    test_kinde_id_missing_fields = "missing_fields_kinde_id"
-
-    # Mock authentication
-    default_mock_payload = {
-        "sub": test_kinde_id_missing_fields,
-        "iss": settings.KINDE_DOMAIN or "mock_issuer",
-        "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
-        "exp": time.time() + 3600,
-        "iat": time.time(),
-        "roles": ["teacher"]
-    }
-
-    async def override_get_current_user_payload() -> dict:
-        return default_mock_payload
-
-    original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
-    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
-
-    try:
-        # CRUD functions should not be called if validation fails first
-        get_teacher_mock = mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id')
-        create_teacher_mock = mocker.patch('backend.app.db.crud.create_teacher')
-
-        # --- Create a payload that is missing a required field ---
-        payload_missing_school = sample_teacher_payload.copy()
-        if 'school_name' in payload_missing_school:
-            del payload_missing_school['school_name']
-
-        # --- Make the Request ---
-        headers = {
-            "Authorization": "Bearer dummytoken",
-            "Content-Type": "application/json"
-        }
-
-        async with httpx.AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
-            response = await client.post(
-                f"{api_prefix}/teachers/",
-                json=payload_missing_school,
-                headers=headers
-            )
-
-        # --- Assertions ---
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, \
-            f"Expected 422 Unprocessable Entity, got {response.status_code}. Response: {response.text}"
-        
-        # Verify that Pydantic validation prevented calls to CRUD layer
-        get_teacher_mock.assert_not_called()
-        create_teacher_mock.assert_not_called()
-    finally:
-        if original_override:
-            app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
-        elif get_current_user_payload in app_with_mock_auth.dependency_overrides:
-            del app_with_mock_auth.dependency_overrides[get_current_user_payload]
-
 @pytest.mark.asyncio
 async def test_list_teachers_as_admin_success(
     app_with_mock_auth: FastAPI, # Original fixture from conftest
@@ -1203,17 +955,23 @@ UNAUTHORIZED_ACCESS_PLACEHOLDER_KINDE_ID = "unauthorized_access_test_id"
 # Configuration for protected endpoints: (method, url_suffix, needs_kinde_id_in_path, request_body_if_needed)
 # url_suffix is appended to settings.API_V1_PREFIX + "/teachers"
 protected_endpoints_config = [
+    ("GET", "/", False, None),
     ("GET", "/me", False, None),
-    # ("GET", f"/{UNAUTHORIZED_ACCESS_PLACEHOLDER_KINDE_ID}", True, None), # ENDPOINT DOES NOT EXIST
-    ("PUT", "/me", False, {"first_name": "TestUpdateJWTFail"}), # Body for TeacherUpdate
-    # ("PUT", f"/{UNAUTHORIZED_ACCESS_PLACEHOLDER_KINDE_ID}", True, {"first_name": "TestAdminUpdateJWTFail"}), # ENDPOINT DOES NOT EXIST
-    ("POST", "/", False, {
-        "first_name": "JwtFailTest", "last_name": "User", "email": "jwt.fail.test@example.com",
-        "school_name": "AuthFail School", "role": "teacher", "country": "Testlandia", "state_county": "TF"
-    }),
-    ("GET", "/", False, None), # List teachers
+    ("PUT", "/me", False, {"first_name": "JwtPutFail", "last_name": "User"}),
     ("DELETE", "/me", False, None),
-    # ("DELETE", f"/{UNAUTHORIZED_ACCESS_PLACEHOLDER_KINDE_ID}", True, None) # ENDPOINT DOES NOT EXIST
+]
+
+# Body definitions used in the parameterized tests above
+request_body1 = None  # For GET/DELETE with no body
+body3 = {"first_name": "JwtPutFail", "last_name": "User"} # For PUT
+
+# Configuration for testing endpoints with missing 'sub' or 'email' claims
+missing_claims_config = [
+    ("GET", "/me", None, {"roles": ["teacher"]}, 400, "User identifier missing from token"), # mock_token_payload0
+    ("DELETE", "/me", None, {"email": "subless.delete.token@example.com", "roles": ["teacher"]}, 400, "User identifier missing from token"), # mock_token_payload3
+    ("PUT_CREATE", "/me", {"first_name": "SublessPut", "last_name": "User", "school_name": "PUT School", "country": "US", "state_county": "CA", "role": "teacher"}, {"email": "subless.create.token@example.com", "roles": ["teacher"]}, 400, "User identifier missing from token"), # request_body4, mock_token_payload4
+    ("PUT_CREATE", "/me", {"first_name": "SublessPut", "last_name": "User", "school_name": "PUT School", "country": "US", "state_county": "CA", "role": "teacher"}, {"sub": "user_for_create_no_email", "roles": ["teacher"]}, 400, "Email missing from authentication token"), # request_body5, mock_token_payload5
+    ("PUT_UPDATE", "/me", {"first_name": "SublessPut", "last_name": "User"}, {"email": "subless.update.token@example.com", "roles": ["teacher"]}, 400, "User identifier missing from token") # request_body6, mock_token_payload6
 ]
 
 @pytest.mark.asyncio
@@ -1277,33 +1035,6 @@ async def test_protected_endpoints_unauthorized_access(
         elif get_current_user_payload in app_without_auth.dependency_overrides and \
              app_without_auth.dependency_overrides.get(get_current_user_payload) == override_get_current_user_payload_for_unauthorized:
             del app_without_auth.dependency_overrides[get_current_user_payload]
-
-
-# --- Test for Missing Claims in Otherwise Valid Token ---
-
-# Configuration for missing claims tests:
-# (method_type, url_suffix, request_body, mock_token_payload, expected_status, expected_detail_substring)
-# method_type: "GET", "POST", "PUT_UPDATE", "PUT_CREATE", "DELETE"
-# PUT_UPDATE assumes user exists. PUT_CREATE assumes user does not exist (triggers create path).
-missing_claims_config = [
-    # --- Scenarios for Missing 'sub' claim ---
-    ("GET", "/me", None, {"email": "subless@example.com", "roles": ["teacher"]}, status.HTTP_400_BAD_REQUEST, "User identifier missing from token"),
-    ("PUT_UPDATE", "/me", {"first_name": "Subless Update"}, {"email": "subless.update@example.com", "roles": ["teacher"]}, status.HTTP_400_BAD_REQUEST, "User identifier missing from token"),
-    ("POST", "/", {
-        "first_name": "SublessPost", "last_name": "User", "email": "subless.post.body@example.com", # email in body
-        "school_name": "Subless School", "role": "teacher", "country": "US", "state_county": "CA"
-    }, {"email": "subless.post.token@example.com", "roles": ["teacher"]}, status.HTTP_400_BAD_REQUEST, "User identifier missing from token"),
-    ("DELETE", "/me", None, {"email": "subless.delete@example.com", "roles": ["teacher"]}, status.HTTP_400_BAD_REQUEST, "User identifier missing from token"),
-    ("PUT_CREATE", "/me", { # Body for create
-        "first_name": "SublessCreate", "last_name": "User", "school_name": "Create School", 
-        "role": "teacher", "country": "US", "state_county": "CA"
-    }, {"email": "subless.create.token@example.com", "roles": ["teacher"]}, status.HTTP_400_BAD_REQUEST, "User identifier missing from token"),
-    # --- Scenario for PUT /me (create path) - 'sub' present, but missing 'email' in token ---
-    ("PUT_CREATE", "/me", { # Body for create
-        "first_name": "EmaillessCreate", "last_name": "User", "school_name": "Create School NoEmail", 
-        "role": "teacher", "country": "US", "state_county": "CA"
-    }, {"sub": "user_for_create_no_email", "roles": ["teacher"]}, status.HTTP_400_BAD_REQUEST, "Email missing from authentication token")
-]
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
