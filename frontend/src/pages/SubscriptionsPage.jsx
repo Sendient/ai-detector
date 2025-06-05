@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useTeacherProfile } from '../hooks/useTeacherProfile';
+import { useAuth } from '../contexts/AuthContext';
 import { loadStripe } from '@stripe/stripe-js'; // For Stripe.js
 import { CheckCircle, XCircle } from 'lucide-react';
 
@@ -20,7 +20,7 @@ console.log('VITE_API_BASE_URL in SubscriptionsPage:', import.meta.env.VITE_API_
 function SubscriptionsPage() {
     const { t } = useTranslation();
     const { getAccessToken } = useKindeAuth();
-    const { profile, isLoadingProfile, profileError } = useTeacherProfile();
+    const { currentUser, loading: authContextLoading, error: authContextError } = useAuth();
     const navigate = useNavigate();
 
     const [isProcessing, setIsProcessing] = useState(false);
@@ -98,12 +98,12 @@ function SubscriptionsPage() {
         }
     ];
 
-    if (isLoadingProfile) {
+    if (authContextLoading) {
         return <div className="flex items-center justify-center min-h-screen"><span className="loading loading-lg loading-spinner text-primary"></span></div>;
     }
 
-    if (profileError) {
-        return <div className="p-4 text-center text-error">{t('subscriptions_error_loading_profile', { message: profileError })}</div>;
+    if (authContextError) {
+        return <div className="p-4 text-center text-error">{t('subscriptions_error_loading_profile', { message: authContextError.message || authContextError })}</div>;
     }
 
     const handleUpgradeToPro = async () => {
@@ -216,6 +216,9 @@ function SubscriptionsPage() {
 
     const handleContactSchools = () => { navigate('/contact-us'); };
 
+    // Determine current plan to adjust button text or highlight
+    const currentPlanId = currentUser?.current_plan?.toUpperCase();
+
     return (
         <div className="container mx-auto p-4 sm:p-6 lg:p-8">
             <h1 className="text-3xl font-bold text-center mb-10 sm:mb-16">{t('subscriptions_page_title', 'Choose Your Plan')}</h1>
@@ -235,6 +238,36 @@ function SubscriptionsPage() {
                             <h2 className="text-xl sm:text-2xl font-semibold">{tier.name}</h2>
                             <p className="text-lg sm:text-xl font-bold my-1">{tier.price}</p>
                             {t(tier.priceSubtitleKey) && <p className="text-xs opacity-80">{t(tier.priceSubtitleKey)}</p>}
+                        </div>
+                        {/* Buttons Section - Placed after plan details, before feature rows start conceptually */}
+                        <div className={`px-4 pt-2 pb-4 text-center w-full rounded-b-lg ${tier.planId === 'FREE' ? tier.bgColor : tier.bgColor}`}>
+                            {tier.planId === 'FREE' && currentPlanId === 'FREE' && (
+                                <button className="btn btn-disabled w-full" disabled>{t('subscriptions_button_currentPlan', 'Current Plan')}</button>
+                            )}
+                            {tier.planId === 'FREE' && currentPlanId !== 'FREE' && (
+                                // No button for Free if not current plan, or specific downgrade logic if needed
+                                <span className="text-sm italic">{t('subscriptions_free_info', 'Basic access features.')}</span>
+                            )}
+                            {tier.planId === 'PRO' && currentPlanId === 'PRO' && (
+                                <button onClick={handleManageSubscription} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing}>
+                                    {isProcessing ? <span className="loading loading-spinner"></span> : t('subscriptions_button_managePro', 'Manage Pro Plan')}
+                                </button>
+                            )}
+                            {tier.planId === 'PRO' && currentPlanId !== 'PRO' && (
+                                <button onClick={handleUpgradeToPro} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing || currentPlanId === 'SCHOOLS'}>
+                                    {isProcessing ? <span className="loading loading-spinner"></span> : t('subscriptions_button_upgradeToPro', 'Upgrade to Pro')}
+                                </button>
+                            )}
+                            {tier.planId === 'SCHOOLS' && currentPlanId === 'SCHOOLS' && (
+                                 <button onClick={handleManageSubscription} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing}>
+                                    {isProcessing ? <span className="loading loading-spinner"></span> : t('subscriptions_button_manageSchools', 'Manage Schools Plan')}
+                                </button>
+                            )}
+                            {tier.planId === 'SCHOOLS' && currentPlanId !== 'SCHOOLS' && (
+                                <button onClick={handleContactSchools} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing}>
+                                    {t('subscriptions_button_contactForSchools', 'Contact for Schools')}
+                                </button>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -266,47 +299,6 @@ function SubscriptionsPage() {
                         ))}
                     </React.Fragment>
                 ))}
-            
-                {/* CTA Buttons Row - uses tier.bgColor for background context */}
-                <div className="hidden md:block"></div> {/* Empty cell for alignment */}
-                 {tiers.map(tier => (
-                    <div key={tier.planId + "-cta"} className={`p-4 flex justify-center items-end ${tier.bgColor} ${tier.planId === 'FREE' ? '' : 'md:bg-opacity-20'} rounded-b-lg pt-6`}>
-                        {/* Dynamic CTA Logic - Simplified for brevity, ensure all conditions are met */}
-                        {tier.planId === 'PRO' && (!profile || profile.current_plan === 'Free' || profile.current_plan === null) && (
-                            <button onClick={handleUpgradeToPro} disabled={isProcessing} className={`btn ${tier.buttonClass} w-full max-w-xs`}>
-                                {isProcessing ? t('common_processing') : t('subscriptions_cta_upgrade_pro', 'Upgrade to Pro')}
-                            </button>
-                        )}
-                        {tier.planId === 'PRO' && profile && profile.current_plan === 'Pro' && (
-                            <div className="w-full max-w-xs text-center">
-                                <p className={`badge badge-outline ${tier.textColor === 'text-primary-content' ? 'border-primary-content' : 'border-success'} mb-2`}>{t('subscriptions_current_plan', 'Current Plan')}</p>
-                                <button onClick={handleManageSubscription} disabled={isProcessing} className={`btn btn-outline ${tier.textColor === 'text-primary-content' ? 'border-primary-content text-primary-content hover:bg-primary-focus' : tier.textColor === 'text-gray-800' ? 'border-gray-500 text-gray-800 hover:bg-gray-300' : ''} w-full`}>
-                                    {isProcessing ? t('common_processing') : t('subscriptions_cta_manage', 'Manage Subscription')}
-                                </button>
-                            </div>
-                        )}
-                        {tier.planId === 'FREE' && (!profile || profile.current_plan === 'Free' || profile.current_plan === null) && (
-                             <div className="w-full max-w-xs text-center">
-                                 <p className={`badge badge-outline ${tier.textColor} mb-2`}>{t('subscriptions_current_plan', 'Current Plan')}</p>
-                             </div>
-                        )}
-                        {tier.planId === 'FREE' && profile && (profile.current_plan === 'Pro' || profile.current_plan === 'Schools') && (
-                             <button onClick={handleManageSubscription} disabled={isProcessing} className={`btn ${tier.buttonClass} w-full max-w-xs ${tier.textColor === 'text-gray-800' ? 'border-gray-400 hover:bg-gray-300' : '' }`}>
-                                {isProcessing ? t('common_processing') : t('subscriptions_cta_downgrade_free', 'Downgrade')}
-                            </button>
-                        )}
-                        {tier.planId === 'SCHOOLS' && (!profile || profile.current_plan !== 'Schools') && (
-                            <button onClick={handleContactSchools} className={`btn ${tier.buttonClass} w-full max-w-xs`}>
-                                {t('subscriptions_cta_contact_us', 'Contact Us')}
-                            </button>
-                        )}
-                        {profile && profile.current_plan === 'Schools' && tier.planId === 'SCHOOLS' && (
-                            <div className="w-full max-w-xs text-center">
-                                <p className={`badge badge-outline ${tier.textColor === 'text-accent-content' ? 'border-accent-content' : 'border-info'} mb-2`}>{t('subscriptions_current_arrangement', 'Current Arrangement')}</p>
-                            </div>
-                        )}
-                    </div>
-                 ))}
             </div>
         </div>
     );

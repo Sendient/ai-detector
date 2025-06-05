@@ -5,14 +5,12 @@ import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
 import LocaleSelector from './LocaleSelector.jsx';
 import { User, LogOut, CreditCard, ShieldCheck } from 'lucide-react';
-import { useTeacherProfile } from '../hooks/useTeacherProfile';
 import { useAuth } from '../contexts/AuthContext';
 
 function Header() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useKindeAuth();
-    const { profile, isLoading: isLoadingProfile } = useTeacherProfile();
-    const { currentUser, loading: authLoading } = useAuth();
+    const { currentUser, loading: authContextLoading } = useAuth();
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
     const getInitials = () => {
@@ -30,13 +28,11 @@ function Header() {
         : t('header_default_user_name');
 
     const getPlanDisplayName = () => {
-        if (authLoading) return null;
+        if (authContextLoading || isAuthLoading) return null;
         if (currentUser && currentUser.current_plan && currentUser.current_plan.toLowerCase() !== 'free') {
-            return `${currentUser.current_plan} Plan`;
-        }
-        if (isLoadingProfile) return null;
-        if (profile && profile.current_plan && profile.current_plan.toLowerCase() !== 'free') {
-            return `${profile.current_plan} Plan`;
+            const planKey = `subscriptionPlan_${currentUser.current_plan.toLowerCase()}`;
+            const translatedPlan = t(planKey);
+            return translatedPlan !== planKey ? translatedPlan : `${currentUser.current_plan} Plan`;
         }
         if (isAuthenticated) {
             return t('header_free_plan', 'Free Plan');

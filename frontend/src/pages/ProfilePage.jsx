@@ -3,7 +3,6 @@ import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, XCircle, ShieldCheckIcon } from 'lucide-react';
-import { useTeacherProfile } from '../hooks/useTeacherProfile.js';
 import { useAuth } from '../contexts/AuthContext';
 
 // Keep countries list for option values if needed, but display text will be translated
@@ -47,8 +46,7 @@ function ProfilePage() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useKindeAuth();
     const navigate = useNavigate();
-    const { profile, isLoadingProfile, profileError, refetchProfile, isProfileComplete } = useTeacherProfile();
-    const { currentUser, loading: authContextLoading } = useAuth();
+    const { currentUser, setCurrentUser, loading: authContextLoading, error: authContextError } = useAuth();
 
     const [formData, setFormData] = useState(initialProfileData);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,43 +60,37 @@ function ProfilePage() {
     useEffect(() => {
         if (!isAuthLoading && user) {
             // console.log('ProfilePage Effect 1 - Setting initial Kinde data:', user);
-            // Directly set the Kinde data, merging with initialProfileData for structure
-            setFormData({
-                ...initialProfileData, // Ensure all profile fields exist
-                email: user.email || '',
-                first_name: user.givenName || '',
-                last_name: user.familyName || ''
-            });
+            setFormData(prev => ({
+                ...initialProfileData,
+                ...prev, // Carry over any existing fields that might not be in initialProfileData or user
+                email: user.email || prev.email || '',
+                first_name: user.givenName || prev.first_name || '',
+                last_name: user.familyName || prev.last_name || ''
+            }));
         }
     }, [user, isAuthLoading]);
 
-    // Effect 2: Merge fetched profile data, prioritizing DB names if they exist
+    // Effect 2: Merge currentUser from AuthContext, this is the DB state
     useEffect(() => {
-        if (!isLoadingProfile && profile) {
-             // console.log('ProfilePage Effect 2 - Merging DB profile:', profile);
-            // Update state based on the fetched profile
+        if (!authContextLoading && currentUser) {
+            // console.log('ProfilePage Effect 2 (AuthContext) - Merging currentUser:', currentUser);
             setFormData(prev => ({
-                ...prev, // Start with potentially Kinde-populated state
-                ...profile, // Merge the fetched profile
-                // Ensure Kinde names are kept if API profile names are empty/null
-                first_name: profile.first_name || prev.first_name,
-                last_name: profile.last_name || prev.last_name,
-                // Always ensure Kinde email is preserved (already set in prev)
-                email: prev.email
+                ...prev, // Start with Kinde-populated data (email, initial first/last name)
+                ...currentUser, // Merge the currentUser from AuthContext (DB state)
+                // Ensure Kinde email is preserved as it's authoritative and read-only in form
+                email: prev.email || currentUser.email, 
+                // For names, if Kinde had one (from prev) and DB is "Not Specified" or empty, keep Kinde's.
+                // If DB has a real name, it will be used from ...currentUser merge.
+                // If current user's name is 'Not Specified', and prev had a name from Kinde, retain Kinde's name.
+                first_name: (currentUser.first_name && currentUser.first_name !== 'Not Specified') 
+                              ? currentUser.first_name 
+                              : (prev.first_name && prev.first_name !== 'Not Specified' ? prev.first_name : currentUser.first_name || ''),
+                last_name: (currentUser.last_name && currentUser.last_name !== 'Not Specified') 
+                             ? currentUser.last_name 
+                             : (prev.last_name && prev.last_name !== 'Not Specified' ? prev.last_name : currentUser.last_name || ''),
             }));
-        } else if (!isLoadingProfile && profile === null) {
-            // If profile fetch finished and confirmed no profile exists,
-            // ensure Kinde names (already set by Effect 1) are kept.
-            // No state update needed here as Effect 1 handled it.
-             // console.log('ProfilePage Effect 2 - DB Profile is null, Kinde data already set.');
         }
-    }, [profile, isLoadingProfile]);
-
-    useEffect(() => {
-        if (profileError) {
-            setError(profileError);
-        }
-    }, [profileError]);
+    }, [currentUser, authContextLoading]);
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -131,7 +123,8 @@ function ProfilePage() {
                 throw new Error(t('messages_profile_error_noToken'));
             }
 
-            const response = await fetch(`${PROXY_PATH}/teachers/me`, {
+            // PUT request to save profile data
+            const putResponse = await fetch(`${PROXY_PATH}/teachers/me`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -140,31 +133,56 @@ function ProfilePage() {
                 body: JSON.stringify(formData),
             });
 
-            if (!response.ok) {
-                let errorDetail = `HTTP ${response.status}`;
+            if (!putResponse.ok) {
+                let errorDetail = `HTTP ${putResponse.status}`;
                 try {
-                    const errorData = await response.json();
+                    const errorData = await putResponse.json();
                     errorDetail = errorData.detail || errorDetail;
                 } catch (e) {
-                     errorDetail = `${response.status} ${response.statusText}`;
+                     errorDetail = `${putResponse.status} ${putResponse.statusText}`;
                 }
                 throw new Error(t('messages_profile_error_saveFailed', { detail: errorDetail }));
             }
 
-            await refetchProfile();
+            // Added: Fetch the latest profile data and update AuthContext
+            console.log("[ProfilePage] PUT successful. Fetching updated profile for AuthContext...");
+            const getResponse = await fetch(`${PROXY_PATH}/teachers/me`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!getResponse.ok) {
+                let getErrorDetail = `HTTP ${getResponse.status}`;
+                try {
+                    const errorData = await getResponse.json();
+                    getErrorDetail = errorData.detail || getErrorDetail;
+                } catch (e) {
+                    getErrorDetail = `${getResponse.status} ${getResponse.statusText}`;
+                }
+                // If fetching the updated profile fails, we still set success for the save,
+                // but log an error. The AuthContext might be stale until next full refresh.
+                console.error("[ProfilePage] Failed to fetch updated profile after save:", getErrorDetail);
+                setError(t('messages_profile_error_fetchAfterSaveFailed', { detail: getErrorDetail })); 
+                // User doesn't necessarily need to see this error prominently if save was ok.
+            } else {
+                const updatedProfileData = await getResponse.json();
+                setCurrentUser(updatedProfileData); // Update AuthContext
+                console.log("[ProfilePage] AuthContext updated with new profile data:", updatedProfileData);
+            }
             
             setSuccess(t('messages_profile_success_saved'));
-            console.log("[ProfilePage] Profile saved and refetchProfile called. Success message set.");
             setIsSubmitting(false);
 
         } catch (err) {
-            console.error("Profile save error:", err);
+            console.error("Profile save or update error:", err);
             setError(err.message || t('messages_profile_error_unexpectedSave'));
             setIsSubmitting(false);
         }
     };
 
-    if (isAuthLoading || isLoadingProfile || authContextLoading) {
+    if (isAuthLoading || authContextLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div className="loading loading-spinner loading-lg text-primary"></div>
@@ -358,30 +376,30 @@ function ProfilePage() {
                     <div className="space-y-2">
                         <div>
                             <span className="font-medium">{t('profilePage_account_createdOn', 'Account Created On:')}</span> 
-                            {profile?.created_at ? new Date(profile.created_at).toLocaleString() : t('common_notAvailable')}
+                            {currentUser?.created_at ? new Date(currentUser.created_at).toLocaleString() : t('common_notAvailable')}
                         </div>
                         <div>
                             <span className="font-medium">{t('profilePage_subscription_currentPlan', 'Current Plan:')}</span> 
-                            {profile?.current_plan ? t(`subscriptionPlan_${profile.current_plan.toLowerCase()}`, profile.current_plan) : t('common_notAvailable')}
+                            {currentUser?.current_plan ? t(`subscriptionPlan_${currentUser.current_plan.toLowerCase()}`, currentUser.current_plan) : t('common_notAvailable')}
                         </div>
                         {/* MODIFIED: Display Plan Limits */}
-                        {profile?.current_plan && profile.current_plan !== 'Schools' && (
+                        {currentUser?.current_plan && currentUser.current_plan !== 'Schools' && (
                             <>
                                 <div>
                                     <span className="font-medium">{t('profilePage_subscription_wordLimit', 'Monthly Word Limit:')}</span> 
-                                    {profile.current_plan_word_limit !== null && profile.current_plan_word_limit !== undefined 
-                                        ? profile.current_plan_word_limit.toLocaleString() 
+                                    {currentUser.current_plan_word_limit !== null && currentUser.current_plan_word_limit !== undefined 
+                                        ? currentUser.current_plan_word_limit.toLocaleString() 
                                         : t('profilePage_subscription_unlimited', 'Unlimited')}
                                 </div>
                                 <div>
                                     <span className="font-medium">{t('profilePage_subscription_charLimit', 'Monthly Character Limit:')}</span> 
-                                    {profile.current_plan_char_limit !== null && profile.current_plan_char_limit !== undefined 
-                                        ? profile.current_plan_char_limit.toLocaleString() 
+                                    {currentUser.current_plan_char_limit !== null && currentUser.current_plan_char_limit !== undefined 
+                                        ? currentUser.current_plan_char_limit.toLocaleString() 
                                         : t('profilePage_subscription_unlimited', 'Unlimited')}
                                 </div>
                             </>
                         )}
-                        {profile?.current_plan === 'Schools' && (
+                        {currentUser?.current_plan === 'Schools' && (
                             <>
                                 <div>
                                     <span className="font-medium">{t('profilePage_subscription_wordLimit', 'Monthly Word Limit:')}</span> 
@@ -394,13 +412,13 @@ function ProfilePage() {
                             </>
                         )}
                         {/* End MODIFIED */}
-                        {profile?.current_plan === 'Pro' && profile?.pro_plan_activated_at && (
+                        {currentUser?.current_plan === 'Pro' && currentUser?.pro_plan_activated_at && (
                             <div>
                                 <span className="font-medium">{t('profilePage_subscription_proActivatedOn', 'Pro Plan Activated On:')}</span> 
-                                {new Date(profile.pro_plan_activated_at).toLocaleString()}
+                                {new Date(currentUser.pro_plan_activated_at).toLocaleString()}
                             </div>
                         )}
-                        {profile?.current_plan === 'Free' && (
+                        {currentUser?.current_plan === 'Free' && (
                             <div className="mt-4">
                                 <button 
                                     className="btn btn-primary btn-sm"
@@ -410,13 +428,13 @@ function ProfilePage() {
                                 </button>
                             </div>
                         )}
-                         {profile?.current_plan === 'Pro' && (
+                         {currentUser?.current_plan === 'Pro' && (
                             <div className="mt-4">
                                 <button 
                                     className="btn btn-outline btn-sm"
                                     // onClick={handleManageSubscription} // Implement this function
-                                    onClick={() => window.location.href = profile.stripe_customer_portal_url || '/'} // TEMP: Direct link if available
-                                    disabled={!profile.stripe_customer_portal_url} // Disable if no portal URL
+                                    onClick={() => window.location.href = currentUser.stripe_customer_portal_url || '/'} // TEMP: Direct link if available
+                                    disabled={!currentUser.stripe_customer_portal_url} // Disable if no portal URL
                                 >
                                     {t('profilePage_button_manageSubscription', 'Manage Subscription')}
                                 </button>

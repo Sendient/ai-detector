@@ -4,104 +4,83 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
 import { useTranslation } from 'react-i18next';
-import { useTeacherProfile } from '../hooks/useTeacherProfile.js';
+import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 
 // --- Import Icons ---
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
 // --------------------
 
+// Helper function to determine profile completion
+const isProfileEffectivelyComplete = (user) => {
+  if (!user) return false;
+  // Check for actual values, not just presence, and exclude placeholders
+  const isComplete = !!(
+    user.first_name?.trim() && user.first_name !== 'Not Specified' &&
+    user.last_name?.trim() && user.last_name !== 'Not Specified' &&
+    user.school_name?.trim() && user.school_name !== 'Not Specified' &&
+    user.role && // Assuming role doesn't have a 'Not Specified' placeholder from Kinde/initial setup
+    user.country && user.country !== 'Not Specified' &&
+    user.state_county?.trim() && user.state_county !== 'Not Specified'
+  );
+  console.log('[Layout] isProfileEffectivelyComplete check for user:', user, 'Result:', isComplete);
+  return isComplete;
+};
+
 function Layout({ children }) {
   const { t } = useTranslation();
   const { isAuthenticated, isLoading: isAuthLoading } = useKindeAuth();
-  const { profile, isLoadingProfile, checkProfileCompletion } = useTeacherProfile();
+  const { currentUser, loading: authContextLoading, error: authContextError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTimeoutRef = useRef(null);
   const effectRunId = useRef(0); // For more detailed logging
 
   useEffect(() => {
     effectRunId.current += 1;
     const currentRunId = effectRunId.current;
-    console.log(`[Layout #${currentRunId}] useEffect run START. Path:`, location.pathname);
+    // console.log(`[Layout #${currentRunId}] useEffect run START. Path:`, location.pathname);
+    // console.log(`[Layout #${currentRunId}] States: isAuthLoading: ${isAuthLoading}, isAuthenticated: ${isAuthenticated}, authContextLoading: ${authContextLoading}, currentUser:`, currentUser ? 'exists' : 'null', `Path: ${location.pathname}`);
 
-    // Always clear any existing redirect timeout at the start of the effect.
-    if (redirectTimeoutRef.current) {
-      console.log(`[Layout #${currentRunId}] Clearing previous redirect timeout ID:`, redirectTimeoutRef.current);
-      clearTimeout(redirectTimeoutRef.current);
-      redirectTimeoutRef.current = null;
+    // No redirects if Kinde auth is still loading or if AuthContext is still loading its data
+    if (isAuthLoading || authContextLoading) {
+      // console.log(`[Layout #${currentRunId}] Auth loading (Kinde: ${isAuthLoading}, Context: ${authContextLoading}). No redirect actions yet.`);
+      return;
     }
 
-    let layoutDeterminedProfileComplete = false;
-    if (profile && !isLoadingProfile) {
-        // If profile data exists and we are NOT loading, 
-        // Layout calculates completion status directly from the profile data it has NOW.
-        layoutDeterminedProfileComplete = checkProfileCompletion(profile);
-    }
-
-    console.log(`[Layout #${currentRunId}] useEffect run. Path:`, location.pathname,
-                'AuthL:', isAuthLoading, 'AuthOK:', isAuthenticated,
-                'ProfL:', isLoadingProfile, 'ProfData:', profile ? 'exists' : 'null',
-                'LayoutDeterminedComplete:', layoutDeterminedProfileComplete);
-
-    if (!isAuthLoading && isAuthenticated) {
+    if (isAuthenticated) {
+      // console.log(`[Layout #${currentRunId}] Authenticated. CurrentUser:`, currentUser);
       if (location.pathname !== '/profile') {
-        if (isLoadingProfile) {
-          if (profile === null) {
-            console.log(`[Layout #${currentRunId}] CASE 1.1: Profile NULL & loading. Redirecting.`);
-            redirectTimeoutRef.current = setTimeout(() => {
-              console.log(`[Layout #${currentRunId}] EXECUTING redirect (profile was null and loading). Timeout ID:`, redirectTimeoutRef.current);
-              navigate('/profile', { replace: true });
-            }, 300);
-            console.log(`[Layout #${currentRunId}] Scheduled redirect timeout ID:`, redirectTimeoutRef.current);
-          } else {
-            console.log(`[Layout #${currentRunId}] CASE 1.2: Profile EXISTS & reloading. Waiting...`);
-            // DO NOTHING - wait for reload to finish. Effect will re-run.
-          }
+        const profileComplete = isProfileEffectivelyComplete(currentUser);
+        // console.log(`[Layout #${currentRunId}] Profile complete status: ${profileComplete}`);
+        if (!profileComplete) {
+          // console.log(`[Layout #${currentRunId}] Profile NOT complete. Redirecting to /profile.`);
+          navigate('/profile', { replace: true });
         } else {
-          // CASE 2: Profile IS NOT loading.
-          if (!layoutDeterminedProfileComplete) {
-            console.log(`[Layout #${currentRunId}] CASE 2.1: Profile NOT loading, LayoutDeterminedComplete FALSE. Redirecting.`);
-            // No timeout here, decision is based on current, non-loading state.
-            navigate('/profile', { replace: true }); 
-          } else {
-            console.log(`[Layout #${currentRunId}] CASE 2.2: Profile NOT loading, LayoutDeterminedComplete TRUE. No redirect.`);
-          }
+          // console.log(`[Layout #${currentRunId}] Profile complete. No redirect needed.`);
         }
       } else {
-        console.log(`[Layout #${currentRunId}] On /profile. No redirect.`);
-        if (redirectTimeoutRef.current) {
-           console.log(`[Layout #${currentRunId}] Clearing timeout because on /profile page. ID:`, redirectTimeoutRef.current);
-           clearTimeout(redirectTimeoutRef.current);
-           redirectTimeoutRef.current = null;
-        }
+        // console.log(`[Layout #${currentRunId}] Currently on /profile page. No redirect needed.`);
+        // If they are on /profile and profile becomes complete, they can navigate away freely.
+        // No action needed here to force them off /profile.
       }
     } else {
-      console.log(`[Layout #${currentRunId}] Not Authenticated or Auth Loading. No redirect logic.`);
+      // console.log(`[Layout #${currentRunId}] Not authenticated. No redirect logic for profile completion.`);
+      // Handle unauthenticated users if necessary (e.g., redirect to login), though Kinde typically handles this.
     }
 
-    console.log(`[Layout #${currentRunId}] useEffect run END.`);
-    return () => {
-      console.log(`[Layout #${currentRunId}] useEffect CLEANUP. Path:`, location.pathname, 'Current Timeout ID:', redirectTimeoutRef.current);
-      if (redirectTimeoutRef.current) {
-        console.log(`[Layout #${currentRunId}] Cleanup: Clearing redirect timeout ID:`, redirectTimeoutRef.current);
-        clearTimeout(redirectTimeoutRef.current);
-        redirectTimeoutRef.current = null;
-      }
-    };
+    // console.log(`[Layout #${currentRunId}] useEffect run END.`);
   }, [
     isAuthenticated,
     isAuthLoading,
-    profile, 
-    isLoadingProfile,
-    checkProfileCompletion,
+    currentUser,
+    authContextLoading,
     navigate,
     location.pathname
   ]);
 
-  // Adjusted loading state display logic
-  if (isAuthLoading || (profile === null && isAuthenticated && isLoadingProfile && location.pathname !== '/profile')) {
-    console.log('[Layout] Displaying FULL PAGE LOADER. isAuthLoading:', isAuthLoading, 'profileNull:', profile === null, 'isAuthenticated:', isAuthenticated, 'isLoadingProfile:', isLoadingProfile, 'pathname:', location.pathname);
+  // Display full-page loader if Kinde is authenticating OR (if authenticated and AuthContext is still loading profile data)
+  if (isAuthLoading || (isAuthenticated && authContextLoading)) {
+    // console.log('[Layout] Displaying FULL PAGE LOADER. isAuthLoading:', isAuthLoading, 'isAuthenticated:', isAuthenticated, 'authContextLoading:', authContextLoading);
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="loading loading-spinner loading-lg"></div>
@@ -110,6 +89,8 @@ function Layout({ children }) {
   }
 
   if (!isAuthenticated) {
+    // This part can remain, it handles the case where Kinde confirms the user is not authenticated.
+    // console.log('[Layout] User NOT authenticated (and not loading). Showing login required message.');
     return (
       <div className="alert alert-info shadow-lg">
         <InformationCircleIcon className="h-6 w-6 stroke-current shrink-0" />
