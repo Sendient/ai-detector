@@ -127,14 +127,13 @@ async def delete_student_admin(
 # Pydantic model for the response. We might need a more detailed one later.
 # For now, using the existing Teacher model, but it might miss some fields from your example.
 # We will need to create a TeacherAdminView model that includes ALL fields.
-class TeacherAdminView(TeacherProfile): # This will need to be expanded or replaced
-    # Add any fields from your MongoDB example that are not in the base Teacher model
-    # For example:
-    # kinde_id: Optional[str] = None # If not already in Teacher
-    # stripe_customer_id: Optional[str] = None
-    # subscription_status: Optional[str] = None
-    # pro_plan_activated_at: Optional[datetime] = None
-    # last_login_date: Optional[datetime] = None # Placeholder for potential addition
+
+# TeacherAdminView inherits from TeacherProfile, which includes comprehensive teacher data
+# (including fields from TeacherInDBBase like kinde_id, stripe_customer_id, etc.)
+# and calculated fields like plan limits and remaining words.
+# If additional fields (e.g., last_login_date) are required in the future,
+# they would need to be added to the base models and database schema.
+class TeacherAdminView(TeacherProfile):
     pass
 
 @router.get(

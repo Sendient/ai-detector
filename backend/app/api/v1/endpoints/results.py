@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends
 # Import models
 from ....models.result import Result
 from ....models.document import Document # Needed for auth check
+from ....models.enums import UserRoleEnum # ADDED UserRoleEnum
 
 # Import CRUD functions
 from ....db import crud
@@ -43,39 +44,39 @@ async def read_result_for_document(
 ):
     """
     Protected endpoint to retrieve the result for a specific document.
+    Admins can retrieve any result by document_id.
+    Teachers can only retrieve results for documents they own.
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to read result for document ID: {document_id}")
-
-    # --- Authorization Check (Based on Document Access) ---
-    # First, check if the associated document exists and if the user can access it
-    # Assuming get_document_by_id respects soft delete if implemented
-    document = await crud.get_document_by_id(
-        document_id=document_id,
-        teacher_id=user_kinde_id
+    user_roles = current_user_payload.get("roles", [])
+    is_admin = any(
+        role == UserRoleEnum.ADMIN.value or (isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value)
+        for role in user_roles
     )
-    if document is None:
-        # If the document doesn't exist OR doesn't belong to the user, the result cannot be accessed
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document with ID {document_id} not found or access denied."
-        )
-    # Authorization confirmed by successful fetch above
-    # TODO: Add fine-grained authorization check:
-    # Can user 'user_kinde_id' view this document (and therefore its result)?
-    # (e.g., check relationship via student/assignment/classgroup/teacher)
-    # logger.warning(f"Authorization check needed for user {user_kinde_id} reading result for document {document_id}")
-    # --- End Authorization Check ---
 
-    # If authorized to view document, attempt to get the result
-    # Assuming get_result_by_document_id respects soft delete if implemented
-    result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=user_kinde_id)
+    logger.info(f"User {user_kinde_id} (Admin: {is_admin}) attempting to read result for document ID: {document_id}")
+
+    query_teacher_id = None
+    if not is_admin:
+        query_teacher_id = user_kinde_id
+
+    # crud.get_result_by_document_id already filters by teacher_id if provided
+    result = await crud.get_result_by_document_id(document_id=document_id, teacher_id=query_teacher_id)
+
     if result is None:
-        # Result might not exist yet (pending/failed) or could be (soft) deleted
+        detail_msg = f"Result for document ID {document_id} not found"
+        if not is_admin:
+            detail_msg += " or you do not have permission to access it."
+        else: # Admin context
+            detail_msg += " (it may still be processing or failed)."
+        
+        logger.warning(f"Result for document {document_id} not found for user {user_kinde_id} (Admin: {is_admin}). Queried with teacher_id: {query_teacher_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Result for document ID {document_id} not found (may still be processing or failed)."
+            detail=detail_msg
         )
+    
+    logger.info(f"Successfully retrieved result {result.id} for document {document_id} by user {user_kinde_id} (Admin: {is_admin}).")
     return result
 
 @router.get(
@@ -92,35 +93,42 @@ async def read_result(
 ):
     """
     Protected endpoint to retrieve a specific result by its ID.
+    Admins can retrieve any result by result_id.
+    Teachers can only retrieve results they own.
     (Less common use case than getting result by document ID).
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to read result ID: {result_id}")
+    user_roles = current_user_payload.get("roles", [])
+    is_admin = any(
+        role == UserRoleEnum.ADMIN.value or (isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value)
+        for role in user_roles
+    )
 
-    # Assuming get_result_by_id respects soft delete if implemented
-    result = await crud.get_result_by_id(result_id=result_id)
+    logger.info(f"User {user_kinde_id} (Admin: {is_admin}) attempting to read result ID: {result_id}")
+
+    query_teacher_id = None
+    if not is_admin:
+        query_teacher_id = user_kinde_id
+
+    # crud.get_result_by_id already filters by teacher_id if provided
+    result = await crud.get_result_by_id(result_id=result_id, teacher_id=query_teacher_id)
+
     if result is None:
+        detail_msg = f"Result with ID {result_id} not found"
+        if not is_admin:
+            detail_msg += " or you do not have permission to access it."
+        else: # Admin context
+            detail_msg += "."
+            
+        logger.warning(f"Result {result_id} not found for user {user_kinde_id} (Admin: {is_admin}). Queried with teacher_id: {query_teacher_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Result with ID {result_id} not found."
+            detail=detail_msg
         )
 
-    # --- Authorization Check (Based on Document Access) ---
-    # Need to check if user can access the associated document
-    # Assuming get_document_by_id respects soft delete if implemented
-    document = await crud.get_document_by_id(
-        document_id=result.document_id,
-        teacher_id=user_kinde_id
-    )
-    if document is None:
-         # Should not happen if result exists, implies data inconsistency OR access denied
-         logger.warning(f"Document {result.document_id} not found or access denied for user {user_kinde_id} when fetching result {result_id}.")
-         # Return 404 for the result, as the context is broken or forbidden
-         raise HTTPException(status_code=404, detail="Result not found or access denied.")
-    # Authorization confirmed by successful fetch above
-    # TODO: Add fine-grained authorization check:
-    # Can user 'user_kinde_id' view this document (and therefore its result)?
-    # logger.warning(f"Authorization check needed for user {user_kinde_id} reading result {result_id} linked to document {result.document_id}")
-    # --- End Authorization Check ---
+    # The check for document ownership is implicitly handled by Result.teacher_id
+    # and the teacher_id passed to crud.get_result_by_id.
+    # No need for an additional crud.get_document_by_id here if Result.teacher_id is authoritative.
 
+    logger.info(f"Successfully retrieved result {result.id} by user {user_kinde_id} (Admin: {is_admin}).")
     return result

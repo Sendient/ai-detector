@@ -14,7 +14,7 @@ from ....models.teacher import Teacher, TeacherCreate, TeacherUpdate, TeacherPro
 # Import CRUD functions for Teacher
 from ....db import crud
 # Import the authentication dependency
-from ....core.security import get_current_user_payload
+from ....core.security import get_current_user_payload, require_kinde_admin_role
 from ....core.config import settings
 from ....models.enums import SubscriptionPlan, UserRoleEnum
 
@@ -436,7 +436,6 @@ async def create_new_teacher(
 
 
 # --- GET / Endpoint (List all teachers - likely admin only) ---
-# (Code remains the same as user provided)
 @router.get(
     "/",
     response_model=List[Teacher],
@@ -447,10 +446,10 @@ async def create_new_teacher(
 async def read_teachers(
     skip: int = Query(0, ge=0, description="Records to skip"),
     limit: int = Query(100, ge=1, le=500, description="Max records to return"),
-    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
+    admin_user_payload: Dict[str, Any] = Depends(require_kinde_admin_role)
 ):
-    user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to read list of teachers (skip={skip}, limit={limit}).")
+    admin_kinde_id = admin_user_payload.get("sub")
+    logger.info(f"Admin user {admin_kinde_id} attempting to read list of teachers (skip={skip}, limit={limit}).")
     # TODO: Add authorization check - Only allow admins?
 
     teachers = await crud.get_all_teachers(skip=skip, limit=limit)

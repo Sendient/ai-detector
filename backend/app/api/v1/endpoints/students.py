@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, status, Query, Depends # Add Depen
 from ....models.student import Student, StudentCreate, StudentUpdate
 from ....models.bulk import StudentBulkCreateRequest, StudentBulkCreateResponse, StudentBulkResponseItem # Added bulk models
 from ....models.class_group import ClassGroupCreate # Import ClassGroupCreate
+from ....models.enums import UserRoleEnum # ADDED UserRoleEnum
 from ....db import crud
 from ....core.security import get_current_user_payload
 
@@ -75,21 +76,44 @@ async def read_student(
     - **student_internal_id**: The internal UUID of the student to retrieve.
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to read student internal ID: {student_internal_id}")
+    user_roles = current_user_payload.get("roles", [])
+    
+    # Determine if the user is an admin
+    # Kinde roles might be a list of strings or a list of dicts like [{'key': 'Admin'}]
+    is_admin = any(
+        role == UserRoleEnum.ADMIN.value or (isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value)
+        for role in user_roles
+    )
+
+    logger.info(f"User {user_kinde_id} (Admin: {is_admin}) attempting to read student internal ID: {student_internal_id}")
+
+    student_to_fetch_teacher_id = None
+    if not is_admin:
+        student_to_fetch_teacher_id = user_kinde_id
 
     student = await crud.get_student_by_id(
         student_internal_id=student_internal_id,
-        teacher_id=user_kinde_id
+        teacher_id=student_to_fetch_teacher_id # Pass Kinde ID for teachers, None for admins
     )
+    
     if student is None:
+        # If admin and not found, it's a genuine 404.
+        # If teacher and not found, it could be not found OR not theirs.
+        # The CRUD log for get_student_by_id will indicate if teacher_id was used in query.
+        detail_msg = f"Student with internal ID {student_internal_id} not found"
+        if not is_admin:
+            detail_msg += " or access denied."
+        else:
+            detail_msg += "."
+
+        logger.warning(f"Failed to find student {student_internal_id}. Admin: {is_admin}, Queried with teacher_id: {student_to_fetch_teacher_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with internal ID {student_internal_id} not found."
+            detail=detail_msg
         )
 
-    # TODO: Add authorization check - Can user 'user_kinde_id' view this student?
-    # (e.g., is the student in one of the user's ClassGroups? Is the user a school admin?)
-
+    # Authorization check is now implicitly handled by how crud.get_student_by_id was called
+    logger.info(f"Successfully retrieved student {student.id} for user {user_kinde_id} (Admin: {is_admin})")
     return student
 
 @router.get(
@@ -114,12 +138,23 @@ async def read_students(
     Can filter by class_id to get students belonging to a specific class.
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to read list of students with filters (class_id: {class_id}).")
+    user_roles = current_user_payload.get("roles", [])
+    is_admin = any(
+        role == UserRoleEnum.ADMIN.value or (isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value)
+        for role in user_roles
+    )
 
-    # TODO: Further authorization logic for listing students might be needed.
+    logger.info(f"User {user_kinde_id} (Admin: {is_admin}) attempting to read list of students with filters (class_id: {class_id}).")
 
+    query_teacher_id = None
+    if not is_admin:
+        query_teacher_id = user_kinde_id
+
+    # All filters are passed to crud.get_all_students.
+    # If query_teacher_id is None (for admin), crud function will not filter by teacher.
+    # If query_teacher_id is set (for teacher), crud function will filter by that teacher.
     students = await crud.get_all_students(
-        teacher_id=user_kinde_id,
+        teacher_id=query_teacher_id,
         external_student_id=external_student_id,
         first_name=first_name,
         last_name=last_name,
@@ -127,7 +162,9 @@ async def read_students(
         class_id=class_id,
         skip=skip,
         limit=limit
+        # include_deleted can be added as a parameter if needed for admins
     )
+    logger.info(f"Retrieved {len(students)} students for user {user_kinde_id} (Admin: {is_admin}).")
     return students
 
 @router.put(
@@ -145,54 +182,78 @@ async def update_existing_student(
 ):
     """
     Protected endpoint to update an existing student.
+    Admins can update any student. Teachers can only update their own.
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to update student internal ID: {student_internal_id}")
-
-    # --- Authorization Check ---
-    # First, check if the student exists AND belongs to the current user
-    existing_student = await crud.get_student_by_id(
-        student_internal_id=student_internal_id,
-        teacher_id=user_kinde_id # Use authenticated user's ID
+    user_roles = current_user_payload.get("roles", [])
+    is_admin = any(
+        role == UserRoleEnum.ADMIN.value or (isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value)
+        for role in user_roles
     )
-    # --- End Authorization Check ---
 
-    # Using the improved logic: check existence first
-    # existing_student = await crud.get_student_by_id(student_internal_id=student_internal_id)
-    if not existing_student:
-        # This now correctly handles both not found and not authorized
+    logger.info(f"User {user_kinde_id} (Admin: {is_admin}) attempting to update student internal ID: {student_internal_id}")
+
+    # Determine the teacher_id to use for querying/updating
+    # For admins, this will be None, allowing access to any student.
+    # For teachers, this will be their own Kinde ID, restricting access.
+    owner_teacher_id_for_query = None
+    if not is_admin:
+        owner_teacher_id_for_query = user_kinde_id
+
+    # --- Verification Step: Check if the student exists (and if teacher, if they own it) ---
+    student_to_verify = await crud.get_student_by_id(
+        student_internal_id=student_internal_id,
+        teacher_id=owner_teacher_id_for_query # Pass Kinde ID for teachers, None for admins
+    )
+
+    if not student_to_verify:
+        detail_msg = f"Student with internal ID {student_internal_id} not found"
+        if not is_admin:
+            detail_msg += " or you do not have permission to access this student."
+        else: # Admin context
+            detail_msg += "."
+        logger.warning(f"Update failed: Student {student_internal_id} not found or not accessible by user {user_kinde_id} (Admin: {is_admin}). Queried with teacher_id: {owner_teacher_id_for_query}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with internal ID {student_internal_id} not found or access denied."
+            detail=detail_msg
         )
 
-    # Try to update (we know the user owns the student at this point)
+    # --- Update Step ---
+    # owner_teacher_id_for_query is correctly set for both admin (None) and teacher (user_kinde_id)
     updated_student = await crud.update_student(
-        student_internal_id=student_internal_id, 
-        teacher_id=user_kinde_id,  # <<< ADDED teacher_id HERE
-        student_in=student_in
+        student_internal_id=student_internal_id,
+        student_in=student_in,
+        teacher_id=owner_teacher_id_for_query # Pass Kinde ID for teachers, None for admins
     )
+
     if updated_student is None:
-        # If update failed after existence/ownership check, likely a duplicate external_student_id
-        if student_in.external_student_id:
+        # This can happen due to a few reasons:
+        # 1. The student was deleted between the verification and update steps (less likely with proper DB transactions if used at a higher level).
+        # 2. A unique constraint violation (e.g., duplicate external_student_id if trying to set it to an existing one).
+        # 3. Other unexpected database error.
+        # crud.update_student logs a warning if external_student_id is duplicate
+        logger.error(f"Update failed for student {student_internal_id} by user {user_kinde_id} (Admin: {is_admin}) even after initial verification. This might be a conflict or DB error.")
+        # Check if it was a potential duplicate external_student_id
+        if student_in.external_student_id: # Check if external_student_id was part of the update
+             # We can't be certain it was a duplicate without another query, but it's a common cause
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Update failed. Student with external_student_id '{student_in.external_student_id}' may already exist."
+                detail=f"Update failed. This could be due to a conflict, such as an existing student with the external ID '{student_in.external_student_id}'."
             )
         else:
-            # Or some other unexpected DB error during update
-             raise HTTPException(
+            raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not update the student record due to an internal error."
+                detail="Could not update the student record due to an internal server error or conflict."
             )
-    logger.info(f"Student internal ID {student_internal_id} updated successfully by user {user_kinde_id}.")
+
+    logger.info(f"Student internal ID {student_internal_id} updated successfully by user {user_kinde_id} (Admin: {is_admin}).")
     return updated_student
 
 @router.delete(
     "/{student_internal_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a student (Protected)", # Updated summary
-    description="Deletes a student record using their internal unique ID. Requires authentication." # Updated description
+    description="Deletes a student record using their internal unique ID. Requires authentication. Admins can delete any student, teachers only their own."
 )
 async def delete_existing_student(
     student_internal_id: uuid.UUID,
@@ -201,38 +262,60 @@ async def delete_existing_student(
 ):
     """
     Protected endpoint to delete a specific student by their internal ID.
+    Admins can delete any student. Teachers can only delete their own.
+    Default is soft delete. Hard delete is not exposed via this API endpoint directly.
     """
     user_kinde_id = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id} attempting to delete student internal ID: {student_internal_id}")
-
-    # --- Authorization Check ---
-    # Check if the student exists AND belongs to the current user before deleting
-    student_to_delete = await crud.get_student_by_id(
-        student_internal_id=student_internal_id,
-        teacher_id=user_kinde_id # Use authenticated user's ID
+    user_roles = current_user_payload.get("roles", [])
+    is_admin = any(
+        role == UserRoleEnum.ADMIN.value or (isinstance(role, dict) and role.get("key") == UserRoleEnum.ADMIN.value)
+        for role in user_roles
     )
-    if not student_to_delete:
-        # Raise 404 whether it doesn't exist or belongs to another user
+
+    logger.info(f"User {user_kinde_id} (Admin: {is_admin}) attempting to delete student internal ID: {student_internal_id}")
+
+    owner_teacher_id_for_query = None
+    if not is_admin:
+        owner_teacher_id_for_query = user_kinde_id
+
+    # --- Verification Step: Check if the student exists (and if teacher, if they own it) ---
+    student_to_verify = await crud.get_student_by_id(
+        student_internal_id=student_internal_id,
+        teacher_id=owner_teacher_id_for_query # Pass Kinde ID for teachers, None for admins
+    )
+
+    if not student_to_verify:
+        detail_msg = f"Student with internal ID {student_internal_id} not found"
+        if not is_admin:
+            detail_msg += " or you do not have permission to access this student for deletion."
+        else: # Admin context
+            detail_msg += "."
+        logger.warning(f"Delete failed: Student {student_internal_id} not found or not accessible by user {user_kinde_id} (Admin: {is_admin}). Queried with teacher_id: {owner_teacher_id_for_query}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with internal ID {student_internal_id} not found or access denied."
+            detail=detail_msg
         )
-    # --- End Authorization Check ---
 
-    # Proceed with deletion only if the check above passed
-    deleted_successfully = await crud.delete_student(student_internal_id=student_internal_id)
+    # --- Deletion Step ---
+    # owner_teacher_id_for_query is correctly set for admin (None) or teacher (user_kinde_id)
+    # API performs soft delete by default (hard_delete=False in CRUD is default)
+    deleted_successfully = await crud.delete_student(
+        student_internal_id=student_internal_id,
+        teacher_id=owner_teacher_id_for_query # Pass Kinde ID for teachers, None for admins
+        # hard_delete parameter defaults to False in crud.delete_student
+    )
+
     if not deleted_successfully:
-        # This case should theoretically not happen if the check passed, but handle defensively
-        logger.error(f"Failed to delete student {student_internal_id} even after ownership check passed for user {user_kinde_id}.")
+        # This could happen if the student was deleted by another process between verification and deletion,
+        # or if an unexpected error occurred in the CRUD operation.
+        logger.error(f"Delete operation failed for student {student_internal_id} by user {user_kinde_id} (Admin: {is_admin}) even after initial verification. CRUD function returned false.")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not delete student with internal ID {student_internal_id} after authorization."
-            # Older code raised 404, but 500 seems more appropriate if it existed moments ago
-            # status_code=status.HTTP_404_NOT_FOUND,
-            # detail=f"Student with internal ID {student_internal_id} not found."
+            detail=f"Could not delete student with internal ID {student_internal_id}. The student may have been deleted by another process or an internal error occurred."
         )
-    logger.info(f"Student internal ID {student_internal_id} deleted successfully by user {user_kinde_id}.")
-    # No content returned on successful delete
+
+    logger.info(f"Student internal ID {student_internal_id} (soft) deleted successfully by user {user_kinde_id} (Admin: {is_admin}).")
+    # No content returned on successful delete (HTTP 204)
     return None
 
 # === NEW BULK UPLOAD ENDPOINT ===
