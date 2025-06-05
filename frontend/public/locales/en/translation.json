@@ -298,9 +298,12 @@
   "profilePage_form_label_schoolName": "School Name",
   "profilePage_form_placeholder_schoolName": "Enter your school's name",
   "profilePage_form_label_role": "Role",
+  "profilePage_form_placeholder_role": "Select your role",
   "profilePage_form_label_country": "Country",
-  "profilePage_form_select_countryPlaceholder": "Select a country...",
-  "profilePage_form_label_stateCounty": "State/County",
+  "profilePage_form_placeholder_country": "Select your country",
+  "profilePage_form_label_stateCounty": "State / County",
+  "profilePage_form_placeholder_stateCounty": "Enter your state or county",
+  "profilePage_form_label_howDidYouHear": "How did you hear about us?",
   "profilePage_form_button_save": "Save Changes",
   "profilePage_button_saveChanges": "Save Changes",
   "messages_profile_error_fetchFailed": "Failed to fetch profile: {{detail}}",
@@ -315,5 +318,7 @@
   "dashboard_recent_assessments_column_document": "Document",
   "dashboard_recent_assessments_column_date": "Date",
   "dashboard_recent_assessments_column_score": "AI Score",
-  "dashboard_recent_assessments_no_data": "No recent assessments available."
+  "dashboard_recent_assessments_no_data": "No recent assessments available.",
+
+  "documentsPage_confirmReprocess": "Are you sure you want to reprocess the document?"
 } 

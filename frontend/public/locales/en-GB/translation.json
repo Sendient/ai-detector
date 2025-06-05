@@ -617,6 +617,7 @@
     "students_column_classes": "Class(es)",
     "messages_students_noStudents": "No students have been added yet. Click 'Add Student' or 'Bulk Upload Students' to get started.",
     "documentsPage_action_reprocess": "Reprocess",
+    "documentsPage_confirmReprocess": "Are you sure you want to reprocess the document?",
     "messages_students_form_success": "Student form submitted successfully.",
     "students_form_label_assignToClass": "Assign to Class:",
     "studentsPage.refreshingDocuments": "Refreshing Docs...",

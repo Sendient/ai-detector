@@ -251,7 +251,7 @@
     "profilePage_form_label_country": "Country",
     "profilePage_form_select_countryPlaceholder": "Select a country...",
     "profilePage_form_label_stateCounty": "State/County",
-    "profilePage_form_button_save": "Save Changes",
+    "profilePage_form_button_save": "Save Profile",
     "messages_profile_error_fetchFailed": "Failed to fetch profile: {{detail}}",
     "messages_profile_error_unexpectedFetch": "An unexpected error occurred fetching profile.",
     "messages_profile_error_authRequired": "Authentication required.",
@@ -514,5 +514,10 @@
     "studentsPage_studentDocumentsTitle": "Documents for {{studentName}}",
     "studentsPage_loadingDocuments": "Loading documents...",
     "studentsPage_refreshDocuments": "Refresh Documents",
-    "studentsPage_refreshingDocuments": "Refreshing..."
+    "studentsPage_refreshingDocuments": "Refreshing...",
+    "documentsPage_confirmReprocess": "Are you sure you want to reprocess the document?",
+    "profilePage_error_fetch": "Error fetching profile: {{message}}",
+    "profilePage_error_formValidation": "Please correct the errors in the form.",
+    "profilePage_error_save": "Error saving profile: {{message}}",
+    "profilePage_success_save": "Profile saved successfully!"
 }
