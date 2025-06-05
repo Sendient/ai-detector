@@ -35,7 +35,7 @@ Example Usage in Endpoints:
 
 import logging
 import httpx # Changed from requests
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import lru_cache
 from datetime import datetime, timedelta, timezone # Added timezone and timedelta
 
@@ -50,7 +50,7 @@ from fastapi.security import OAuth2PasswordBearer
 # --- Config Imports ---
 # Import Kinde settings from config
 # Adjust the relative path '.' based on where security.py is relative to 'core'
-from .config import KINDE_DOMAIN, KINDE_AUDIENCE
+from .config import KINDE_DOMAIN, KINDE_AUDIENCE, ADMIN_EMAIL_DOMAIN
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -268,21 +268,39 @@ async def require_kinde_admin_role(
     payload: Dict[str, Any] = Depends(get_current_user_payload)
 ) -> Dict[str, Any]:
     """
-    FastAPI dependency that requires the user to have the 'Admin' role in their Kinde JWT.
-    Raises HTTPException 403 if the role is not present.
-    Returns the payload if the user is an admin.
+    Dependency that checks if the authenticated user has the 'admin' role
+    AND their email belongs to the configured admin email domain.
     """
-    roles = payload.get("roles", [])
-    is_admin = any(role.get("key") == "Admin" for role in roles if isinstance(role, dict))
+    user_kinde_id = payload.get("sub")
+    user_roles = payload.get("roles", [])
+    user_email = payload.get("email", "")
 
-    if not is_admin:
-        logger.warning(f"Admin access denied for user {payload.get('sub')}. Kinde roles: {roles}")
+    # Check for 'admin' role
+    is_kinde_admin = "admin" in user_roles
+
+    # Check for Sendient email domain
+    is_sendient_domain_email = False
+    admin_domain_to_check = ADMIN_EMAIL_DOMAIN # Store for logging clarity
+    
+    if admin_domain_to_check and user_email:
+        is_sendient_domain_email = user_email.lower().endswith(admin_domain_to_check.lower())
+    
+    # If all checks pass, return the payload
+    if is_kinde_admin and is_sendient_domain_email:
+        logger.info(f"Admin access GRANTED for user {user_kinde_id} with email '{user_email}'.")
+        return payload
+    else:
+        logger.warning(
+            f"Admin access DENIED for user {user_kinde_id}. "
+            f"Kinde roles: {user_roles}, Email from payload: '{user_email}', "
+            f"Is Kinde Admin: {is_kinde_admin}, "
+            f"Expected domain from settings: '{admin_domain_to_check}', "
+            f"Email matches domain: {is_sendient_domain_email}"
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User does not have admin privileges."
+            detail="User does not have admin privileges.",
         )
-    logger.info(f"Admin access GRANTED for user {payload.get('sub')}. Kinde roles: {roles}")
-    return payload
 
 
 # --- Cache Management Functions ---

@@ -15,7 +15,6 @@ const AdminStudentsPage = () => {
 
   useEffect(() => {
     if (!authLoading && currentUser && !currentUser.is_administrator) {
-      console.warn("AdminStudentsPage: User is not an administrator. Redirecting.");
       navigate('/unauthorized');
     }
   }, [currentUser, authLoading, navigate]);
@@ -30,7 +29,6 @@ const AdminStudentsPage = () => {
       setError('');
       try {
         const response = await apiService.get('/api/v1/admin/students');
-        console.log('API response data:', response.data); // Debug log
         if (response.data && Array.isArray(response.data)) {
           setStudents(response.data);
         } else {
@@ -68,8 +66,6 @@ const AdminStudentsPage = () => {
       }
     }
   };
-
-  console.log('Current students state:', students); // Debug log
 
   const requestSort = (key) => {
     let direction = 'ascending';

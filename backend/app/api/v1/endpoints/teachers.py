@@ -1,5 +1,4 @@
 # app/api/v1/endpoints/teachers.py
-print("<<<<< LOADING TEACHERS.PY MODULE AT START OF FILE >>>>")
 
 import uuid
 import logging
@@ -344,97 +343,6 @@ async def update_or_create_current_user_profile(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while creating the teacher profile.")
 
 
-# --- POST / Endpoint ---
-# (Code remains the same as user provided)
-@router.post(
-    "/",
-    response_model=Teacher,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a new teacher profile (Protected)",
-    description="Creates a new teacher profile linked to the authenticated user's Kinde ID. Returns 409 if profile already exists. (Consider if PUT /me replaces this for user creation)",
-    responses={
-        409: {"description": "Teacher profile already exists for this user"},
-        422: {"description": "Validation Error"},
-        500: {"description": "Internal Server Error"}
-    }
-)
-async def create_new_teacher(
-    request: Request, # Keep Request to log raw body
-    # teacher_in: TeacherCreate, # Temporarily remove Pydantic validation here
-    current_user_payload: Dict[str, Any] = Depends(get_current_user_payload)
-):
-    """
-    Protected endpoint to create a new teacher profile for the calling user.
-    NOTE: PUT /me now handles initial profile creation. This endpoint might
-    only be needed for specific scenarios or admin actions.
-    """
-    raw_body_str = ""
-    try:
-        raw_body = await request.body()
-        raw_body_str = raw_body.decode()
-        logger.debug(f"Raw body received for POST /teachers/: {raw_body_str}")
-    except Exception as e:
-        logger.error(f"Could not read raw request body: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not read request body.")
-
-    # --- Explicit Pydantic Validation with Logging ---
-    try:
-        # Manually parse the raw body using the TeacherCreate model
-        teacher_data = TeacherCreate.model_validate_json(raw_body_str)
-        logger.info(f"Manual validation successful. Data: {teacher_data.model_dump()}")
-    except ValidationError as e:
-        logger.error(f"Pydantic validation failed for POST /teachers/: {e.errors()}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.errors()
-        )
-    except Exception as e:
-        logger.error(f"Error parsing request body for POST /teachers/: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid request body format: {e}")
-    # --- End Explicit Validation ---
-
-    user_kinde_id_str = current_user_payload.get("sub")
-    logger.info(f"User {user_kinde_id_str} attempting to create teacher profile using validated data: {teacher_data.model_dump()}")
-
-    if not user_kinde_id_str:
-        logger.error("Kinde 'sub' claim missing from token payload during teacher creation.")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User identifier missing from token.")
-
-    # Check if profile already exists for this Kinde ID
-    existing_teacher = await crud.get_teacher_by_kinde_id(kinde_id=user_kinde_id_str)
-    if existing_teacher:
-        logger.warning(f"Attempt to create profile failed: Teacher profile already exists for Kinde ID {user_kinde_id_str}.")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Teacher profile already exists for this user."
-        )
-
-    logger.debug(f"Calling crud.create_teacher for Kinde ID {user_kinde_id_str} with validated data: {teacher_data.model_dump()}")
-    try:
-        # Pass the validated Pydantic object and kinde_id to the CRUD function
-        created_teacher = await crud.create_teacher(teacher_in=teacher_data, kinde_id=user_kinde_id_str)
-    except Exception as e:
-        logger.error(f"CRUD create_teacher failed for Kinde ID {user_kinde_id_str}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create profile due to server error.")
-
-    if not created_teacher:
-        logger.error(f"crud.create_teacher returned None unexpectedly for Kinde ID {user_kinde_id_str}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create the teacher record due to an internal error."
-        )
-
-    logger.info(f"Teacher profile '{created_teacher.first_name} {created_teacher.last_name}' created successfully for user {user_kinde_id_str}.")
-    return created_teacher
-
-
-# --- PUT /me Endpoint for Updating Profile (Now handled by update_or_create_current_user_profile) ---
-# This specific function is replaced by the upsert logic above.
-# Keeping the original signature here for reference if needed, but it's effectively replaced.
-# @router.put(...)
-# async def update_current_user_profile(...): ...
-
-
 # --- GET / Endpoint (List all teachers - likely admin only) ---
 @router.get(
     "/",
@@ -446,13 +354,17 @@ async def create_new_teacher(
 async def read_teachers(
     skip: int = Query(0, ge=0, description="Records to skip"),
     limit: int = Query(100, ge=1, le=500, description="Max records to return"),
-    admin_user_payload: Dict[str, Any] = Depends(require_kinde_admin_role)
+    current_user_payload: Dict[str, Any] = Depends(require_kinde_admin_role)
 ):
-    admin_kinde_id = admin_user_payload.get("sub")
-    logger.info(f"Admin user {admin_kinde_id} attempting to read list of teachers (skip={skip}, limit={limit}).")
-    # TODO: Add authorization check - Only allow admins?
-
+    """
+    Retrieves a list of all teachers. Supports pagination.
+    
+    This endpoint is restricted to users with the 'admin' role.
+    """
+    logger.info(f"User {current_user_payload.get('sub')} listing all teachers with skip={skip}, limit={limit}")
     teachers = await crud.get_all_teachers(skip=skip, limit=limit)
+    if not teachers:
+        logger.warning(f"No teachers found for the given skip and limit. Returning empty list.")
     return teachers
 
 

@@ -353,31 +353,43 @@ async def app_with_mock_auth(app: FastAPI) -> FastAPI:
         "roles": ["teacher"]
     }
 
-    async def override_get_current_user_payload() -> Dict[str, Any]:
+    async def override_get_current_user_payload_for_mock_auth() -> Dict[str, Any]: # Renamed for clarity
         return default_mock_payload
 
-    app.dependency_overrides[get_current_user_payload] = override_get_current_user_payload
+    original_override = app.dependency_overrides.get(get_current_user_payload) # Store any pre-existing override
+
+    app.dependency_overrides[get_current_user_payload] = override_get_current_user_payload_for_mock_auth
     yield app
     
-    if get_current_user_payload in app.dependency_overrides and \
-       app.dependency_overrides[get_current_user_payload] == override_get_current_user_payload:
+    # Restore the original override, or remove if this fixture set it and there was none before
+    if original_override:
+        app.dependency_overrides[get_current_user_payload] = original_override
+    elif get_current_user_payload in app.dependency_overrides and \
+         app.dependency_overrides[get_current_user_payload] == override_get_current_user_payload_for_mock_auth:
         del app.dependency_overrides[get_current_user_payload]
 
 @pytest_asyncio.fixture(scope="function")
 async def app_without_auth(app: FastAPI) -> FastAPI:
-    """Fixture that provides the FastAPI app with auth dependency removed."""
-    # Store original override if it exists
+    """Fixture that explicitly sets an unauthenticated state."""
+    from fastapi import HTTPException, status # Ensure imports are available
+
+    async def force_unauthenticated() -> Dict[str, Any]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="No authentication provided (app_without_auth)"
+        )
+
     original_override = app.dependency_overrides.get(get_current_user_payload)
     
-    # Remove the auth dependency
-    if get_current_user_payload in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_payload]
+    app.dependency_overrides[get_current_user_payload] = force_unauthenticated
     
     yield app
     
-    # Restore original override if it existed
     if original_override:
         app.dependency_overrides[get_current_user_payload] = original_override
+    elif get_current_user_payload in app.dependency_overrides and \
+         app.dependency_overrides[get_current_user_payload] == force_unauthenticated:
+        del app.dependency_overrides[get_current_user_payload]
 
 # --- Pytest Hooks for Logging ---
 

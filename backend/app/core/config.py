@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     KINDE_AUDIENCE: Optional[str] = None # This can be a single string
     KINDE_CLIENT_ID: Optional[str] = None # For machine-to-machine if used
 
+    ADMIN_EMAIL_DOMAIN: str = "@sendient.ai" # ADDED: Admin email domain
+
     # Azure Blob Storage Settings
     AZURE_BLOB_CONNECTION_STRING: Optional[str] = None
     AZURE_BLOB_CONTAINER_NAME: str = "uploaded-documents"
@@ -214,6 +216,7 @@ if settings.DEBUG:
     logger.debug(f"STRIPE_WEBHOOK_SECRET Set: {'Yes' if settings.STRIPE_WEBHOOK_SECRET else 'No - CRITICAL'}")
     logger.debug(f"STRIPE_PRO_PLAN_PRICE_ID Set: {'Yes' if settings.STRIPE_PRO_PLAN_PRICE_ID else 'No - CRITICAL'}")
     logger.debug(f"FRONTEND_URL Set: {'Yes' if settings.FRONTEND_URL else 'No - CRITICAL'}")
+    logger.debug(f"ADMIN_EMAIL_DOMAIN: {settings.ADMIN_EMAIL_DOMAIN}") # ADDED: Log the loaded admin email domain
 
 
 # --- Aliases for backward compatibility or direct import (optional, but good for transition) ---
@@ -228,6 +231,7 @@ KINDE_DOMAIN = settings.KINDE_DOMAIN
 KINDE_AUDIENCE = settings.KINDE_AUDIENCE
 AZURE_BLOB_CONNECTION_STRING = settings.AZURE_BLOB_CONNECTION_STRING
 AZURE_BLOB_CONTAINER_NAME = settings.AZURE_BLOB_CONTAINER_NAME
+ADMIN_EMAIL_DOMAIN = settings.ADMIN_EMAIL_DOMAIN # ADDED: Alias for direct import if needed
 
 # Stripe settings aliases
 STRIPE_SECRET_KEY = settings.STRIPE_SECRET_KEY

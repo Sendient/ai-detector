@@ -1,10 +1,9 @@
-print(f"<<<<< LOADING CLASS_GROUPS.PY FROM: {__file__} >>>>>")
 # app/api/v1/endpoints/class_groups.py
 
 import uuid # Corrected Indentation
 import logging
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, status, Query, Depends # Removed , Request
+from fastapi import APIRouter, HTTPException, status, Query, Depends
 from pydantic import ValidationError # Added ValidationError
 
 # Import Pydantic models for ClassGroup
@@ -18,7 +17,6 @@ from ....models.class_group import (
 from ....db import crud
 # Import the authentication dependency
 from ....core.security import get_current_user_payload
-# from ....models import User # REMOVE THIS LINE
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

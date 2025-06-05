@@ -8,7 +8,7 @@ import uuid # Added for student_id path parameter
 from ....core.security import require_kinde_admin_role, get_current_user_payload
 from ....db import crud # For DB operations
 from ....models.student import Student # Changed from TeacherProfile to Student
-from ....models.teacher import Teacher, TeacherProfile  # Assuming a Teacher model to represent the data, IMPORT TeacherProfile
+from ....models.teacher import TeacherProfile  # Assuming a Teacher model to represent the data, IMPORT TeacherProfile
 from ....models.document import Document # <-- Import the Document model
 from ....models.enums import UserRoleEnum, SubscriptionPlan # Added SubscriptionPlan
 from ....core.config import settings # Added settings
@@ -20,11 +20,6 @@ router = APIRouter(
     tags=["Admin"],
     dependencies=[Depends(require_kinde_admin_role)] # Apply to all routes in this router
 )
-
-@router.get("/test-admin-students-route-please-ignore") # TEMPORARY TEST ROUTE
-async def test_admin_students_route_please_ignore():
-    logger.info("%%%% TEST ROUTE /test-admin-students-route-please-ignore WAS HIT %%%%")
-    return {"message": "Admin students temporary test route is working!"}
 
 @router.get(
     "/overview",

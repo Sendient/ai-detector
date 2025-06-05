@@ -39,9 +39,8 @@ function AdminManageClassesPage() {
       const token = await getToken();
       if (!token) throw new Error(t('messages_error_authTokenMissing'));
 
-      // TODO: This endpoint needs to be created on the backend for admins to fetch ALL classes
-      // For now, using the existing one and acknowledging it won't filter by teacher
-      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups/all-admin`, { // Placeholder endpoint
+      // This endpoint allows admins to fetch all class groups.
+      const response = await fetch(`${API_BASE_URL}/api/v1/class-groups/all-admin`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
@@ -113,8 +112,7 @@ function AdminManageClassesPage() {
     });
   }, [classes, sortField, sortOrder]);
 
-  // Placeholder handlers
-  const handleAddClass = () => console.log('Add new class clicked');
+  // Placeholder handlers for editing/deleting classes are not yet implemented.
   const handleEditClass = (classId) => console.log('Edit class:', classId);
   const handleDeleteClass = (classId) => console.log('Delete class:', classId);
 
@@ -141,10 +139,6 @@ function AdminManageClassesPage() {
     <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold">{t('adminManageClasses_heading', 'Manage Classes (Admin)')}</h1>
-        {/* <button onClick={handleAddClass} className="btn btn-primary">
-          <PlusIcon className="h-5 w-5 mr-2" />
-          {t('adminManageClasses_button_addClass', 'Add New Class')}
-        </button> */}
       </div>
 
       <div className="card bg-base-100 shadow-xl">
@@ -164,7 +158,7 @@ function AdminManageClassesPage() {
                       {t('adminManageClasses_col_academicYear', 'Academic Year')}
                       {sortField === 'academic_year' ? (sortOrder === 'asc' ? <ChevronUpIcon className="h-4 w-4 inline ml-1"/> : <ChevronDownIcon className="h-4 w-4 inline ml-1"/>) : <ArrowsUpDownIcon className="h-4 w-4 inline ml-1 text-gray-400"/>}
                     </th>
-                    <th>{t('adminManageClasses_col_teacher', 'Teacher')}</th> {/* TODO: Populate Teacher Info */}
+                    <th>{t('adminManageClasses_col_teacher', 'Teacher')}</th>
                     <th>{t('adminManageClasses_col_students', 'Students')}</th>
                     <th>{t('adminManageClasses_col_actions', 'Actions')}</th>
                   </tr>
@@ -174,7 +168,7 @@ function AdminManageClassesPage() {
                     <tr key={cls.id}>
                       <td>{cls.class_name}</td>
                       <td>{cls.academic_year}</td>
-                      <td>{cls.teacher_id || t('common_text_notApplicable', 'N/A')}</td> {/* Placeholder */}
+                      <td>{cls.teacher_id || t('common_text_notApplicable', 'N/A')}</td> {/* TODO: This shows teacher ID. To show name, backend needs to populate it or another query is needed. */}
                       <td>{cls.student_ids?.length || 0}</td>
                       <td className="space-x-2">
                         <button onClick={() => handleEditClass(cls.id)} className="btn btn-sm btn-ghost text-info" title={t('adminManageClasses_tooltip_edit', 'Edit Class')}>

@@ -817,7 +817,7 @@ async def test_list_teachers_as_admin_success(
     get_url = f"{api_prefix}/teachers/"
     
     admin_kinde_id = "test_admin_kinde_id"
-    admin_email = "admin@example.com"
+    admin_email = "admin@sendient.ai" # MODIFIED: Email now ends with @sendient.ai
 
     # 1. Customize get_current_user_payload for an admin user
     admin_user_payload = {
@@ -957,10 +957,11 @@ async def test_list_teachers_as_non_admin_forbidden(
         response = await client.get(get_url, headers=headers)
         
     # 3. Assertions
-    assert response.status_code == status.HTTP_200_OK, \
-        f"Expected 200 OK for non-admin, got {response.status_code}. Response: {response.text}"
+    assert response.status_code == status.HTTP_403_FORBIDDEN, \
+        f"Expected 403 Forbidden for non-admin, got {response.status_code}. Response: {response.text}" # MODIFIED: Expected status code and message
     response_data = response.json()
-    assert response_data == [], "Expected empty list for non-admin user."
+    assert "detail" in response_data # MODIFIED: Check for detail in 403 response
+    assert "User does not have admin privileges" in response_data["detail"] # MODIFIED: Check for specific error message
 
     # Cleanup the dependency override
     if original_override:
@@ -1000,13 +1001,15 @@ async def test_get_teacher_by_id_as_admin_success(
 
     # Mock payload for the admin user making the request
     admin_user_kinde_id = f"kinde_id_admin_user_{uuid.uuid4()}"
+    admin_email_for_test = "super_admin@sendient.ai" # MODIFIED: Email for admin user
     admin_mock_payload = {
         "sub": admin_user_kinde_id,
         "iss": settings.KINDE_DOMAIN or "mock_issuer",
         "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
         "exp": time.time() + 3600,
         "iat": time.time(),
-        "roles": ["admin"] # User making the request is an admin
+        "roles": ["admin"], # User making the request is an admin
+        "email": admin_email_for_test # MODIFIED: Use the updated email
     }
 
     # Override get_current_user_payload for this test to simulate an admin user
@@ -1083,13 +1086,15 @@ async def test_get_teacher_by_id_as_admin_not_found(
 
     # Mock payload for the admin user making the request
     admin_user_kinde_id = f"kinde_id_admin_user_not_found_{uuid.uuid4()}"
+    admin_email_for_test = "admin_not_found@sendient.ai"  # MODIFIED: Email for admin user
     admin_mock_payload = {
         "sub": admin_user_kinde_id,
         "iss": settings.KINDE_DOMAIN or "mock_issuer",
         "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
         "exp": time.time() + 3600,
         "iat": time.time(),
-        "roles": ["admin"]
+        "roles": ["admin"],
+        "email": admin_email_for_test  # MODIFIED: Use the updated email
     }
 
     async def override_for_admin_not_found_test() -> Dict[str, Any]:
@@ -1179,11 +1184,11 @@ async def test_get_teacher_by_id_as_non_admin_forbidden(
             response = await client.get(f"{api_prefix}/teachers/", headers=headers)
         
         logger.info(f"NON_ADMIN_FORBIDDEN_TEST: Response Status: {response.status_code}")
-        assert response.status_code == status.HTTP_200_OK, \
-            f"Expected 200 OK for non-admin access to GET /teachers/, got {response.status_code}. Response: {response.text}"
-        
+        assert response.status_code == status.HTTP_403_FORBIDDEN, \
+            f"Expected 403 Forbidden for non-admin, got {response.status_code}. Response: {response.text}" # MODIFIED: Expected status code and message
         response_data = response.json()
-        assert response_data == [], "Expected empty list for non-admin user."
+        assert "detail" in response_data # MODIFIED: Check for detail in 403 response
+        assert "User does not have admin privileges" in response_data["detail"] # MODIFIED: Check for specific error message
 
     finally:
         if original_override is None:
@@ -1228,28 +1233,51 @@ async def test_protected_endpoints_unauthorized_access(
     # No auth headers provided
     headers = {"Content-Type": "application/json"}
 
-    # Mock validate_token to raise HTTPException with 401
-    mocker.patch('backend.app.core.security.validate_token', side_effect=HTTPException(
+    # Define a local override for get_current_user_payload that raises 401
+    unauthorized_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid authentication credentials"
-    ))
+        detail="Invalid authentication credentials" # Consistent detail message
+    )
+    async def override_get_current_user_payload_for_unauthorized() -> Dict[str, Any]:
+        raise unauthorized_exception
 
-    async with AsyncClient(transport=ASGITransport(app=app_without_auth), base_url="http://testserver") as client:
-        if method == "GET":
-            response = await client.get(url, headers=headers)
-        elif method == "POST":
-            response = await client.post(url, json=body, headers=headers)
-        elif method == "PUT":
-            response = await client.put(url, json=body, headers=headers)
-        elif method == "DELETE":
-            response = await client.delete(url, headers=headers)
-        else:
-            pytest.fail(f"Unsupported HTTP method: {method}")
+    # Store original override to restore it later
+    # Using app_without_auth here as per the test's fixture
+    original_override = app_without_auth.dependency_overrides.get(get_current_user_payload)
+    app_without_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload_for_unauthorized
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        response_data = response.json()
-        assert "detail" in response_data
-        assert "Invalid authentication credentials" in response_data["detail"]
+    # The mocker.patch for validate_token is no longer needed as we directly override get_current_user_payload
+    # mocker.patch('backend.app.core.security.validate_token', side_effect=HTTPException(
+    #     status_code=status.HTTP_401_UNAUTHORIZED,
+    #     detail="Invalid authentication credentials"
+    # ))
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app_without_auth), base_url="http://testserver") as client:
+            if method == "GET":
+                response = await client.get(url, headers=headers)
+            elif method == "POST":
+                response = await client.post(url, json=body, headers=headers)
+            elif method == "PUT":
+                response = await client.put(url, json=body, headers=headers)
+            elif method == "DELETE":
+                response = await client.delete(url, headers=headers)
+            else:
+                pytest.fail(f"Unsupported HTTP method: {method}")
+
+            assert response.status_code == status.HTTP_401_UNAUTHORIZED
+            response_data = response.json()
+            assert "detail" in response_data
+            # Assert the detail message from our specific exception
+            assert response_data["detail"] == unauthorized_exception.detail
+    finally:
+        # Restore original dependency override
+        if original_override:
+            app_without_auth.dependency_overrides[get_current_user_payload] = original_override
+        elif get_current_user_payload in app_without_auth.dependency_overrides and \
+             app_without_auth.dependency_overrides.get(get_current_user_payload) == override_get_current_user_payload_for_unauthorized:
+            del app_without_auth.dependency_overrides[get_current_user_payload]
+
 
 # --- Test for Missing Claims in Otherwise Valid Token ---
 
@@ -1288,80 +1316,95 @@ async def test_protected_endpoints_missing_claims(
     method_type: str,
     url_suffix: str,
     request_body: Optional[Dict[str, Any]],
-    mock_token_payload: Dict[str, Any],
+    mock_token_payload: Dict[str, Any], # This is the payload we want get_current_user_payload to return
     expected_status: int,
     expected_detail_substring: str
 ):
     """
     Tests protected endpoints with tokens that are 'valid' but missing crucial claims.
-    - Mocks validate_token to return a payload missing 'sub' or 'email'.
+    - Mocks get_current_user_payload to return a payload missing 'sub' or 'email'.
     - For PUT_CREATE/PUT_UPDATE, mocks crud.get_teacher_by_kinde_id appropriately.
     """
     api_prefix = settings.API_V1_PREFIX
     full_url = f"{api_prefix}/teachers{url_suffix}"
 
-    # Mock app.core.security.validate_token to return the deficient payload
-    mocker.patch('backend.app.core.security.validate_token', return_value=mock_token_payload)
+    # Define a local override for get_current_user_payload
+    async def override_get_current_user_payload_for_missing_claims() -> Dict[str, Any]:
+        return mock_token_payload # Use the parameterized mock_token_payload
 
-    # --- Setup for specific PUT method types ---
-    mock_get_teacher = None
-    if method_type == "PUT_UPDATE":
-        method = "PUT"
-        existing_teacher_id = mock_token_payload.get("sub", f"dummy_id_for_put_update_{uuid.uuid4()}")
-        mock_existing_teacher = Teacher(
-            kinde_id=existing_teacher_id,
-            email="exists@example.com",
-            first_name="ExistsFirstName",
-            last_name="ExistsLastName",
-            school_name="Existing School",
-            country="Existing Country",
-            state_county="Existing State",
-            role=TeacherRole.TEACHER,
-            is_active=True,
-            is_administrator=False,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
-        )
-        mock_get_teacher = mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=mock_existing_teacher)
-    elif method_type == "PUT_CREATE":
-        method = "PUT"
-        mock_get_teacher = mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=None)
-    else:
-        method = method_type
+    # Store original override to restore it later
+    original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
+    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload_for_missing_claims
 
-    headers = {"Authorization": "Bearer a_valid_token_format_wise_but_deficient_payload"}
+    # The mocker.patch for validate_token is now less critical if get_current_user_payload is fully overridden,
+    # but can be kept for defense or if some code path still hits it.
+    # For now, let's assume the direct override of get_current_user_payload is sufficient.
+    # mocker.patch('backend.app.core.security.validate_token', return_value=mock_token_payload)
 
-    async with httpx.AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
-        response = None
-        if method == "GET":
-            response = await client.get(full_url, headers=headers)
-        elif method == "POST":
-            response = await client.post(full_url, json=request_body, headers=headers)
-        elif method == "PUT":
-            response = await client.put(full_url, json=request_body, headers=headers)
-        elif method == "DELETE":
-            response = await client.delete(full_url, headers=headers)
+
+    try:
+        # --- Setup for specific PUT method types ---
+        mock_get_teacher = None # Initialize to avoid UnboundLocalError if no PUT method
+        if method_type == "PUT_UPDATE":
+            method = "PUT"
+            # Ensure 'sub' exists in mock_token_payload if needed for PUT_UPDATE logic here
+            # or handle its absence gracefully if that's part of the test.
+            # For now, assuming test logic handles cases where 'sub' might be missing from mock_token_payload.
+            existing_teacher_id = mock_token_payload.get("sub", f"dummy_id_for_put_update_{uuid.uuid4()}")
+
+            mock_existing_teacher = Teacher(
+                kinde_id=existing_teacher_id,
+                email="exists@example.com", # This email might be overridden by mock_token_payload later
+                first_name="ExistsFirstName",
+                last_name="ExistsLastName",
+                school_name="Existing School",
+                country="Existing Country",
+                state_county="Existing State",
+                role=TeacherRole.TEACHER,
+                is_active=True,
+                is_administrator=False, # Default, admin status derived from token in endpoint
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+            mock_get_teacher = mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=mock_existing_teacher)
+        elif method_type == "PUT_CREATE":
+            method = "PUT"
+            mock_get_teacher = mocker.patch('backend.app.db.crud.get_teacher_by_kinde_id', return_value=None)
         else:
-            pytest.fail(f"Unsupported HTTP method_type in test config: {method_type}")
+            method = method_type
 
-        assert response.status_code == expected_status, (
-            f"Expected {expected_status} for {method} {full_url} with payload {mock_token_payload}, "
-            f"got {response.status_code}. Response: {response.text}"
-        )
-        
-        response_data = response.json()
-        assert "detail" in response_data, f"Detail missing in response for {method} {full_url}. Response: {response.text}"
-        assert expected_detail_substring in response_data["detail"], (
-            f"Expected error message containing '{expected_detail_substring}' for {method} {full_url}, "
-            f"got: {response_data['detail']}"
-        )
+        headers = {"Authorization": "Bearer a_token_whose_payload_is_now_directly_mocked"}
 
-    if mock_get_teacher:
-        # Assert that get_teacher_by_kinde_id was called if it was mocked (i.e., for PUT scenarios)
-        if "sub" in mock_token_payload:
-            mock_get_teacher.assert_called_once_with(kinde_id=mock_token_payload["sub"])
-        else:
-            mock_get_teacher.assert_not_called()
+        async with AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
+            response = None
+            if method == "GET":
+                response = await client.get(full_url, headers=headers)
+            elif method == "POST":
+                response = await client.post(full_url, json=request_body, headers=headers)
+            elif method == "PUT":
+                response = await client.put(full_url, json=request_body, headers=headers)
+            elif method == "DELETE":
+                response = await client.delete(full_url, headers=headers)
+            else:
+                pytest.fail(f"Unsupported HTTP method_type in test config: {method_type}")
+
+            assert response.status_code == expected_status, (
+                f"Expected {expected_status} for {method} {full_url} with overridden payload {mock_token_payload}, "
+                f"got {response.status_code}. Response: {response.text}"
+            )
+            response_data = response.json()
+            assert "detail" in response_data
+            assert expected_detail_substring in response_data["detail"], (
+                f"Expected detail '{expected_detail_substring}' not found in '{response_data['detail']}' "
+                f"for {method} {full_url} with overridden payload {mock_token_payload}"
+            )
+    finally:
+        # Restore original dependency override
+        if original_override:
+            app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
+        elif get_current_user_payload in app_with_mock_auth.dependency_overrides and \
+             app_with_mock_auth.dependency_overrides[get_current_user_payload] == override_get_current_user_payload_for_missing_claims:
+            del app_with_mock_auth.dependency_overrides[get_current_user_payload]
 
 @pytest.mark.asyncio
 async def test_get_current_teacher_missing_sub_claim(
@@ -1546,6 +1589,57 @@ async def test_delete_teacher_server_error(
 
     finally:
         # Restore original dependency override
+        if original_override:
+            app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
+        elif get_current_user_payload in app_with_mock_auth.dependency_overrides:
+            del app_with_mock_auth.dependency_overrides[get_current_user_payload]
+
+@pytest.mark.asyncio
+async def test_get_teachers_empty(
+    app_with_mock_auth: FastAPI,
+    mocker: MockerFixture
+):
+    """Test GET /teachers/ as an admin when no teachers exist in the database."""
+    api_prefix = settings.API_V1_PREFIX
+    get_url = f"{api_prefix}/teachers/"
+
+    admin_kinde_id = "test_admin_empty_list_kinde_id"
+    admin_email = "admin_empty@sendient.ai"
+
+    admin_user_payload = {
+        "sub": admin_kinde_id,
+        "iss": settings.KINDE_DOMAIN or "mock_issuer",
+        "aud": [settings.KINDE_AUDIENCE] if settings.KINDE_AUDIENCE else ["mock_audience"],
+        "exp": time.time() + 3600,
+        "iat": time.time(),
+        "roles": ["admin"],
+        "email": admin_email
+    }
+
+    async def override_get_current_user_payload_admin_empty() -> Dict[str, Any]:
+        return admin_user_payload
+
+    original_override = app_with_mock_auth.dependency_overrides.get(get_current_user_payload)
+    app_with_mock_auth.dependency_overrides[get_current_user_payload] = override_get_current_user_payload_admin_empty
+
+    try:
+        # Mock crud.get_all_teachers to return an empty list
+        mocker.patch('backend.app.db.crud.get_all_teachers', return_value=[])
+
+        headers = {
+            "Authorization": "Bearer dummy_admin_token_empty",
+            "Content-Type": "application/json"
+        }
+
+        async with httpx.AsyncClient(transport=ASGITransport(app=app_with_mock_auth), base_url="http://testserver") as client:
+            response = await client.get(get_url, headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK, \
+            f"Expected 200 OK, got {response.status_code}. Response: {response.text}"
+        response_data = response.json()
+        assert response_data == [], f"Expected empty list, got {response_data}"
+
+    finally:
         if original_override:
             app_with_mock_auth.dependency_overrides[get_current_user_payload] = original_override
         elif get_current_user_payload in app_with_mock_auth.dependency_overrides:

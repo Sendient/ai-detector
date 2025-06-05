@@ -47,8 +47,6 @@ async def create_new_student(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
     logger.info(f"User {user_kinde_id} attempting to create student: {student_in.first_name} {student_in.last_name}")
-    # TODO: Add authorization check - does this user (teacher/admin) have permission to add students?
-    # (e.g., are they adding to a class/school they manage?)
 
     created_student = await crud.create_student(student_in=student_in, teacher_id=user_kinde_id)
     if created_student is None:

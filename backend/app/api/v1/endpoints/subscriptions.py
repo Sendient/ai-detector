@@ -4,14 +4,12 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 import stripe # Stripe library for payment processing
-from motor.motor_asyncio import AsyncIOMotorDatabase # For type hinting DB if needed
 
 # Adjusted import paths to be relative to the current file's location (endpoints/subscriptions.py)
 from ....core.config import settings # Your application settings
 from ....db import crud # Your CRUD operations
 from ....models.teacher import Teacher, TeacherUpdate # Teacher Pydantic model
 from ...deps import get_current_teacher # Kinde auth dependency
-from ....db.database import get_database # Import your database dependency function
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +30,6 @@ class PortalSessionResponse(BaseModel):
     """
     url: str
 
-class CreateCheckoutSessionRequest(BaseModel):
-    """
-    Request model for creating a checkout session.
-    """
-    pass
-
 
 # --- API Endpoint ---
 @router.post(
@@ -48,8 +40,7 @@ class CreateCheckoutSessionRequest(BaseModel):
 )
 async def create_checkout_session(
     *,
-    current_teacher: Teacher = Depends(get_current_teacher),
-    db: AsyncIOMotorDatabase = Depends(get_database) # Inject DB session for CRUD operations
+    current_teacher: Teacher = Depends(get_current_teacher)
 ):
     """
     Creates a Stripe Checkout Session to allow the currently authenticated teacher
@@ -189,13 +180,6 @@ async def create_portal_session(
 
     frontend_base_url = settings.FRONTEND_URL or os.getenv("FRONTEND_URL", "http://localhost:5173")
     return_url = f"{frontend_base_url}/account/billing"
-
-    # ---- START TEMPORARY DEBUG LOGGING ----
-    logger.info(f"DEBUG: settings.FRONTEND_URL value: {settings.FRONTEND_URL}")
-    logger.info(f"DEBUG: os.getenv('FRONTEND_URL') value: {os.getenv('FRONTEND_URL')}")
-    logger.info(f"DEBUG: Calculated frontend_base_url: {frontend_base_url}")
-    logger.info(f"DEBUG: Final return_url being passed to Stripe: {return_url}")
-    # ---- END TEMPORARY DEBUG LOGGING ----
 
     try:
         logger.info(f"Creating Stripe Customer Portal session for customer {current_teacher.stripe_customer_id}. Return URL: {return_url}")
