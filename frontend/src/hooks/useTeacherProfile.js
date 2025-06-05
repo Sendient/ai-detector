@@ -97,9 +97,9 @@ export function useTeacherProfile() {
     }, [isAuthenticated, isAuthLoading, user?.id, getAccessToken, t, checkProfileCompletion, API_BASE_URL]);
 
     useEffect(() => {
-        console.log('[useTeacherProfile] Outer useEffect triggered. Pathname:', location.pathname, 'IsAuthenticated:', isAuthenticated, 'User ID:', user?.id, 'IsAuthLoading:', isAuthLoading);
+        console.log('[useTeacherProfile] Outer useEffect triggered. IsAuthenticated:', isAuthenticated, 'User ID:', user?.id, 'IsAuthLoading:', isAuthLoading);
         if (isAuthenticated && user?.id) {
-            console.log('[useTeacherProfile] Outer useEffect: Calling fetchProfile due to auth/user/path change.');
+            console.log('[useTeacherProfile] Outer useEffect: Calling fetchProfile due to auth/user change.');
             fetchProfile();
         } else if (!isAuthLoading && !isAuthenticated) {
             console.log('[useTeacherProfile] Outer useEffect: User not authenticated and auth not loading. Resetting profile state.');
@@ -108,7 +108,7 @@ export function useTeacherProfile() {
             setProfileError(null);
             setIsProfileComplete(false);
         }
-    }, [isAuthenticated, user?.id, isAuthLoading, fetchProfile, location.pathname]);
+    }, [isAuthenticated, user?.id, isAuthLoading, fetchProfile]);
 
     // Log state changes for debugging
     useEffect(() => {
