@@ -46,7 +46,7 @@ function ProfilePage() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useKindeAuth();
     const navigate = useNavigate();
-    const { currentUser, setCurrentUser, loading: authContextLoading, error: authContextError } = useAuth();
+    const { currentUser, setCurrentUser, loading: authContextLoading } = useAuth();
 
     const [formData, setFormData] = useState(initialProfileData);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -88,6 +88,8 @@ function ProfilePage() {
                 last_name: (currentUser.last_name && currentUser.last_name !== 'Not Specified') 
                              ? currentUser.last_name 
                              : (prev.last_name && prev.last_name !== 'Not Specified' ? prev.last_name : currentUser.last_name || ''),
+                school_name: (currentUser.school_name && currentUser.school_name !== 'Not Specified') ? currentUser.school_name : '',
+                state_county: (currentUser.state_county && currentUser.state_county !== 'Not Specified') ? currentUser.state_county : '',
             }));
         }
     }, [currentUser, authContextLoading]);
@@ -138,7 +140,7 @@ function ProfilePage() {
                 try {
                     const errorData = await putResponse.json();
                     errorDetail = errorData.detail || errorDetail;
-                } catch (e) {
+                } catch {
                      errorDetail = `${putResponse.status} ${putResponse.statusText}`;
                 }
                 throw new Error(t('messages_profile_error_saveFailed', { detail: errorDetail }));
@@ -158,7 +160,7 @@ function ProfilePage() {
                 try {
                     const errorData = await getResponse.json();
                     getErrorDetail = errorData.detail || getErrorDetail;
-                } catch (e) {
+                } catch {
                     getErrorDetail = `${getResponse.status} ${getResponse.statusText}`;
                 }
                 // If fetching the updated profile fails, we still set success for the save,
