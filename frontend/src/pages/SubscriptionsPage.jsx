@@ -1,7 +1,6 @@
 // frontend/src/pages/SubscriptionsPage.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { loadStripe } from '@stripe/stripe-js'; // For Stripe.js
@@ -21,7 +20,6 @@ function SubscriptionsPage() {
     const { t } = useTranslation();
     const { getAccessToken } = useKindeAuth();
     const { currentUser, loading: authContextLoading, error: authContextError } = useAuth();
-    const navigate = useNavigate();
 
     const [isProcessing, setIsProcessing] = useState(false);
     const [apiError, setApiError] = useState(null);
@@ -133,7 +131,7 @@ function SubscriptionsPage() {
                 let errorData;
                 try {
                     errorData = await response.json();
-                } catch (e) {
+                } catch {
                     // Ignore if response is not JSON
                 }
                 const errorMessage = errorData?.detail || response.statusText || t('messages_error_create_checkout_failed', 'Failed to create checkout session.');
@@ -190,7 +188,7 @@ function SubscriptionsPage() {
                 let errorData;
                 try {
                     errorData = await response.json();
-                } catch (e) {
+                } catch {
                     // Ignore if response is not JSON
                 }
                 const errorMessage = errorData?.detail || response.statusText || t('messages_error_create_portal_failed', 'Failed to create customer portal session.');
@@ -214,7 +212,9 @@ function SubscriptionsPage() {
         }
     };
 
-    const handleContactSchools = () => { navigate('/contact-us'); };
+    const handleContactSchools = () => {
+        window.location.href = 'mailto:hello@smartdetector.ai';
+    };
 
     // Determine current plan to adjust button text or highlight
     const currentPlanId = currentUser?.current_plan?.toUpperCase();
@@ -248,23 +248,18 @@ function SubscriptionsPage() {
                                 // No button for Free if not current plan, or specific downgrade logic if needed
                                 <span className="text-sm italic">{t('subscriptions_free_info', 'Basic access features.')}</span>
                             )}
-                            {tier.planId === 'PRO' && currentPlanId === 'PRO' && (
-                                <button onClick={handleManageSubscription} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing}>
-                                    {isProcessing ? <span className="loading loading-spinner"></span> : t('subscriptions_button_managePro', 'Manage Pro Plan')}
-                                </button>
-                            )}
                             {tier.planId === 'PRO' && currentPlanId !== 'PRO' && (
-                                <button onClick={handleUpgradeToPro} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing || currentPlanId === 'SCHOOLS'}>
-                                    {isProcessing ? <span className="loading loading-spinner"></span> : t('subscriptions_button_upgradeToPro', 'Upgrade to Pro')}
+                                <button className={`btn w-full ${tier.buttonClass}`} onClick={handleUpgradeToPro} disabled={isProcessing}>
+                                    {isProcessing ? t('subscriptions_button_processing', 'Processing...') : t('subscriptions_button_upgradeToPro', 'Upgrade to Pro')}
                                 </button>
                             )}
-                            {tier.planId === 'SCHOOLS' && currentPlanId === 'SCHOOLS' && (
-                                 <button onClick={handleManageSubscription} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing}>
-                                    {isProcessing ? <span className="loading loading-spinner"></span> : t('subscriptions_button_manageSchools', 'Manage Schools Plan')}
+                            {tier.planId === 'PRO' && currentPlanId === 'PRO' && (
+                                <button className={`btn w-full ${tier.buttonClass}`} onClick={handleManageSubscription} disabled={isProcessing}>
+                                    {isProcessing ? t('subscriptions_button_processing', 'Processing...') : t('subscriptions_button_manageSubscription', 'Manage Subscription')}
                                 </button>
                             )}
-                            {tier.planId === 'SCHOOLS' && currentPlanId !== 'SCHOOLS' && (
-                                <button onClick={handleContactSchools} className={`btn ${tier.buttonClass} w-full`} disabled={isProcessing}>
+                            {tier.planId === 'SCHOOLS' && (
+                                <button className={`btn w-full ${tier.buttonClass}`} onClick={handleContactSchools}>
                                     {t('subscriptions_button_contactForSchools', 'Contact for Schools')}
                                 </button>
                             )}
@@ -299,6 +294,10 @@ function SubscriptionsPage() {
                         ))}
                     </React.Fragment>
                 ))}
+            </div>
+
+            <div className="mt-10 sm:mt-16 border-t pt-6">
+                {/* Rest of the component content remains unchanged */}
             </div>
         </div>
     );
