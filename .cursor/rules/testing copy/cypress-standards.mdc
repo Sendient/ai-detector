@@ -1,0 +1,166 @@
+---
+description:
+globs: cypress/**/*.ts
+alwaysApply: false
+---
+# Cypress Testing Standards
+
+This document outlines the standards and best practices for creating and organizing Cypress tests in the Platform UI Vite project.
+
+## File Structure
+
+The Cypress directory is structured as follows:
+
+- `cypress/e2e/` - Contains all end-to-end test files.
+  - Test files should use the `.cy.ts` extension.
+  - Naming convention for test files: `ComponentName.cy.ts` or `FeatureName.cy.ts`.
+  - Tests should be grouped by feature or user flow within this directory.
+- `cypress/fixtures/` - Stores mock data or fixed datasets used by tests (e.g., JSON files).
+- `cypress/support/` - Contains reusable custom commands, global configurations, and utility functions that extend Cypress's behavior. This includes `commands.ts` and `e2e.ts`.
+- `cypress/utils/` - Contains testing utility functions, helpers, page objects, and mock data generators.
+- `cypress/screenshots/` - Default folder where Cypress saves screenshots taken during test runs (e.g., on failure or manually).
+- `cypress/videos/` - Default folder where Cypress saves videos of test runs.
+
+## Test Organization
+
+- Group tests by feature or user journey
+- Use clear, descriptive test names
+- Organize tests hierarchically
+- Include different states and variants of components
+
+## Common Utilities
+
+Create reusable utilities in `cypress/utils` for:
+
+- Test helpers
+- Common assertions
+- Page objects
+- Mock data generators
+
+Custom Cypress commands are typically located in `cypress/support/commands.ts`.
+
+Example utility files for `cypress/utils`:
+- `mockData.ts` - Contains factory functions for generating mock data
+- `selectors.ts` - Common selectors used across tests (if applicable, otherwise this can be removed or adapted)
+- `helpers.ts` - Testing utility functions
+
+## Test Structure
+
+```typescript
+// Example Cypress test structure
+describe('Feature: User Authentication', () => {
+  beforeEach(() => {
+    // Setup code
+    cy.visit('/login');
+  });
+
+  it('should allow a user to log in with valid credentials', () => {
+    // Test code
+    cy.getByDataCy('login-email-input').type('user@example.com');
+    cy.getByDataCy('login-password-input').type('password123');
+    cy.getByDataCy('login-submit-button').click();
+
+    // Assertions
+    cy.url().should('include', '/dashboard');
+    cy.getByDataCy('dashboard-welcome-message').should('contain', 'Welcome');
+  });
+
+  it('should show an error message with invalid credentials', () => {
+    // Test code
+    cy.getByDataCy('login-email-input').type('invalid@example.com');
+    cy.getByDataCy('login-password-input').type('wrongpassword');
+    cy.getByDataCy('login-submit-button').click();
+
+    // Assertions
+    cy.getByDataCy('login-error-message').should('be.visible');
+    cy.getByDataCy('login-error-message').should('contain', 'Invalid credentials');
+  });
+});
+```
+
+## Best Practices
+
+- Primarily use `data-cy` attributes for robust element selection. Other selectors like IDs or specific, stable classes can be used where appropriate.
+- Avoid using highly dynamic CSS selectors that are prone to change with UI refactoring.
+- Write tests that are independent of each other
+- Keep tests focused on a single feature or behavior
+- Use fixtures for test data
+- Mock API responses when appropriate
+- Test edge cases and error states
+- Use custom commands for common operations
+- Implement proper assertions
+- Use proper waiting strategies
+  - Intercept and stub network requests when appropriate
+  - Use aliases with `cy.intercept()` for better control of test flow
+  - Mock API responses for testing edge cases and error states
+
+## Testing Patterns
+
+### Page Object Pattern
+
+```typescript
+// cypress/support/pageObjects/LoginPage.ts (or cypress/utils/pageObjects/LoginPage.ts)
+export class LoginPage {
+  visit() {
+    cy.visit('/login');
+    return this;
+  }
+
+  fillEmail(email: string) {
+    cy.getByDataCy('login-email-input').type(email);
+    return this;
+  }
+
+  fillPassword(password: string) {
+    cy.getByDataCy('login-password-input').type(password);
+    return this;
+  }
+
+  submit() {
+    cy.getByDataCy('login-submit-button').click();
+    return this;
+  }
+
+  getErrorMessage() {
+    return cy.getByDataCy('login-error-message');
+  }
+}
+
+// Usage in test
+const loginPage = new LoginPage();
+loginPage.visit().fillEmail('user@example.com').fillPassword('password123').submit();
+```
+
+### Custom Commands
+
+```typescript
+// cypress/support/commands.ts
+Cypress.Commands.add('login', (email, password) => {
+  cy.visit('/login');
+  cy.getByDataCy('login-email-input').type(email);
+  cy.getByDataCy('login-password-input').type(password);
+  cy.getByDataCy('login-submit-button').click();
+});
+
+// Usage in test
+cy.login('user@example.com', 'password123');
+```
+
+## Visual Testing
+
+- Use Cypress's screenshot functionality for visual testing
+- Compare screenshots for visual regression testing
+- Capture screenshots at critical points in tests
+
+## Performance Testing
+
+- Measure page load times
+- Test application performance under load
+- Monitor network requests and response times
+
+## Accessibility Testing
+
+- Test keyboard navigation
+- Verify screen reader compatibility
+- Check for proper ARIA attributes
+- Ensure proper color contrast

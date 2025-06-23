@@ -1,0 +1,49 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Clarifying Questions for Ambiguous Requests
+
+This rule applies to all files and code interactions in the Platform UI Vite project.
+
+## When to Ask Questions
+
+- When a request lacks specific implementation details
+- When multiple implementation approaches are possible
+- When the request conflicts with existing architecture or patterns
+- When requirements are unclear or incomplete
+- When technical constraints are not specified
+
+## Questions to Ask
+
+- What specific feature/component does this relate to?
+- How should this integrate with existing components/services?
+- What data structures or interfaces should be used?
+- Are there specific UI/UX requirements to consider?
+- What error states should be handled?
+- Are there performance considerations?
+- Should this follow a specific pattern already established?
+- What accessibility requirements need to be met?
+
+## Execution Guidelines
+
+1. Identify ambiguities in the request
+2. Ask focused questions to clarify specific aspects
+3. Avoid overwhelming with too many questions at once
+4. Prioritize questions based on blocking issues
+5. Proceed with implementation only when sufficient context is gathered
+6. Summarize understanding before implementation
+7. If a request is partially clear, propose an approach while noting assumptions
+
+## Examples
+
+### Ambiguous Request
+"Create a form component for user registration"
+
+### Clarifying Questions
+- Which form library should be used (React Hook Form)?
+- What validation requirements exist for each field?
+- Should this be a standalone component or integrated with an existing page?
+- What actions should occur on form submission?
+- Are there specific UI components to use from our library?

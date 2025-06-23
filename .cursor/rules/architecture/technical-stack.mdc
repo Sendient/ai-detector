@@ -1,0 +1,86 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Technical Stack
+
+This document outlines the technical stack and dependencies used in the Platform UI Vite project.
+
+## Core Technologies
+
+### Framework and Runtime
+- Vite 5.0.8
+- React 18.2.0
+- TypeScript 5.2.2
+
+### UI and Styling
+- Tailwind CSS 3.4.17
+- DaisyUI 4.12.24
+- Custom UI components
+- clsx for class composing
+- Heroicons for icon set
+- recharts for charts
+
+### State Management
+- Redux Toolkit
+
+### Form Handling
+- React Hook Form
+- Zod for validation
+
+### Testing
+- Cypress
+- React Testing Library
+
+## Key Dependencies
+
+### Development
+- TypeScript
+- ESLint
+- Prettier
+- Husky
+- eslint-plugin-simple-import-sort
+
+### Build Tools
+- Vite
+- Tailwind CSS
+- PostCSS
+- Autoprefixer
+
+### Testing
+- Cypress
+- vite-plugin-svgr
+
+### Code Quality
+- ESLint
+- Prettier
+- TypeScript
+- Husky for commit hooks
+
+## Version Control
+- Git
+- GitHub
+
+## Development Environment
+- Node.js
+- npm
+- VS Code
+- Cursor IDE
+
+## Deployment
+- Azure
+- GitHub Actions
+- Environment Variables
+
+## Monitoring and Analytics
+- Sentry
+- FullStory
+- Google Analytics (react-ga4)
+
+## Internationalization
+- i18next
+- react-i18next
+
+## Authentication
+- Kinde Auth

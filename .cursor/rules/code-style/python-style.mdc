@@ -1,0 +1,60 @@
+---
+description:
+globs: *.py
+alwaysApply: false
+---
+# Python Code Style Guide
+
+## General Style
+
+1. Follow PEP 8 guidelines
+2. Use type hints for all function parameters and return values
+3. Use Pydantic models for data validation
+4. Use enums for fixed sets of values
+5. Use dataclasses for simple data structures
+
+## Naming Conventions
+
+1. Classes: PascalCase
+   ```python
+   class UserProfile(BaseModel):
+       pass
+   ```
+
+2. Functions and Variables: snake_case
+   ```python
+   def process_user_data(user_id: str) -> None:
+       pass
+   ```
+
+3. Constants: UPPER_SNAKE_CASE
+   ```python
+   VALID_EXTENSIONS = {".pdf", ".docx"}
+   ```
+
+4. Private Methods: _prefix
+   ```python
+   def _internal_helper():
+       pass
+   ```
+
+## Code Organization
+
+1. Imports Order:
+   - Standard library
+   - Third-party packages
+   - Local modules
+
+2. Class Structure:
+   - Class docstring
+   - Class variables
+   - __init__ method
+   - Public methods
+   - Private methods
+
+3. File Organization:
+   - Imports
+   - Constants
+   - Classes
+   - Functions
+   - Main execution block

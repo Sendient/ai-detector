@@ -1,0 +1,30 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Data Flow Architecture
+
+## Request Flow
+
+1. User requests enter through Platform API
+2. Long-running tasks are queued via Queue Orchestrator
+3. Queue Processor handles background processing
+4. Results are stored and returned to users
+5. Stats Collector tracks system metrics
+
+## Integration Points
+
+1. MongoDB for data storage
+2. Azure Blob Storage for file storage
+3. Azure Queues for message handling
+4. AI models for processing
+5. Stripe for payment processing
+
+## Development Guidelines
+
+1. New features should be implemented in the appropriate service
+2. Use queues for long-running operations
+3. Follow the established data flow patterns
+4. Maintain separation of concerns
+5. Use appropriate storage solutions for different data types

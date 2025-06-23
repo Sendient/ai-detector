@@ -1,0 +1,82 @@
+---
+description:
+globs: **/test/**/*.py,**/tests/**/*.py
+alwaysApply: false
+---
+# Testing Best Practices
+
+## Test Writing
+
+1. Use pytest fixtures for setup
+   ```python
+   @pytest.fixture
+   def test_user():
+       return User(id="test123")
+   ```
+
+2. Use parametrized tests using `pytest.param` for multiple cases, with ids that describe in ~3 words what the case is about
+   ```python
+   @pytest.mark.parametrize("input,expected", [
+       pytest.param("test1", "result1", id="meaningful-id-1"),
+       pytest.param("test2", "result2", id="meaningful-id-2"),
+   ])
+   def test_multiple_cases(input, expected):
+       assert process(input) == expected
+   ```
+
+3. Mock external dependencies
+   ```python
+   @pytest.fixture
+   def mock_db(monkeypatch):
+       mock = Mock()
+       monkeypatch.setattr("module.db", mock)
+       return mock
+   ```
+
+4. Use appropriate assertions
+   ```python
+   assert result == expected
+   assert isinstance(result, str)
+   assert len(result) > 0
+   ```
+
+## Test Data
+
+1. Look at appropriate conftest.py files before creating new fixtures
+2. Use fixtures for test data
+3. Clean up after tests
+4. Use meaningful test data
+5. Avoid hardcoding values
+6. Use factories for complex objects
+
+## Test Coverage
+
+1. Aim for high coverage
+2. Focus on critical paths
+3. Test edge cases
+4. Test error conditions
+5. Test async code properly
+
+## Running Tests
+`uv` is used in this repository, so test commands must be run with `uv run`. We also use .env files with dotenv so we often need to import the right env. E.g. assuming you are in the root directory of this git repo, for some specific platform API test, we might run
+```bash
+uv run dotenv -f platform_api/.env run uv run python -m pytest platform_api/test/unit_tests/submissions_test.py -k "no-status" -v
+```
+or for a queue_processor test we could run
+```bash
+uv run dotenv -f queue_processor/.env run uv run python -m pytest queue_processor/ tests -k test_assess_answer_table_in_markscheme_context
+```
+
+If you need to run integration tests, you should ask the user to run them as they can be costly and a human should be in charge of that.
+
+If you ever hit errors with packages not found, e.g.
+```
+ImportError while loading conftest '/home/nasfarley88/git/smart-educator/queue_processor/test/conftest.py'.
+queue_processor/test/conftest.py:7: in <module>
+    from azure.storage.blob import BlobServiceClient
+E   ModuleNotFoundError: No module named 'azure'
+```
+then you can update the dependencies with make, e.g.
+```bash
+make lock
+```

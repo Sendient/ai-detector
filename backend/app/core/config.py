@@ -77,6 +77,23 @@ class Settings(BaseSettings):
     #     env_file_encoding = "utf-8"
     #     extra = 'ignore'
 
+    @model_validator(mode='after')
+    def validate_stripe_keys(self):
+        """Validate that Stripe keys are not placeholders and have valid prefixes."""
+        if self.STRIPE_SECRET_KEY:
+            # Case-insensitive check for placeholders
+            is_placeholder = self.STRIPE_SECRET_KEY.lower() in ("aaa", "your_stripe_secret_key")
+            
+            # Case-sensitive check for valid prefixes, as Stripe keys are case-sensitive
+            is_invalid_prefix = not (self.STRIPE_SECRET_KEY.startswith("sk_live_") or self.STRIPE_SECRET_KEY.startswith("sk_test_"))
+            
+            if is_placeholder or is_invalid_prefix:
+                raise ValueError(
+                    f"Invalid STRIPE_SECRET_KEY configured: '{self.STRIPE_SECRET_KEY}'. It appears to be a placeholder or has an invalid format. "
+                    "Please check your environment configuration (e.g., .env or Azure Key Vault)."
+                )
+        return self
+        
     @model_validator(mode='before')
     @classmethod
     def load_deprecated_db_env_vars(cls, values: Dict[str, Any]) -> Dict[str, Any]:

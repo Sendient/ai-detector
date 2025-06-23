@@ -1,0 +1,41 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# System Components Architecture
+
+## Core Services
+
+1. Platform API (`platform_api/`)
+   - Main Azure Function App
+   - Handles HTTP requests
+   - Manages user interactions
+   - Integrates with other services
+
+2. Queue Orchestrator (`queue_orchestrator/`)
+   - Manages message queues
+   - Coordinates task distribution
+   - Handles service orchestration
+
+3. Queue Processor (`queue_processor/`)
+   - Processes queue messages
+   - Handles background tasks
+   - Manages asynchronous operations
+
+4. Stats Collector (`stats_collector/`)
+   - Collects system statistics
+   - Tracks usage metrics
+   - Generates analytics
+
+## Supporting Services
+
+1. File Converter (`file_converter/`)
+   - Handles file format conversions
+   - Manages document processing
+   - Supports multiple file types
+
+2. Infrastructure (`bicep/`)
+   - Azure infrastructure as code
+   - Environment configurations
+   - Resource definitions

@@ -1,0 +1,68 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Development Setup Guide
+
+## Prerequisites
+
+1. Git - [Download](https://git-scm.com/downloads)
+2. Python 3.11 - [Download](https://www.python.org/downloads)
+3. Docker - [Get Started](https://www.docker.com/get-started)
+4. make
+   - Windows: [GNU Make for Windows](https://gnuwin32.sourceforge.net/packages/make.htm)
+   - Mac: `brew install make`
+   - Linux: `sudo apt-get install make`
+5. Azure Functions Tools - [Install Guide](https://learn.microsoft.com/en-us/azure/azure-functions/functions-run-local)
+6. uv - [Install Guide](https://docs.astral.sh/uv/getting-started/installation)
+
+## Setup Steps
+
+1. Clone the repository
+2. Create and activate virtual environment:
+   ```bash
+   uv venv
+   ```
+3. Install dependencies and setup pre-commit hooks:
+   ```bash
+   make
+   ```
+
+## Running the Application
+
+1. Start the local development server:
+   ```bash
+   make local-server
+   ```
+   This will:
+   - Start required Docker containers
+   - Launch the Azure Functions server
+   - Set up local emulation of Azure services
+
+2. For code updates:
+   - Run `make reset` to tear down containers
+   - Run `make local-server` to restart
+
+3. For Docker image updates:
+   - Run `make rebuild` to rebuild images
+
+## Environment Variables
+
+- Create a `.env` file in the project root
+- For commands outside VSCode terminal, prefix with `dotenv run --`
+- Set `USE_DEVELOPMENT_MODE=true` for submission ingestion to use Azurite queues
+
+## Testing
+
+- Unit tests: `make test`
+- End-to-end tests:
+  1. Start server: `make local-server`
+  2. Run tests: `make e2e`
+  3. Run specific test: `make e2e -k test_name`
+
+## Code Quality
+
+- Linting: `make lint`
+- Pre-commit hooks are automatically installed with `make`
+- See [pyproject.toml](mdc:pyproject.toml) for linting rules

@@ -1,0 +1,79 @@
+---
+description:
+globs: *.py
+alwaysApply: false
+---
+# Logging Usage Guide
+
+## Log Levels
+
+Use appropriate log levels:
+
+1. DEBUG: Detailed information for debugging
+   ```python
+   logger.debug("Processing user data", user_id=user_id)
+   ```
+
+2. INFO: General operational information
+   ```python
+   logger.info("User logged in", user_id=user_id)
+   ```
+
+3. WARNING: Unexpected but handled situations
+   ```python
+   logger.warning("Rate limit exceeded", user_id=user_id)
+   ```
+
+4. ERROR: Errors that need attention
+   ```python
+   logger.error("Database connection failed", error=str(e))
+   ```
+
+5. CRITICAL: System-level errors
+   ```python
+   logger.critical("Database cluster down")
+   ```
+
+## Best Practices
+
+1. Use structured logging
+   ```python
+   logger.info("User action", action="login", user_id=user_id)
+   ```
+
+2. Include context in log messages
+   ```python
+   logger.error("Payment failed",
+                user_id=user_id,
+                amount=amount,
+                error=str(e))
+   ```
+
+3. Use appropriate log levels
+4. Don't log sensitive information
+5. Include relevant context
+6. Use consistent message format
+7. Log exceptions with traceback
+8. Use bound loggers for context
+9. When using structlog, do not include dynamic information in the message, instead include it as keyword arguments (as above)
+
+## Logging Decorators
+
+Use the provided logging decorators:
+
+```python
+@log_function_call
+def process_data(data: dict) -> None:
+    pass
+
+@log_coroutine_call
+async def process_data_async(data: dict) -> None:
+    pass
+```
+
+## Logging in Tests
+
+1. Use pytest's logging configuration
+2. Set appropriate log levels for tests
+3. Capture and verify log messages
+4. Use test-specific log handlers

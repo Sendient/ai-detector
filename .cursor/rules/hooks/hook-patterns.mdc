@@ -1,0 +1,226 @@
+---
+description:
+globs: *.tsx
+alwaysApply: false
+---
+# Hook Patterns
+
+This document outlines the patterns and best practices for creating and using React hooks in the Platform UI Vite project.
+
+## Hook Purpose
+
+- **Extract component logic**: Hooks should extract and encapsulate reusable logic from components
+- **Promote reusability**: Create hooks that can be used across multiple components
+- **Separate concerns**: Keep business logic separate from presentation
+- **Reduce component complexity**: Move complex logic out of components to improve readability and testability
+
+## Naming Conventions
+
+- All custom hooks must start with `use` prefix
+- Use camelCase for hook names
+- Name hooks based on their functionality
+- Be descriptive and specific in naming
+
+Examples:
+- `useAuth` - Authentication related logic
+- `useFetchData` - Data fetching logic
+- `useFormValidation` - Form validation logic
+- `useLocalStorage` - Local storage interaction
+
+## Hook Structure
+
+```typescript
+// Basic hook structure
+import { useState, useEffect } from 'react';
+import { HookParams, HookResult } from './interfaces';
+
+export const useCustomHook = (params: HookParams): HookResult => {
+  // State declarations
+  const [state, setState] = useState<StateType>(initialState);
+
+  // Effects
+  useEffect(() => {
+    // Effect logic
+    return () => {
+      // Cleanup logic
+    };
+  }, [dependencies]);
+
+  // Memoized values
+
+  // Helper functions
+
+  // Return values/functions
+  return {
+    state,
+    updateState: setState,
+    // Other values/functions
+  };
+};
+```
+
+## Type Definitions
+
+- Define explicit types for hook parameters and return values
+- Keep type definitions in a separate `interfaces` directory
+- Use descriptive interface names
+- Document type definitions with JSDoc comments
+
+```typescript
+// interfaces/useCustomHook.interfaces.ts
+export interface HookParams {
+  initialValue: string;
+  config?: {
+    delay?: number;
+    maxRetries?: number;
+  };
+}
+
+export interface HookResult {
+  value: string;
+  loading: boolean;
+  error: Error | null;
+  setValue: (value: string) => void;
+  refresh: () => void;
+}
+```
+
+## Best Practices
+
+- Keep hooks focused on a single concern
+- Compose complex hooks from simpler hooks
+- Extract common logic into reusable hooks
+- Follow React's rules of hooks
+  - Only call hooks at the top level
+  - Only call hooks from React functions
+- Properly handle cleanup in useEffect
+- Use proper dependency arrays
+- Avoid excessive re-renders
+- Use `useMemo` to memoize expensive calculations
+- Use `useCallback` to memoize event handlers and callback functions passed to child components
+- Properly manage dependency arrays for memoized values
+- Document hook usage with JSDoc comments
+
+## Testing Hooks
+
+- Test hooks through component tests
+- Test hook behavior and state changes
+- Test all possible states and edge cases
+- Mock external dependencies
+
+## Common Hook Patterns
+
+### Data Fetching Hook
+
+```typescript
+export const useFetchData = <T>(url: string) => {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(url);
+        const result = await response.json();
+
+        if (isMounted) {
+          setData(result);
+          setError(null);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err as Error);
+          setData(null);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void fetchData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [url]);
+
+  return { data, loading, error };
+};
+```
+
+### Form Hook
+
+```typescript
+export const useForm = <T extends Record<string, unknown>>(initialValues: T) => {
+  const [values, setValues] = useState<T>(initialValues);
+  const [errors, setErrors] = useState<Partial<Record<keyof T, string>>>({});
+  const [touched, setTouched] = useState<Partial<Record<keyof T, boolean>>>({});
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const { name } = e.target;
+    setTouched((prev) => ({ ...prev, [name]: true }));
+  };
+
+  const resetForm = () => {
+    setValues(initialValues);
+    setErrors({});
+    setTouched({});
+  };
+
+  return {
+    values,
+    errors,
+    touched,
+    handleChange,
+    handleBlur,
+    resetForm,
+    setValues,
+    setErrors,
+  };
+};
+```
+
+## When to Create a Hook
+
+Create a custom hook when:
+
+- You need to reuse stateful logic across components
+- Component logic becomes complex and hard to understand
+- You want to separate concerns (UI vs. logic)
+- You're using multiple React hooks together in a pattern
+- You're implementing common behaviors (authentication, forms, etc.)
+
+## Hook Composition
+
+- Compose complex hooks from simpler hooks
+- Follow the single responsibility principle
+- Keep each hook focused on a specific concern
+- Use higher-level hooks to combine lower-level hooks
+
+```typescript
+// Example of hook composition
+export const useUserProfile = (userId: string) => {
+  const { data, loading, error } = useFetch(`/api/users/${userId}`);
+  const { save, loading: saveLoading } = useSaveData();
+
+  // Additional logic specific to user profiles
+
+  return {
+    profile: data,
+    loading: loading || saveLoading,
+    error,
+    updateProfile: save,
+  };
+};
+```

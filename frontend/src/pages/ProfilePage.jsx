@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useKindeAuth } from '@kinde-oss/kinde-auth-react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, XCircle, ShieldCheckIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { loadStripe } from '@stripe/stripe-js'; // For Stripe.js
 
 // Keep countries list for option values if needed, but display text will be translated
 const countries = [
@@ -45,16 +45,20 @@ const initialProfileData = {
 function ProfilePage() {
     const { t } = useTranslation();
     const { user, isAuthenticated, isLoading: isAuthLoading, getAccessToken } = useKindeAuth();
-    const navigate = useNavigate();
     const { currentUser, setCurrentUser, loading: authContextLoading } = useAuth();
 
     const [formData, setFormData] = useState(initialProfileData);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState('');
+    const [isProcessingUpgrade, setIsProcessingUpgrade] = useState(false);
 
     // const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
     const PROXY_PATH = import.meta.env.VITE_API_PROXY_PATH || '/api/v1';
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
+    // Placeholder for your Stripe Publishable Key (from .env)
+    const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
     // Effect 1: Populate initial form data from Kinde user when available
     useEffect(() => {
@@ -181,6 +185,66 @@ function ProfilePage() {
             console.error("Profile save or update error:", err);
             setError(err.message || t('messages_profile_error_unexpectedSave'));
             setIsSubmitting(false);
+        }
+    };
+
+    const handleUpgradeToPro = async () => {
+        setIsProcessingUpgrade(true);
+        setError(null); // Clear previous errors
+        try {
+            const token = await getAccessToken();
+            if (!token) {
+                throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
+            }
+
+            const proPriceId = import.meta.env.VITE_STRIPE_PRO_PLAN_PRICE_ID;
+            if (!proPriceId) {
+                throw new Error(t('messages_error_stripe_pro_price_id_missing', 'Stripe Pro Plan Price ID is not configured.'));
+            }
+
+            const response = await fetch(`${API_BASE_URL}/api/v1/create-checkout-session`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ price_id: proPriceId }),
+            });
+
+            if (!response.ok) {
+                let errorData;
+                try {
+                    errorData = await response.json();
+                } catch {
+                    // Ignore if response is not JSON
+                }
+                const errorMessage = errorData?.detail || response.statusText || t('messages_error_create_checkout_failed', 'Failed to create checkout session.');
+                throw new Error(errorMessage);
+            }
+
+            const session = await response.json();
+            const sessionId = session?.sessionId;
+
+            if (sessionId) {
+                const stripe = await stripePromise; // Get the Stripe instance
+                if (stripe) {
+                    const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: sessionId });
+                    if (stripeError) {
+                        console.error("Stripe redirectToCheckout error:", stripeError);
+                        throw new Error(stripeError.message || t('messages_error_stripe_redirect', 'Failed to redirect to Stripe. Please try again.'));
+                    }
+                } else {
+                    throw new Error(t('messages_error_stripe_not_loaded', 'Stripe.js has not loaded yet.'));
+                }
+            } else {
+                throw new Error(t('messages_error_checkout_session_id_missing', 'Checkout session ID not found in response.'));
+            }
+
+        } catch (err) {
+            console.error("handleUpgradeToPro error:", err);
+            setError(err.message); // Display the error in the main error alert
+        } finally {
+            setIsProcessingUpgrade(false);
         }
     };
 
@@ -385,7 +449,7 @@ function ProfilePage() {
                             {currentUser?.current_plan ? t(`subscriptionPlan_${currentUser.current_plan.toLowerCase()}`, currentUser.current_plan) : t('common_notAvailable')}
                         </div>
                         {/* MODIFIED: Display Plan Limits */}
-                        {currentUser?.current_plan && currentUser.current_plan !== 'Schools' && (
+                        {currentUser?.current_plan && currentUser.current_plan.toUpperCase() !== 'SCHOOLS' && (
                             <>
                                 <div>
                                     <span className="font-medium">{t('profilePage_subscription_wordLimit', 'Monthly Word Limit:')}</span> 
@@ -401,7 +465,7 @@ function ProfilePage() {
                                 </div>
                             </>
                         )}
-                        {currentUser?.current_plan === 'Schools' && (
+                        {currentUser?.current_plan?.toUpperCase() === 'SCHOOLS' && (
                             <>
                                 <div>
                                     <span className="font-medium">{t('profilePage_subscription_wordLimit', 'Monthly Word Limit:')}</span> 
@@ -424,9 +488,17 @@ function ProfilePage() {
                             <div className="mt-4">
                                 <button 
                                     className="btn btn-primary btn-sm"
-                                    onClick={() => navigate('/subscribe')} // Navigate to subscribe page
+                                    onClick={handleUpgradeToPro} // Corrected onClick handler
+                                    disabled={isProcessingUpgrade}
                                 >
-                                    {t('profilePage_button_upgradeToPro', 'Upgrade to Pro')}
+                                    {isProcessingUpgrade ? (
+                                        <>
+                                            <span className="loading loading-spinner"></span>
+                                            {t('profilePage_button_upgrading', 'Upgrading...')}
+                                        </>
+                                    ) : (
+                                        t('profilePage_button_upgradeToPro', 'Upgrade to Pro')
+                                    )}
                                 </button>
                             </div>
                         )}
@@ -452,7 +524,7 @@ function ProfilePage() {
                     <div className="card-body">
                         <h2 className="card-title text-lg">{t('profilePage_usageDetails_title', 'Usage Details')}</h2>
                         <div className="divider my-1"></div>
-                        {currentUser.current_plan === 'SCHOOLS' ? (
+                        {currentUser.current_plan?.toUpperCase() === 'SCHOOLS' ? (
                             <p>{t('profilePage_usage_unlimited', "Your Schools plan includes unlimited word usage.")}</p>
                         ) : (
                             <div className="space-y-2">
@@ -472,7 +544,7 @@ function ProfilePage() {
                                     <span>{t('profilePage_usage_documentsProcessed', 'Documents Processed This Cycle:')}</span>
                                     <span className="font-semibold">{currentUser.documents_processed_current_cycle?.toLocaleString() || '0'}</span>
                                 </div>
-                                {currentUser.current_plan_word_allowance && currentUser.current_plan_word_allowance > 0 && currentUser.current_plan !== 'SCHOOLS' && (
+                                {currentUser.current_plan_word_allowance && currentUser.current_plan_word_allowance > 0 && currentUser.current_plan?.toUpperCase() !== 'SCHOOLS' && (
                                     <progress 
                                         className="progress progress-primary w-full mt-2" 
                                         value={currentUser.words_used_current_cycle || 0} 

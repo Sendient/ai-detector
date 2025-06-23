@@ -1,0 +1,67 @@
+---
+description:
+globs: *.py
+alwaysApply: false
+---
+# Logging Configuration
+
+## Structlog Setup
+
+```python
+import structlog
+
+# Configure structlog
+structlog.configure(
+    processors=[
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.ExtraAdder(),
+        structlog.stdlib.add_logger_name,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.CallsiteParameterAdder(
+            parameters={
+                structlog.processors.CallsiteParameter.FILENAME,
+                structlog.processors.CallsiteParameter.FUNC_NAME,
+                structlog.processors.CallsiteParameter.LINENO,
+            }
+        ),
+    ],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+```
+
+## Sentry Integration
+
+```python
+import sentry_sdk
+from sentry_sdk.integrations.logging import LoggingIntegration
+
+sentry_logging = LoggingIntegration(
+    level=logging.DEBUG,
+    event_level=logging.WARNING
+)
+
+sentry_sdk.init(
+    dsn=settings.SENTRY_DSN,
+    integrations=[sentry_logging],
+    environment=settings.ENVIRONMENT,
+    release=f"app@{settings.GIT_SHA}",
+    enable_tracing=True,
+    traces_sample_rate=1.0,
+    profiles_sample_rate=1.0,
+)
+```
+
+## Environment-Specific Configuration
+
+1. Local Development:
+   - DEBUG level logging
+   - Console output with colors
+   - Detailed stack traces
+
+2. Production:
+   - INFO level logging
+   - JSON format output
+   - Sentry integration
+   - Performance monitoring

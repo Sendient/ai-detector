@@ -1,0 +1,60 @@
+---
+description:
+globs: platform_api/locust_load_testing/**/*
+alwaysApply: false
+---
+# Load Testing Guide
+
+## Prerequisites
+
+1. Install load testing dependencies:
+   ```bash
+   uv sync --frozen --all-groups --extra load-testing
+   ```
+
+2. Ensure the API is running locally:
+   ```bash
+   make local-server
+   ```
+
+## Running Load Tests
+
+1. Start Locust with a test file:
+   ```bash
+   locust -f platform_api/locust_load_testing/submission_ingestion_load_test.py
+   ```
+
+2. Open http://localhost:8089 in your browser
+
+3. Configure test parameters:
+   - Number of users: Concurrent users to simulate
+   - Spawn rate: Users added per second
+   - Host: Target server (e.g., `http://localhost:7071` for local Azure Functions)
+
+## Available Load Tests
+
+### Individual Route Tests
+Located in `platform_api/locust_load_testing/individual_route_tests/task_sets/`
+
+Each route has its own TaskSet and corresponding user in `platform_api/locust_load_testing/individual_route_tests/`
+
+### Multi-Route Tests
+Located in `platform_api/locust_load_testing/`
+
+These test users simulate multiple endpoint interactions.
+
+## Creating New Load Tests
+
+Use the template generator:
+```bash
+python platform_api/locust_load_testing/scripts/create_new_load_test.py
+```
+
+Run with `--help` to see all available options.
+
+## Test Structure
+
+1. TaskSets define the behavior for specific routes
+2. Users combine TaskSets to create complete test scenarios
+3. Each test can be configured with different user counts and spawn rates
+4. Results are available in real-time through the Locust web interface

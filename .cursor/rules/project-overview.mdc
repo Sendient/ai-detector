@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# SmartEducator Platform API Overview
+
+This is a serverless API that serves a static web app, interacting with MongoDB, AI models, Blob Storage, AI Orchestrator, and Queues.
+
+## Main Components
+
+1. Platform API (`platform_api/`) - The main Azure Function App
+2. Queue Orchestrator (`queue_orchestrator/`) - Handles queue orchestration
+3. Queue Processor (`queue_processor/`) - Processes queue messages
+4. Stats Collector (`stats_collector/`) - Collects statistics
+5. File Converter (`file_converter/`) - Handles file conversion
+6. Infrastructure (`bicep/`) - Azure infrastructure as code
+
+## Key Files
+
+- [docker-compose.yaml](mdc:docker-compose.yaml) - Local development environment setup
+- [pyproject.toml](mdc:pyproject.toml) - Python project configuration and dependencies
+- [Makefile](mdc:Makefile) - Common development commands
+- [README.md](mdc:README.md) - Project documentation and setup instructions
+
+## Development Workflow
+
+1. Use `make local-server` to run the application locally
+2. Use `make test` for running `plaform_api/` unit tests
+3. Use `make test-all` for running all the unit tests
+4. Use `make e2e` for end-to-end tests
+5. Use `make lint` for code linting and formatting
+
+## Important Notes
+
+- The system requires Python 3.11, Docker, and Azure Functions Tools
+- Environment variables must be set in `.env` file
+- For local development, the system emulates Azure Cosmos DB, Azure Storage, and Azure Function App

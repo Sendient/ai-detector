@@ -1,0 +1,29 @@
+---
+description:
+globs: *.py
+alwaysApply: false
+---
+# Code Best Practices
+
+## General Practices
+
+1. Use dependency injection
+2. Keep functions small and focused
+3. Use meaningful variable names
+4. Comments explain _why_ not what
+5. Add type hints to all functions
+6. Use Pydantic for data validation
+7. Use enums for fixed value sets
+8. Document public APIs
+9. Use async/await for I/O operations
+10. Handle exceptions appropriately
+11. Use logging for debugging
+
+## Tools
+
+1. Use `ruff` for linting and formatting
+2. Use `pre-commit` for pre-commit hooks
+
+## Configuration
+
+See [pyproject.toml](mdc:pyproject.toml) for detailed linting and formatting rules.

@@ -1,0 +1,114 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Project Structure
+
+This document outlines the organization of the Platform UI Vite project.
+
+## Directory Structure
+
+The project follows a modular architecture with the following main directories:
+
+### Source Directory
+- `src/` - Contains all application source code
+  - `assets/` - Static assets like images, fonts, and files
+    - `files/` - Document files
+    - `images/` - Images used in the application
+      - `mock/` - Mock images for development
+      - `png/` - PNG image files
+      - `svg/` - SVG vector graphics
+
+  - `components/` - Reusable UI components
+    - Each component typically has its own directory
+    - Component directories include interfaces subdirectory
+    - Many components have additional subdirectories like:
+      - `components/` - Sub-components
+      - `hooks/` - Component-specific hooks
+      - `interfaces/` - Type definitions
+      - `schemas/` - Validation schemas
+
+  - `constants/` - Application constants and configuration values
+
+  - `hooks/` - Custom React hooks
+    - `interfaces/` - Hook type definitions
+
+  - `i18n/` - Internationalization files
+    - `en/` - English translations
+
+  - `interfaces/` - Global type definitions
+
+  - `layouts/` - Layout components
+    - `BaseLayout/` - The base application layout
+    - `DashboardLayout/` - Dashboard-specific layout
+    - Layout directories typically include:
+      - `components/` - Layout-specific components
+      - `hooks/` - Layout-specific hooks
+      - `interfaces/` - Layout type definitions
+
+  - `pages/` - Page components representing routes
+    - Each page has its own directory
+    - Page directories typically include:
+      - `components/` - Page-specific components
+      - `hooks/` - Page-specific hooks
+      - `interfaces/` - Page-specific type definitions
+      - `schemas/` - Page-specific validation schemas
+
+  - `router/` - Routing configuration
+
+  - `schemas/` - Global validation schemas
+
+  - `store/` - Redux store configuration
+    - `apis/` - API service definitions
+    - `hooks/` - Store-related hooks
+    - `slices/` - Redux Toolkit slices
+    - `tags/` - RTK Query tags
+    - `types/` - Store-related type definitions
+
+  - `utils/` - Utility functions
+    - `interfaces/` - Utility type definitions
+
+### Public Directory
+- `public/` - Static files served directly
+  - `.well-known/` - Well-known resource files
+  - `faqImages/` - FAQ image resources
+  - `fonts/` - Font files
+
+### Testing Directory
+- `cypress/` - Cypress testing files
+  - `e2e/` - End-to-end tests
+    - `integration/` - Integration tests
+    - `screenshotting-tests/` - Visual regression tests
+  - `fixtures/` - Test fixtures
+  - `support/` - Support files for tests
+  - `utils/` - Test utilities
+
+## Component Organization Guidelines
+
+### Directory Structure
+- Use feature-based organization
+- Keep related components together
+- Include `interfaces/` subdirectories for type definitions
+
+### Component Naming
+- Use PascalCase for component files
+- Use descriptive names that reflect component purpose
+- Include `.cy.ts` for Cypress test files
+- Use `interfaces/` subdirectories for type definitions with files and interfaces named `IComponentName`
+
+### Component Structure
+- Each component should be in its own file
+- Group related components in subdirectories
+
+## Import Conventions
+- Use relative imports for files in the same directory
+- Use absolute imports for files in different directories
+- Avoid deep relative imports (../../)
+
+## Key Files
+- `src/App.tsx` - Main application component
+- `src/main.tsx` - Entry point for the application
+- `src/index.css` - Global styles
+- `src/store/apis` - API services configuration
+- `src/router` - Routing configuration

@@ -1,0 +1,229 @@
+---
+description:
+globs: src/**/components/*.tsx
+alwaysApply: false
+---
+# Component Patterns
+
+This document outlines the patterns and best practices for creating React components in the Platform UI Vite project.
+
+## Component Structure
+
+- Keep components small and modular
+- Each component should have a single responsibility
+- Extract complex logic into custom hooks
+- Use composition over inheritance
+- Follow the container/presentation pattern where appropriate
+- Always leave a blank line between the imports and the first line of the interface/component
+
+## Component Size Guidelines
+
+- **Prefer smaller components**: Components should be focused on a single responsibility
+- Aim for less than 150 lines of code per component file
+- If a component grows too large, split it into smaller subcomponents
+- Large components are harder to test, maintain, and reuse
+
+## File Structure
+
+```typescript
+// components/Component/interfaces/IComponent.ts
+export interface IComponent {
+  prop1: string;
+  prop2?: number;
+  className?: string;
+  children?: React.ReactNode;
+}
+
+// components/Component/Component.tsx
+// Imports
+import clsx from 'clsx';
+import { IComponent } from './interfaces/IComponent';
+
+// Component definition
+export default function Component({
+  prop1,
+  prop2,
+  className,
+  children,
+  ...props
+}: IComponent) {
+  // Component logic here
+
+  return (
+    <div className={clsx('base-classes', className)} {...props}>
+      {children}
+    </div>
+  );
+};
+```
+
+## Type Definitions
+
+- Define component props in a separate interface file
+- Use explicit type definitions for all props
+- Avoid using `any` type
+- Use proper TypeScript interfaces
+- Use descriptive type names
+
+```typescript
+// components/Component/interfaces/IComponent.ts
+export interface IComponent {
+  prop1: string;
+  prop2?: number;
+  className?: string;
+  children?: React.ReactNode;
+}
+
+// components/Component/Component.tsx
+import { IComponent } from './interfaces/IComponent';
+
+export default function Component(props: IComponent) {
+  // ...
+}
+```
+
+## Component Organization
+
+- Group related components in feature folders
+- Use barrel files (`index.ts`) to export components
+- Keep component-specific types, utilities, and tests together
+- Organize by feature, not by type
+
+## Best Practices
+
+- Use functional components with hooks
+- Use proper prop types and default values
+- Implement proper error boundaries
+- Use proper data fetching patterns
+- Implement proper loading and error states
+- Ensure components are accessible
+- Use proper event handling
+- Use proper form handling
+
+## Composability
+
+- Design components to be composable
+- Use the children prop for flexible composition
+- Use the component pattern for customization
+- Use proper component composition patterns
+
+## Performance Considerations
+
+- Use memoization for expensive computations
+- Use React.memo for pure components
+- Use proper list rendering patterns
+- Use proper state management
+- Implement proper code splitting
+- Use lazy loading for large components
+
+## Component Communication
+
+- Use props for parent-to-child communication
+- Use callbacks for child-to-parent communication
+- Use context for cross-component communication
+- Use Redux for global state
+- Use custom events for complex communication
+
+## Testing
+
+- Write Cypress tests for critical components
+- Test component behavior and rendering
+- Use proper mock data
+- Test edge cases and error states
+
+## Text
+
+- Avoid hardcoding text directly in components
+- Use a configuration file or constants for text content
+- Support internationalization with i18next
+
+## Examples
+
+### Good Component (Small and Focused)
+
+```tsx
+// components/Button/interfaces/IButton.ts
+export interface IButton {
+  variant?: 'primary' | 'secondary';
+  size?: 'small' | 'medium' | 'large';
+  className?: string;
+  children?: React.ReactNode;
+  // Any other props
+}
+
+// components/Button/Button.tsx
+import clsx from 'clsx';
+import { IButton } from './interfaces/IButton';
+
+export default function Button({
+  variant = 'primary',
+  size = 'medium',
+  className,
+  children,
+  ...props
+}) => {
+  const baseClasses = 'rounded font-medium';
+  const variantClasses = {
+    primary: 'bg-blue-500 text-white',
+    secondary: 'bg-gray-200 text-gray-800',
+  };
+  const sizeClasses = {
+    small: 'px-2 py-1 text-sm',
+    medium: 'px-4 py-2',
+    large: 'px-6 py-3 text-lg',
+  };
+
+  return (
+    <button
+      className={clsx(
+        baseClasses,
+        variantClasses[variant],
+        sizeClasses[size],
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+};
+```
+
+### Component Refactoring Example
+
+#### Before (Complex Component)
+
+```tsx
+// Avoid this pattern
+const UserDashboard = () => {
+  // Many state variables
+  // Complex logic for user data
+  // Complex logic for notifications
+  // Complex logic for user preferences
+
+  return (
+    <div>
+      {/* User profile section */}
+      {/* Notification list section */}
+      {/* User preferences section */}
+      {/* Activity feed section */}
+    </div>
+  );
+};
+```
+
+#### After (Modular Components)
+
+```tsx
+// Prefer this pattern
+const UserDashboard = () => {
+  return (
+    <div>
+      <UserProfile />
+      <NotificationList />
+      <UserPreferences />
+      <ActivityFeed />
+    </div>
+  );
+};
+```

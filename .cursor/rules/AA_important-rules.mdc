@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Rule 1: content should *always* be stored in i18n files, *never* as hardcoded text in the component.
+Context: when adding new content, it should be added to new or existing i18n files and then rendered in the component using the `i18next` package.
+
+Rule 2: interfaces should *always* be extracted to dedicated files, *never* defined in the component file.
+Context: as defined in the [project-structure.mdc](mdc:.cursor/rules/architecture/project-structure.mdc) file structure, components should have `component/interfaces` directories with relevant interface files. 
+
+Rule 3: interactive components should *always* include data-cy attributes, *never* omit testing attributes.
+Context: use constants for the high level data-cy prefix and relevant suffixes for different elements.
+
+Rule 4: *always* check linting errors before finishing a solution, *never* leave a solution with linting errors.
+Context: our precommit checks require there are no linting errors, so a solution cannot be considered complete until all linting errors are fixed.
+

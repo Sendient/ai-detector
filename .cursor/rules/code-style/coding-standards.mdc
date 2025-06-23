@@ -1,0 +1,168 @@
+---
+description:
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+# Coding Standards
+
+This document outlines the coding standards and best practices for the Platform UI Vite project.
+
+## TypeScript Standards
+
+- Use strict type checking
+- Define proper interfaces and types for all components and functions
+- Avoid using `any` type
+- Use type inference where possible
+- Export types from `interfaces` directory within feature folders
+
+## Naming Conventions
+
+- Use camelCase for:
+  - Variables and function names
+  - Object properties
+  - Method names
+  - Local constants
+  - Custom hooks (prefixed with 'use')
+  - Event handlers (prefixed with 'handle')
+  - Boolean variables (prefixed with 'is', 'has', 'should', 'can', 'will')
+
+- Use PascalCase for:
+  - React components
+  - TypeScript interfaces and types
+  - Classes
+  - Enums
+  - Context providers
+  - Custom hooks that return components
+
+- Use UPPER_SNAKE_CASE for:
+  - Global constants
+  - Environment variables
+  - Enum names and values
+  - Configuration constants
+
+- File naming conventions:
+  - React components: PascalCase (e.g., `Button.tsx`)
+  - Hooks: camelCase (e.g., `useAuth.ts`)
+  - Utilities: camelCase (e.g., `formatDate.ts`)
+  - Types: PascalCase with `I` prefix (e.g., `IButton.ts`)
+  - Tests: Component name with `.cy.ts` suffix
+  - Exception to conventions are defined in `.eslintrc.cjs`
+
+## Code Comments
+
+- Documentation Comments:
+  - Use JSDoc style comments (`/** */`) for:
+    - Component documentation
+    - Function documentation
+    - Type definitions
+    - Public API documentation
+  - Include parameter types, return types, and examples where helpful
+
+- Implementation Comments:
+  - Use single-line comments (`//`) for:
+    - Complex logic explanations
+    - Workarounds or temporary solutions
+    - Important implementation details
+  - Keep comments close to the code they describe
+  - Write comments that explain "why" not "what"
+
+- TODO Comments:
+  - Use `// TODO:` for:
+    - Planned improvements
+    - Known issues to be fixed
+    - Technical debt items
+  - Include ticket/issue numbers when applicable
+  - Add estimated effort/complexity (e.g., `// TODO: [HIGH] Refactor this component`)
+  - Remove TODO comments once implemented
+
+- Comment Organization:
+  - Group related comments together
+  - Use consistent formatting within each comment type
+  - Keep comments up to date with code changes
+  - Remove outdated or redundant comments
+
+- Comment Best Practices:
+  - Write self-documenting code when possible
+  - Use comments to explain complex business logic
+  - Document non-obvious side effects
+  - Explain workarounds for framework limitations
+  - Document performance considerations
+
+## Component Standards
+
+### Structure
+```typescript
+// components/Component/interfaces/IComponent.ts
+export interface IComponent {
+    prop1: string;
+    prop2: SomeOtherType;
+}
+
+// components/Component/Component.tsx
+import { IComponent } from './interfaces/IComponent';
+
+export default function Component({ prop1, prop2 }: IComponent) {
+  // Component logic
+  return (
+    // JSX
+  );
+}
+```
+
+### Best Practices
+- Use functional components with hooks
+- Keep components small and focused
+- Extract complex logic into custom hooks
+- Use proper prop types and default values
+- Implement proper error boundaries
+- Keep component interfaces defined in separate `.interfaces.ts` files
+- Include a barrel file in folders with multiple files to keep exports and imports tidy
+- Alphabetically sort barrel file exports
+- Prefer `interface` over `types`
+- Do not hardcode text into components. Use a file in a `constants` folder to store text in one place.
+
+## State Management
+
+### Redux Usage
+- Use Redux Toolkit for global state
+- Create feature-specific slices using RTK's `createSlice`
+- Leverage automatically generated action creators from slices
+- Implement proper error handling
+- Use RTK Query for API calls
+
+### Local State
+- Use `useState` for component-specific state
+- Use `useReducer` for complex local state
+- Implement proper state initialization
+
+## Form Handling
+
+### React Hook Form
+- Use React Hook Form for form management
+- Implement Zod validation schemas
+- Use proper error handling and validation
+- Implement proper form submission handling
+
+## Styling Standards
+
+### Tailwind CSS
+- Use mobile-first approach
+- Follow proper class organization
+- Use proper responsive breakpoints
+- Use proper color variables
+- Use DaisyUI components where appropriate
+
+### Component Styling
+- Use proper spacing and layout
+- Implement proper accessibility
+- Use proper typography
+- Implement proper animations
+
+## Testing Standards
+
+### Cypress
+- Create tests for critical user paths
+- Follow page object pattern where appropriate
+- Implement proper assertions
+- Use fixtures for test data
+- Group related tests together

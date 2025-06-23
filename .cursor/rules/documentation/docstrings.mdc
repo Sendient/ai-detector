@@ -1,0 +1,106 @@
+---
+description:
+globs: *.py
+alwaysApply: false
+---
+# Docstring Standards
+
+## General Rules
+
+1. All public functions, classes, and methods must have docstrings
+2. Use Google-style docstring format
+3. Include type information in docstrings
+4. Document all parameters, return values, and exceptions
+5. Keep docstrings concise but informative
+
+## Class Docstrings
+
+```python
+class UserProfile(BaseModel):
+    """A model representing a user's profile information.
+
+    This class contains all the information about a user's profile, including
+    their personal details and preferences.
+
+    Attributes:
+        user_id (str): The unique identifier for the user.
+        name (str): The user's full name.
+        email (str): The user's email address.
+        preferences (dict): User preferences and settings.
+    """
+```
+
+## Function Docstrings
+
+```python
+def process_user_data(user_id: str, data: dict) -> None:
+    """Process user data and update the database.
+
+    This function takes user data, validates it, and updates the user's
+    profile in the database.
+
+    Args:
+        user_id (str): The unique identifier for the user.
+        data (dict): The user data to process.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the user_id is invalid.
+        DatabaseError: If the database update fails.
+    """
+```
+
+## Method Docstrings
+
+```python
+def update_preferences(self, new_prefs: dict) -> bool:
+    """Update the user's preferences.
+
+    Args:
+        new_prefs (dict): The new preferences to set.
+
+    Returns:
+        bool: True if the update was successful, False otherwise.
+
+    Raises:
+        ValidationError: If the preferences are invalid.
+    """
+```
+
+## Module Docstrings
+
+```python
+"""User profile management module.
+
+This module handles all aspects of user profile management, including
+creation, updates, and deletion of user profiles.
+
+The module provides a set of functions and classes for:
+- Creating new user profiles
+- Updating existing profiles
+- Managing user preferences
+- Handling profile deletion
+"""
+```
+
+## Special Cases
+
+1. For deprecated functions:
+   ```python
+   def old_function():
+       """DEPRECATED: Use new_function() instead."""
+   ```
+
+2. For private methods:
+   ```python
+   def _internal_helper():
+       """Internal helper function for processing data."""
+   ```
+
+3. For async functions:
+   ```python
+   async def fetch_data():
+       """Fetch data asynchronously from the API."""
+   ```

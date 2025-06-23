@@ -1,0 +1,13 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+rule "naming-conventions" {
+  description = "Enforce certain naming conventions"
+  when = "creating variables names, function names, Class names, docstring, and comments"
+  then = "Write new, or refactor existing:
+    - use a descriptive name that suits the purpose of the code
+    - be mindful of the verbosity, keeping things concise where possible but not compromising on clarity
+    - use British English throughout"
+}
