@@ -98,28 +98,10 @@ async def read_current_user_profile(
         authoritative_is_administrator = has_kinde_admin_role and is_sendient_email
         logger.info(f"  - Authoritative is_administrator status: {authoritative_is_administrator}")
 
-        if teacher.is_administrator != authoritative_is_administrator:
-            logger.info(f"GET /me: Discrepancy found. DB is_administrator: {teacher.is_administrator}, Authoritative: {authoritative_is_administrator}. Attempting to update DB.")
-            try:
-                updated_teacher_data = TeacherUpdate(is_administrator=authoritative_is_administrator)
-                # Use a method that only updates specific fields or fetches and then updates
-                # For simplicity, assuming crud.update_teacher can handle partial updates based on model
-                updated_teacher = await crud.update_teacher(
-                    kinde_id=user_kinde_id_str, 
-                    teacher_in=updated_teacher_data,
-                    authoritative_is_admin_status=authoritative_is_administrator,
-                    is_sync_update=True # Flag to indicate this is an internal sync
-                )
-                if updated_teacher:
-                    teacher = updated_teacher # Use the updated teacher object
-                    logger.info(f"GET /me: Successfully updated is_administrator in DB for Kinde ID {user_kinde_id_str} to {teacher.is_administrator}")
-                else:
-                    logger.error(f"GET /me: Failed to update is_administrator in DB for Kinde ID {user_kinde_id_str} during sync.")
-                    # Potentially raise an error or handle, but for now, proceed with originally fetched teacher
-            except Exception as e_update:
-                logger.error(f"GET /me: Exception during is_administrator sync update for Kinde ID {user_kinde_id_str}: {e_update}", exc_info=True)
-                # Proceed with the originally fetched teacher data if update fails
-
+        # The authoritative status is determined from the token. We can override the DB value in the response
+        # without writing to the database on a GET request. The PUT request will handle the DB update.
+        teacher.is_administrator = authoritative_is_administrator
+        
         logger.info(f"GET /me: Found existing teacher profile for Kinde ID: {user_kinde_id_str}, Internal ID: {teacher.id}, is_admin (after sync attempt): {teacher.is_administrator}")
         # --- END RBAC Sync Logic for GET /me ---
         

@@ -124,7 +124,9 @@ function ProfilePage() {
         setSuccess('');
 
         try {
-            const token = await getAccessToken("https://api.aidetector.sendient.ai");
+            const token = await getAccessToken({
+                audience: "https://api.aidetector.sendient.ai"
+            });
             if (!token) {
                 throw new Error(t('messages_profile_error_noToken'));
             }
@@ -192,7 +194,9 @@ function ProfilePage() {
         setIsProcessingUpgrade(true);
         setError(null); // Clear previous errors
         try {
-            const token = await getAccessToken();
+            const token = await getAccessToken({
+                audience: "https://api.aidetector.sendient.ai"
+            });
             if (!token) {
                 throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
             }
@@ -202,7 +206,7 @@ function ProfilePage() {
                 throw new Error(t('messages_error_stripe_pro_price_id_missing', 'Stripe Pro Plan Price ID is not configured.'));
             }
 
-            const response = await fetch(`${API_BASE_URL}/api/v1/create-checkout-session`, {
+            const response = await fetch(`${API_BASE_URL}${PROXY_PATH}/create-checkout-session`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
