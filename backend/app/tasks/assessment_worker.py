@@ -565,82 +565,52 @@ class AssessmentWorker:
         result: Optional[Any] = None
 
         try:
-            # Step 1: Prepare document and result
+            # Step 1: Prepare Document and Result (update status to PROCESSING)
             document, result = await self._prepare_document_and_result(task)
-        except DocumentPreparationError as e:
-            if "Document" in str(e) and "not found" in str(e):
-                logger.warning(f"[AssessmentWorker_PROCESS_TASK] Halting task {task.id} because document {document_id} not found. Task not retried by this path.")
-            return
-            else:
-                logger.error(f"[AssessmentWorker_PROCESS_TASK] Document/Result preparation failed for task {task.id}: {e}. Retry handled by helper.")
-                return
-        
-        # Initialize for the try-except block, in case _extract_text_and_counts fails early
-        extracted_text: Optional[str] = None
-        character_count: Optional[int] = None
-        word_count: Optional[int] = None
-        # Define teacher_db here as it's used in broader scope now
-        teacher_db: Optional[Any] = None
-        ml_api_error_message: Optional[str] = None # Retain this from original for ML error message storage
-
-        try:
-            # Step 2: Extract text and counts
+            
+            # Step 2: Extract text and get counts
             extracted_text, character_count, word_count = await self._extract_text_and_counts(document, teacher_id)
-
-            # Step 3: Check usage limits
-            # This helper returns teacher_db if successful, or raises an exception (handled below).
-            # It internally handles task deletion or retry for certain failure modes.
+            
+            # Step 3: Check usage limits against the teacher's plan
             teacher_db = await self._check_usage_limits(task, result, document.id, teacher_id, word_count)
-
-            # Initialize ml_output_tuple for use in potential ML error finalization path
-            ml_output_tuple: tuple[Optional[str], Optional[float], List[ParagraphResult], Optional[bool], Optional[bool]]
-            ml_output_tuple = (None, None, [], False, False) # Default error-like state
-
-            try:
-                # Step 4: Call ML API and parse response
-                ml_output_tuple = await self._execute_ml_call_and_parse_response(extracted_text, document.id)
-            except (MlApiConfigError, MlApiHttpError, MlApiConnectionError, MlApiReportedError, MlApiResponseParseError) as ml_err_e:
-                logger.error(f"[AssessmentWorker_PROCESS_TASK] ML API call or parsing error for task {task.id}: {ml_err_e}")
-                ml_api_error_for_result = f"ML_API_ERROR: {type(ml_err_e).__name__}: {str(ml_err_e)[:150]}" # Truncate
-                ml_output_tuple = (ml_api_error_for_result, None, [], False, False) 
-                # Proceed to finalization which will record a FAILED result.
+            
+            # Step 4: Call ML API and parse response
+            ml_output_tuple = await self._execute_ml_call_and_parse_response(extracted_text, document.id)
             
             # Step 5: Finalize processing and update database
-            await self._finalize_processing_and_update_db(
-                task, document, result, teacher_db, 
-                word_count, # char_count is not passed as it's not used by finalize
-                ml_output_tuple
-            )
+            await self._finalize_processing_and_update_db(task, document, result, teacher_db, word_count, ml_output_tuple)
 
-        except DocumentPreparationError as e: # This was the first try-except block
-            if "Document" in str(e) and "not found" in str(e):
-                logger.warning(f"[AssessmentWorker_PROCESS_TASK] Halting task {task.id} because document {document_id} not found. Task not retried by this path.")
-                return
-            else:
-                logger.error(f"[AssessmentWorker_PROCESS_TASK] Document/Result preparation failed for task {task.id}: {e}. Retry handled by helper.")
-                return 
-        except (FileDownloadError, UnsupportedFileTypeError, TextProcessingError) as e: # From the second (main) try-except
-            logger.error(f"[AssessmentWorker_PROCESS_TASK] Text extraction or processing failed for task {task.id}: {e}")
+        except DocumentPreparationError as e:
+            logger.error(f"[AssessmentWorker_process] Document preparation failed for task {task.id}: {e}. Task retry handled by helper.")
+            # The task is already marked for retry within the helper, so we just stop this run.
+            return # IMPORTANT: Return here to prevent finally block from deleting a task meant for retry
+
+        except TextExtractionError as e:
+            logger.error(f"[AssessmentWorker_process] Text extraction failed for task {task.id}: {e}", exc_info=True)
             await self._handle_generic_processing_failure(task, document, result, f"TEXT_EXTRACTION_ERROR:{type(e).__name__}")
-        except UserNotFoundForLimitCheckError as e:
-            logger.error(f"[AssessmentWorker_PROCESS_TASK] User not found for limit check, task {task.id}: {e}. Task state (deleted/retried) handled by helper.")
-            return 
+
         except PlanLimitExceededError as e:
-            logger.warning(f"[AssessmentWorker_PROCESS_TASK] Plan limit exceeded for task {task.id}: {e.message}. Task state (deleted/retried) handled by helper.")
-            return
-        # Note: MlApi... errors are caught inside the main try, then ml_output_tuple is set with error info, 
-        # and _finalize_processing_and_update_db is called which will record the FAILED state.
-        # If _finalize_processing_and_update_db then fails its own DB updates, it raises TaskFinalizationError.
-        except TaskFinalizationError as e:
-            logger.error(f"[AssessmentWorker_PROCESS_TASK] Task finalization failed for task {task.id}: {e}. Retry handled by helper.")
-            return
-        except Exception as e: # Catch-all for truly unexpected errors in the orchestration
-            logger.error(f"[AssessmentWorker_PROCESS_TASK] Unhandled orchestration error for task {task.id} (doc id: {document_id if document else 'N/A'}): {e}", exc_info=True)
-            await self._handle_generic_processing_failure(task, document, result, f"UNHANDLED_ORCHESTRATION_ERROR:{type(e).__name__}")
-    
+            logger.warning(f"[AssessmentWorker_process] Plan limit exceeded for task {task.id}. Task is finalized with error by helper.")
+            # The helper function _check_usage_limits already finalizes the task with an error status.
+            # It does not mark for retry, so we can proceed to the finally block to delete the task.
+            pass # Explicitly pass to continue to finally
+
+        except MlApiError as e_ml:
+            logger.error(f"[AssessmentWorker_process] ML API related error for task {task.id}: {e_ml}", exc_info=True)
+            await self._handle_generic_processing_failure(task, document, result, "ML_API_ERROR")
+
+        except Exception as e:
+            logger.critical(f"[AssessmentWorker_process] UNHANDLED EXCEPTION for task {task.id}: {e}", exc_info=True)
+            await self._handle_generic_processing_failure(task, document, result, "UNHANDLED_EXCEPTION")
+        
+        finally:
+            logger.debug(f"[AssessmentWorker_process] Reached finally block for task {task.id}. Deleting task.")
+            await self._delete_assessment_task(task.id)
+
     async def _handle_generic_processing_failure(self, task: AssessmentTask, document: Optional[Any], result: Optional[Any], error_reason_key: str):
         """
-        Helper to update document/result to ERROR/FAILED and requeue the task.
+        Handles common failure scenarios by updating document/result statuses to ERROR
+        and marking the task for retry.
         """
         logger.warning(f"[AssessmentWorker__handle_failure] Handling generic failure for task {task.id}. Reason: {error_reason_key}")
         error_message_for_db = str(error_reason_key)[:500] # Truncate for DB
