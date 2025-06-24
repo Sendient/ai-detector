@@ -236,7 +236,7 @@ function AnalyticsPage() {
                               max={currentUser.current_plan_word_allowance}>
                           </progress>
                       )}
-                  </div>
+              </div>
                 )
              ) : ( <p className="text-sm text-gray-500 dark:text-gray-400">Usage data not available. Ensure you are logged in.</p> )}
            </div>
@@ -307,26 +307,26 @@ function AnalyticsPage() {
                             <td className="px-4 py-3 whitespace-nowrap">
                               <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeClass(item.status)}`}>
                                 {item.status || 'N/A'}
-                              </span>
-                            </td>
+                                        </span>
+                                    </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                               {item.score ? `${(item.score * 100).toFixed(1)}%` : 'N/A'}
-                            </td>
+                                    </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                               {item.word_count?.toLocaleString() ?? 'N/A'}
-                            </td>
+                                    </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                               {item.character_count?.toLocaleString() ?? 'N/A'}
-                            </td>
-                          </tr>
+                                    </td>
+                                </tr>
                         ))
-                      ) : (
+                    ) : (
                         <tr>
-                          <td colSpan="6" className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
-                            No recent activity to display.
-                          </td>
+                            <td colSpan="6" className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
+                                No recent activity to display.
+                            </td>
                         </tr>
-                      )}
+                    )}
                   </tbody>
               </table>
           </div>

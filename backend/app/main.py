@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse
 # Assuming your config.py provides 'settings' object and other constants
 from .core.config import settings, PROJECT_NAME, API_V1_PREFIX, VERSION
 from .db.database import connect_to_mongo, close_mongo_connection, check_database_health, get_database
+from .db.init_db import init_db_indexes # <--- IMPORT THE CENTRALIZED FUNCTION
 
 # Import all endpoint routers
 from .api.v1.endpoints.schools import router as schools_router
@@ -225,42 +226,18 @@ async def startup_event():
         raise RuntimeError("Database not available after supposedly successful connection during startup.")
 
     # --- Database Index Creation ---
-    try:
-        # (Keep your existing index creation logic here)
-        # Example:
-        await db.teachers.create_index("kinde_id", name="idx_teacher_kinde_id", unique=False)
-        logger.info("Index on teachers.kinde_id ensured (unique=False).")
-        # Ensure Stripe related indexes on teachers collection
-        await db.teachers.create_index("stripe_customer_id", name="idx_teacher_stripe_customer_id", unique=False, sparse=True) # TEMPORARILY NON-UNIQUE
-        logger.info("Index on teachers.stripe_customer_id ensured (unique=False, sparse=True) - TEMPORARILY NON-UNIQUE.")
-        await db.teachers.create_index("stripe_subscription_id", name="idx_teacher_stripe_subscription_id", unique=False, sparse=True) # TEMPORARILY NON-UNIQUE
-        logger.info("Index on teachers.stripe_subscription_id ensured (unique=False, sparse=True) - TEMPORARILY NON-UNIQUE.")
-        
-        idx_assessment_dequeue = IndexModel(
-            [("priority_level", pymongo.DESCENDING), ("created_at", pymongo.ASCENDING)],
-            name="idx_assessment_tasks_dequeue_order"
-        )
-        await db.assessment_tasks.create_indexes([idx_assessment_dequeue])
-        logger.info("Index on assessment_tasks for dequeue order ensured.")
-
-    except OperationFailure as e:
-        # (Keep your existing OperationFailure handling logic)
-        if e.code in [85, 86] or "already exists with different options" in e.details.get('errmsg', ''):
-            logger.warning(f"Index creation conflict for an existing index: {e.details.get('errmsg', str(e))}. App will continue.")
-        # ... (other specific error handling for OperationFailure)
-        elif "The order by query does not have a corresponding composite index" in e.details.get('errmsg', ''): # For CosmosDB specific messages if applicable
-            logger.warning(f"CosmosDB index hint: {e.details.get('errmsg', str(e))}. App will continue.")
-        else:
-            logger.error(f"Database OperationFailure during index creation: {e}", exc_info=True)
-            # Consider if certain OperationFailures should also halt startup
-    except Exception as e:
-        logger.error(f"Error during index creation: {e}", exc_info=True)
-        # Consider if generic errors during index creation should halt startup
-    # --- End Database Index Creation ---
+    logger.info("Attempting to initialize all database indexes via init_db_indexes...")
+    indexes_created_ok = await init_db_indexes()
+    if indexes_created_ok:
+        logger.info("Successfully completed index initialization.")
+    else:
+        logger.error("Index initialization failed. Check previous logs for details. Application will continue, but performance may be degraded.")
+        # Depending on severity, you might want to raise a RuntimeError here
+        # raise RuntimeError("Could not create necessary database indexes on startup.")
 
     # --- Start Background Workers ---
-    # (Keep your existing worker startup logic here)
-    # Example: Start BatchProcessor
+    # Only start workers if database connection and setup were successful
+    logger.info("Starting background worker tasks (AssessmentWorker, BatchProcessor)...")
     try:
         bp_instance = BatchProcessor() # Ensure BatchProcessor is correctly imported
         _original_fastapi_app.state.batch_processor_instance = bp_instance

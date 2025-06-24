@@ -101,8 +101,8 @@ function DocumentsPage() {
                     if (data?.status === COMPLETED_STATUS) {
                         newResults[docId] = null;
                         console.log(`[DocumentsPage] Result for doc ${docId} is COMPLETED but score is not a number (is ${data?.score}). Storing null score.`);
-                    } else {
-                        delete newResults[docId];
+                } else {
+                    delete newResults[docId];
                         console.log(`[DocumentsPage] Result for doc ${docId} status is ${data?.status} (not COMPLETED with a numeric score), score not stored/updated.`);
                     }
                 }
@@ -166,12 +166,12 @@ function DocumentsPage() {
       throw new Error(t('messages_error_loginRequired_upload'));
     }
 
-    const token = await getToken();
+        const token = await getToken();
     if (!token) {
       throw new Error(t('messages_error_authTokenMissing'));
     }
 
-    const formData = new FormData();
+        const formData = new FormData();
     formData.append('file', fileToUpload);
 
     if (studentId) {
@@ -187,8 +187,8 @@ function DocumentsPage() {
       body: formData,
     });
 
-    if (!response.ok) {
-      let errorDetail = `HTTP error ${response.status}`;
+        if (!response.ok) {
+            let errorDetail = `HTTP error ${response.status}`;
       try {
         const errData = await response.json();
         errorDetail = errData.detail || errorDetail;
@@ -223,16 +223,16 @@ function DocumentsPage() {
     try {
       const result = await performUpload(selectedFile, null, null);
       console.log('[DocumentsPage] Single upload successful:', result);
-      setUploadStatus(t('messages_upload_success', { id: result.id }));
-      setSelectedFile(null); 
-      const fileInput = document.getElementById('document-upload-input');
+        setUploadStatus(t('messages_upload_success', { id: result.id }));
+        setSelectedFile(null);
+        const fileInput = document.getElementById('document-upload-input');
       if (fileInput) {
         fileInput.value = ''; 
       }
       setTimeout(() => { fetchDocuments(); setUploadStatus(''); }, 2000); 
     } catch (err) {
-      console.error("Error uploading document:", err);
-      setUploadStatus(t('messages_upload_error', { message: err.message }));
+        console.error("Error uploading document:", err);
+        setUploadStatus(t('messages_upload_error', { message: err.message }));
     }
   };
   

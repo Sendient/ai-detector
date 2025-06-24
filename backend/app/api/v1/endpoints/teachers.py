@@ -101,7 +101,7 @@ async def read_current_user_profile(
         # The authoritative status is determined from the token. We can override the DB value in the response
         # without writing to the database on a GET request. The PUT request will handle the DB update.
         teacher.is_administrator = authoritative_is_administrator
-        
+
         logger.info(f"GET /me: Found existing teacher profile for Kinde ID: {user_kinde_id_str}, Internal ID: {teacher.id}, is_admin (after sync attempt): {teacher.is_administrator}")
         # --- END RBAC Sync Logic for GET /me ---
         

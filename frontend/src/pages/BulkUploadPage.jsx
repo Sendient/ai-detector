@@ -219,7 +219,7 @@ function BulkUploadPage() {
                 </>
               ) : (
                 <>
-                  <ArrowUpTrayIcon className="h-5 w-5 mr-2" />
+              <ArrowUpTrayIcon className="h-5 w-5 mr-2" />
                   {t('bulkUpload_button_upload', 'Bulk Upload Students')}
                 </>
               )}

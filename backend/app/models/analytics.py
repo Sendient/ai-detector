@@ -10,7 +10,7 @@ class UsageStatsResponse(BaseModel):
     document_count: int = Field(..., description="Number of documents uploaded in the period")
     total_characters: int = Field(..., description="Total characters counted in documents uploaded during the period")
     total_words: int = Field(..., description="Total words counted in documents uploaded during the period")
-    teacher_id: str = Field(..., description="The Kinde ID of the teacher for whom stats were calculated")
+    teacher_id: str = Field(..., description="The Kinde ID of the teacher for whom stats were calculated") 
 
     # New fields for all-time stats breakdown
     current_documents: Optional[int] = Field(default=None, description="Number of non-deleted documents (for all-time stats)")

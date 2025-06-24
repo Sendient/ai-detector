@@ -223,15 +223,15 @@ function DashboardPage() {
 
       const [statsResponse, distributionResponse, recentDocsResponse] = await fetchWithTimeout(
         Promise.all([
-          fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }),
-          fetch(`${API_BASE_URL}/api/v1/dashboard/score-distribution`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }),
-          fetch(`${API_BASE_URL}/api/v1/dashboard/recent`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
+        fetch(`${API_BASE_URL}/api/v1/dashboard/stats`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${API_BASE_URL}/api/v1/dashboard/score-distribution`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${API_BASE_URL}/api/v1/dashboard/recent`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
         ])
       );
 
@@ -530,7 +530,7 @@ function DashboardPage() {
             <div className="flex-grow">
               <h2 className="text-2xl font-semibold text-base-content mb-2">
                 {t('dashboardPage_welcome')} {userName || 'User'}!
-              </h2>
+          </h2>
               <div className="my-3 border-t border-base-content/20"></div>
 
               {!authLoading && currentUser ? (
@@ -572,13 +572,13 @@ function DashboardPage() {
             </div>
 
             <div className="mt-auto flex justify-end pt-2">
-              <Link
-                to="/quickstart"
+            <Link
+              to="/quickstart"
                 className="btn btn-primary btn-md group"
-              >
+            >
                 <ArrowUpTrayIcon className="w-5 h-5 mr-2 transition-transform duration-300 ease-in-out group-hover:-translate-y-0.5" />
-                {t('dashboardPage_button_quickStart')}
-              </Link>
+              {t('dashboardPage_button_quickStart')}
+            </Link>
             </div>
           </div>
         </div>

@@ -1,10 +1,14 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import IndexModel, ASCENDING, DESCENDING
 from .database import get_database
+import logging
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
 
 async def init_db_indexes():
     """
-    Initialize MongoDB indexes for collections.
+    Initialize MongoDB indexes for all necessary collections.
     This should be called during application startup.
     """
     db = get_database()
@@ -13,6 +17,18 @@ async def init_db_indexes():
         return False
 
     try:
+        # Teacher Collection Indexes
+        teacher_indexes = [
+            IndexModel([("kinde_id", ASCENDING)], name="teacher_kinde_id_unique", unique=True),
+            IndexModel(
+                [("stripe_customer_id", ASCENDING)],
+                name="teacher_stripe_customer_id_unique",
+                unique=True,
+                sparse=True  # Use sparse as not all teachers will have a stripe ID
+            ),
+            IndexModel([("school_id", ASCENDING)], name="teacher_school_id_lookup"), # For finding teachers by school
+        ]
+
         # Student Collection Indexes
         student_indexes = [
             # Index for internal ID (should be created automatically by MongoDB)
@@ -86,11 +102,16 @@ async def init_db_indexes():
         ]
         
         # Create indexes
+        await db["teachers"].create_indexes(teacher_indexes)
+        logger.info("Successfully created/verified indexes for 'teachers' collection.")
         await db["students"].create_indexes(student_indexes)
+        logger.info("Successfully created/verified indexes for 'students' collection.")
         await db["batches"].create_indexes(batch_indexes)
+        logger.info("Successfully created/verified indexes for 'batches' collection.")
         await db["documents"].create_indexes(document_indexes)
+        logger.info("Successfully created/verified indexes for 'documents' collection.")
         
         return True
     except Exception as e:
-        print(f"Error creating indexes: {e}")
+        logger.error(f"Error creating indexes: {e}", exc_info=True)
         return False 

@@ -176,9 +176,9 @@ function ProfilePage() {
             }
             
             // This code now only runs if both PUT and the subsequent GET were successful.
-            const updatedProfileData = await getResponse.json();
-            setCurrentUser(updatedProfileData); // Update AuthContext
-            console.log("[ProfilePage] AuthContext updated with new profile data:", updatedProfileData);
+                const updatedProfileData = await getResponse.json();
+                setCurrentUser(updatedProfileData); // Update AuthContext
+                console.log("[ProfilePage] AuthContext updated with new profile data:", updatedProfileData);
             
             setSuccess(t('messages_profile_success_saved'));
             setIsSubmitting(false);

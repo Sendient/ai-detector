@@ -570,10 +570,10 @@ class AssessmentWorker:
         except DocumentPreparationError as e:
             if "Document" in str(e) and "not found" in str(e):
                 logger.warning(f"[AssessmentWorker_PROCESS_TASK] Halting task {task.id} because document {document_id} not found. Task not retried by this path.")
-                return 
+            return
             else:
                 logger.error(f"[AssessmentWorker_PROCESS_TASK] Document/Result preparation failed for task {task.id}: {e}. Retry handled by helper.")
-                return 
+                return
         
         # Initialize for the try-except block, in case _extract_text_and_counts fails early
         extracted_text: Optional[str] = None
@@ -615,7 +615,7 @@ class AssessmentWorker:
         except DocumentPreparationError as e: # This was the first try-except block
             if "Document" in str(e) and "not found" in str(e):
                 logger.warning(f"[AssessmentWorker_PROCESS_TASK] Halting task {task.id} because document {document_id} not found. Task not retried by this path.")
-                return 
+                return
             else:
                 logger.error(f"[AssessmentWorker_PROCESS_TASK] Document/Result preparation failed for task {task.id}: {e}. Retry handled by helper.")
                 return 
