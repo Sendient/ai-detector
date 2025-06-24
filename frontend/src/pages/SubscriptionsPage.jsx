@@ -108,7 +108,9 @@ function SubscriptionsPage() {
         setIsProcessing(true);
         setApiError(null);
         try {
-            const token = await getAccessToken();
+            const token = await getAccessToken({
+                audience: 'https://api.aidetector.sendient.ai'
+            });
             if (!token) {
                 throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
             }
@@ -171,7 +173,9 @@ function SubscriptionsPage() {
         setIsProcessing(true);
         setApiError(null);
         try {
-            const token = await getAccessToken();
+            const token = await getAccessToken({
+                audience: 'https://api.aidetector.sendient.ai'
+            });
             if (!token) {
                 throw new Error(t('messages_error_authTokenMissing', 'Authentication token is missing.'));
             }
