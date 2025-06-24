@@ -7,24 +7,24 @@ import { loadStripe } from '@stripe/stripe-js'; // For Stripe.js
 
 // Keep countries list for option values if needed, but display text will be translated
 const countries = [
-    "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan",
-    "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina",
-    "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cabo Verde", "Cambodia", "Cameroon", "Canada", "Central African Republic",
-    "Chad", "Chile", "China", "Colombia", "Comoros", "Congo", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Democratic Republic of the Congo",
-    "Denmark", "Djibouti", "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia",
-    "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala",
-    "Guinea", "Guinea-Bissau", "Guyana", "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland",
-    "Israel", "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kuwait", "Kyrgyzstan", "Laos", "Latvia",
-    "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives",
-    "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro",
-    "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea",
-    "North Macedonia", "Norway", "Oman", "Pakistan", "Palau", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines",
-    "Poland", "Portugal", "Qatar", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines",
-    "Samoa", "San Marino", "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore",
-    "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan",
-    "Suriname", "Sweden", "Switzerland", "Syria", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago",
-    "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay",
-    "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
+    "country_afghanistan", "country_albania", "country_algeria", "country_andorra", "country_angola", "country_antigua_and_barbuda", "country_argentina", "country_armenia", "country_australia", "country_austria", "country_azerbaijan",
+    "country_bahamas", "country_bahrain", "country_bangladesh", "country_barbados", "country_belarus", "country_belgium", "country_belize", "country_benin", "country_bhutan", "country_bolivia", "country_bosnia_and_herzegovina",
+    "country_botswana", "country_brazil", "country_brunei", "country_bulgaria", "country_burkina_faso", "country_burundi", "country_cabo_verde", "country_cambodia", "country_cameroon", "country_canada", "country_central_african_republic",
+    "country_chad", "country_chile", "country_china", "country_colombia", "country_comoros", "country_congo", "country_costa_rica", "country_croatia", "country_cuba", "country_cyprus", "country_czech_republic", "country_democratic_republic_of_the_congo",
+    "country_denmark", "country_djibouti", "country_dominica", "country_dominican_republic", "country_ecuador", "country_egypt", "country_el_salvador", "country_equatorial_guinea", "country_eritrea", "country_estonia",
+    "country_eswatini", "country_ethiopia", "country_fiji", "country_finland", "country_france", "country_gabon", "country_gambia", "country_georgia", "country_germany", "country_ghana", "country_greece", "country_grenada", "country_guatemala",
+    "country_guinea", "country_guinea-bissau", "country_guyana", "country_haiti", "country_honduras", "country_hungary", "country_iceland", "country_india", "country_indonesia", "country_iran", "country_iraq", "country_ireland",
+    "country_israel", "country_italy", "country_jamaica", "country_japan", "country_jordan", "country_kazakhstan", "country_kenya", "country_kiribati", "country_kuwait", "country_kyrgyzstan", "country_laos", "country_latvia",
+    "country_lebanon", "country_lesotho", "country_liberia", "country_libya", "country_liechtenstein", "country_lithuania", "country_luxembourg", "country_madagascar", "country_malawi", "country_malaysia", "country_maldives",
+    "country_mali", "country_malta", "country_marshall_islands", "country_mauritania", "country_mauritius", "country_mexico", "country_micronesia", "country_moldova", "country_monaco", "country_mongolia", "country_montenegro",
+    "country_morocco", "country_mozambique", "country_myanmar", "country_namibia", "country_nauru", "country_nepal", "country_netherlands", "country_new_zealand", "country_nicaragua", "country_niger", "country_nigeria", "country_north_korea",
+    "country_north_macedonia", "country_norway", "country_oman", "country_pakistan", "country_palau", "country_palestine", "country_panama", "country_papua_new_guinea", "country_paraguay", "country_peru", "country_philippines",
+    "country_poland", "country_portugal", "country_qatar", "country_romania", "country_russia", "country_rwanda", "country_saint_kitts_and_nevis", "country_saint_lucia", "country_saint_vincent_and_the_grenadines",
+    "country_samoa", "country_san_marino", "country_sao_tome_and_principe", "country_saudi_arabia", "country_senegal", "country_serbia", "country_seychelles", "country_sierra_leone", "country_singapore",
+    "country_slovakia", "country_slovenia", "country_solomon_islands", "country_somalia", "country_south_africa", "country_south_korea", "country_south_sudan", "country_spain", "country_sri_lanka", "country_sudan",
+    "country_suriname", "country_sweden", "country_switzerland", "country_syria", "country_tajikistan", "country_tanzania", "country_thailand", "country_timor-leste", "country_togo", "country_tonga", "country_trinidad_and_tobago",
+    "country_tunisia", "country_turkey", "country_turkmenistan", "country_tuvalu", "country_uganda", "country_ukraine", "country_united_arab_emirates", "country_united_kingdom", "country_united_states", "country_uruguay",
+    "country_uzbekistan", "country_vanuatu", "country_vatican_city", "country_venezuela", "country_vietnam", "country_yemen", "country_zambia", "country_zimbabwe"
 ];
 
 // --- Define role keys and their corresponding backend values ---
@@ -167,16 +167,16 @@ function ProfilePage() {
                 } catch {
                     getErrorDetail = `${getResponse.status} ${getResponse.statusText}`;
                 }
-                // If fetching the updated profile fails, we still set success for the save,
-                // but log an error. The AuthContext might be stale until next full refresh.
+                // If fetching the updated profile fails, the entire operation is now treated as an error.
+                // This prevents showing a success message for the save when the UI data might be stale.
                 console.error("[ProfilePage] Failed to fetch updated profile after save:", getErrorDetail);
-                setError(t('messages_profile_error_fetchAfterSaveFailed', { detail: getErrorDetail })); 
-                // User doesn't necessarily need to see this error prominently if save was ok.
-            } else {
-                const updatedProfileData = await getResponse.json();
-                setCurrentUser(updatedProfileData); // Update AuthContext
-                console.log("[ProfilePage] AuthContext updated with new profile data:", updatedProfileData);
+                throw new Error(t('messages_profile_error_fetchAfterSaveFailed', { detail: getErrorDetail }));
             }
+            
+            // This code now only runs if both PUT and the subsequent GET were successful.
+            const updatedProfileData = await getResponse.json();
+            setCurrentUser(updatedProfileData); // Update AuthContext
+            console.log("[ProfilePage] AuthContext updated with new profile data:", updatedProfileData);
             
             setSuccess(t('messages_profile_success_saved'));
             setIsSubmitting(false);
@@ -395,9 +395,9 @@ function ProfilePage() {
                                     required
                                 >
                                     <option value="">{t('profilePage_form_select_countryPlaceholder')}</option>
-                                    {countries.map(country => (
-                                        <option key={country} value={country}>
-                                            {country}
+                                    {countries.map(countryKey => (
+                                        <option key={countryKey} value={t(countryKey)}>
+                                            {t(countryKey)}
                                         </option>
                                     ))}
                                 </select>
